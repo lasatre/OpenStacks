@@ -34,9 +34,10 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
-from PySide6.QtWidgets import (QFileDialog, QLabel, QMainWindow, QPushButton, QTabWidget,
+from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QMainWindow,
+                               QPushButton, QTabWidget, QToolButton,
                                QToolBar, QVBoxLayout, QWidget)
 
 from .adb import Adb, AdbError, BootState
@@ -474,64 +475,81 @@ class PlayerWindow(QMainWindow):
         self.tabs.setMovable(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._on_current_tab)
-        self.setCentralWidget(self.tabs)
-
         self._build_sidebar()
         self.statusBar().showMessage("OpenStacks player ready - launch an instance from the manager.")
 
     # -- sidebar ---------------------------------------------------------------------
-    _PANE_ACTIONS = ("rotate", "keymap", "screenshot", "install_apk", "multitouch",
-                     "pop_screen")
-    _NAV_ACTIONS = (("nav_back", "Back", "Android Back"),
-                    ("nav_home", "Home", "Android Home"),
-                    ("nav_recents", "Recents", "Recent apps (task list)"))
+    # tools (top of the rail) and Android navigation (anchored to the bottom),
+    # laid out like BlueStacks' right-hand bar: icon only, tooltip names them
+    _TOOLS = (
+        # (method, icon, tooltip, shortcut)
+        ("rotate", "rotate", "Rotate screen", "Ctrl+Shift+R"),
+        ("screenshot", "screenshot", "Take a screenshot", "Ctrl+S"),
+        ("install_apk", "install_apk", "Install APK", "Ctrl+I"),
+        ("pop_screen", "pop_screen", "Pop the screen out into its own window / bring it back",
+         "Ctrl+Shift+P"),
+        ("keymap", "keymap", "Game controls / key mapping (coming soon)", ""),
+        ("multitouch", "multitouch", "Multi-touch gestures (coming soon)", ""),
+    )
+    _NAV = (
+        ("nav_back", "back", "Back", ""),
+        ("nav_home", "home", "Home", ""),
+        ("nav_recents", "recents", "Recent apps", ""),
+    )
 
     def _build_sidebar(self) -> None:
-        bar = QToolBar("Actions", self)
-        bar.setOrientation(Qt.Vertical)
-        bar.setMovable(False)
-        bar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.addToolBar(Qt.RightToolBarArea, bar)
-        self.sidebar = bar
+        from .icons import icon
 
-        def add(text: str, tip: str = "", key: str = "") -> QAction:
-            act = QAction(text, self)
+        rail = QWidget(self)
+        rail.setObjectName("sideRail")
+        rail.setFixedWidth(46)
+        rail.setStyleSheet(
+            "#sideRail { background: #1b1f26; border-left: 1px solid #2a2f38; }"
+            "#sideRail QToolButton { border: none; border-radius: 6px; padding: 0; }"
+            "#sideRail QToolButton:hover { background: #2c323c; }"
+            "#sideRail QToolButton:pressed { background: #3a414d; }")
+        col = QVBoxLayout(rail)
+        col.setContentsMargins(4, 8, 4, 8)
+        col.setSpacing(4)
+        self._rail_buttons: dict[str, QToolButton] = {}
+
+        def button(method: str, icon_name: str, tip: str, key: str,
+                   slot=None) -> QToolButton:
+            act = QAction(icon(icon_name), tip, self)
             if key:
                 act.setShortcut(QKeySequence(key))
-            act.setToolTip(tip or text)
+                tip = f"{tip} ({key})"
+            act.setToolTip(tip)
+            act.triggered.connect(slot or (lambda _=False, m=method: self._with_pane(m)))
             self.addAction(act)                 # shortcuts work even without focus
-            bar.addAction(act)
-            return act
+            b = QToolButton(rail)
+            b.setDefaultAction(act)
+            b.setIconSize(QSize(22, 22))
+            b.setFixedSize(38, 38)
+            b.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            col.addWidget(b, 0, Qt.AlignHCenter)
+            self._rail_buttons[method] = b
+            return b
 
-        for i, method in enumerate(self._PANE_ACTIONS):
-            tips = {
-                "rotate": "Rotate screen (Ctrl+Shift+R)",
-                "keymap": "Keyboard mapping editor (WIP)",
-                "screenshot": "Save a screenshot (Ctrl+S)",
-                "install_apk": "Install an APK (drag&drop also works)",
-                "multitouch": "Multi-touch gestures (WIP)",
-                "pop_screen": "Show the screen in its own window / bring it back "
-                              "(Ctrl+Shift+P)",
-            }
-            keys = {"rotate": "Ctrl+Shift+R", "screenshot": "Ctrl+S",
-                    "install_apk": "Ctrl+I", "pop_screen": "Ctrl+Shift+P"}
-            labels = {"pop_screen": "Pop Out"}
-            add(labels.get(method, method.replace("_", " ").title()), tips[method],
-                keys.get(method, ""))
+        for method, ic, tip, key in self._TOOLS:
+            button(method, ic, tip, key)
+        # VNC display only: switch input between VNC and adb
+        b = button("input_mode", "input", "Input: VNC (click to switch to ADB)", "",
+                   lambda _=False: self._toggle_input_mode())
+        self.act_input_mode = b.defaultAction()
+        col.addStretch(1)
+        for method, ic, tip, key in self._NAV:
+            button(method, ic, tip, key)
 
-        # Android navigation, like BlueStacks' side bar (bottom group)
-        bar.addSeparator()
-        for method, text, tip in self._NAV_ACTIONS:
-            act = add(text, tip)
-            act.triggered.connect(lambda _=False, m=method: self._with_pane(m))
-        bar.addSeparator()
-
-        self.act_input_mode = add("Input: VNC",
-                                  "Toggle input pipeline (QEMU VNC <-> ADB)")
-        self.act_input_mode.triggered.connect(self._toggle_input_mode)
-        for i, method in enumerate(self._PANE_ACTIONS):
-            self.sidebar.actions()[i].triggered.connect(
-                lambda _=False, m=method: self._with_pane(m))
+        # tabs + rail side by side
+        holder = QWidget(self)
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(self.tabs, 1)
+        row.addWidget(rail)
+        self.setCentralWidget(holder)
+        self.sidebar = rail
 
     # -- pane helpers -----------------------------------------------------------------
     def current_pane(self) -> Optional[PlayerPane]:
@@ -551,7 +569,8 @@ class PlayerWindow(QMainWindow):
             return
         new = "vnc" if pane.input_bridge is pane.adb_input else "adb"
         pane.set_input_mode(new)
-        self.act_input_mode.setText(f"Input: {new.upper()}")
+        self.act_input_mode.setToolTip(
+            f"Input: {new.upper()} (click to switch to {'VNC' if new == 'adb' else 'ADB'})")
         pane.flash(f"input pipeline switched to {new}")
 
     def _on_current_tab(self, idx: int) -> None:
@@ -559,7 +578,7 @@ class PlayerWindow(QMainWindow):
         pane = self.current_pane()
         # the VNC/ADB input toggle only applies to the VNC display
         if pane is not None:
-            self.act_input_mode.setVisible(not pane.native)
+            self._rail_buttons["input_mode"].setVisible(not pane.native)
 
     def _close_tab(self, idx: int) -> None:
         w = self.tabs.widget(idx)

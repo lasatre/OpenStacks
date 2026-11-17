@@ -635,6 +635,14 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
 - Rvc64 (Android 11) created through that flow boots to the BlueStacks home screen on the first
   try (ro.build.version.release=11, docs/shots/phase79_android11_rvc64.png).
 
+- Client build 5.22.290.1031 (user-supplied HD-MultiInstanceManager.exe): key
+  b3b8c6d5d7f2ef642075595e7aa5754c = the only 32-hex string in the exe (5.21's key is too);
+  HEAD-verified Nougat32/64, Pie64, Rvc64, Tiramisu64 (Android 13, 815,153,759 B). Images come
+  from the default build (5.21.550, matches the installed renderer DLL) unless only a newer
+  build has them (Tiramisu64) or --build is given; cache names carry the build.
+- Tiramisu64 (Android 13) downloaded + instance created: boots to the BlueStacks home screen
+  (ro.build.version.release=13, docs/shots/phase79_android13_tiramisu64.png).
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

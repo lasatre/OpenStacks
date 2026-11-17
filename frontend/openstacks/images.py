@@ -53,7 +53,22 @@ CLIENT_BUILDS = {
             "Rvc64": ("11", 693493911, "ffaea01e90e5e0ef2e7b1288c5df3306"),
         },
     },
+    # key = the only 32-hex string in that build's HD-MultiInstanceManager.exe; verified
+    # live (HEAD) 2026-11-17. Newer re-releases of the 5.21 images plus Tiramisu64.
+    "5.22.290.1031": {
+        "oem": "nxt",
+        "key": "b3b8c6d5d7f2ef642075595e7aa5754c",
+        "images": {
+            "Nougat32": ("7 (32-bit)", 547530506, "6cb8913e664fc39cf682154a904aeb8f"),
+            "Nougat64": ("7", 765639468, "a7265e7bd5c9f991edadc962707605b7"),
+            "Pie64": ("9", 656337273, "e6ce22b1ca98621eacd1418b7d6cd399"),
+            "Rvc64": ("11", 694319694, "57febb0ad58b3d4fba5382fa379b775b"),
+            "Tiramisu64": ("13", 815153759, "b089fcfae345cec6ad84d271c17f289c"),
+        },
+    },
 }
+# Images come from DEFAULT_BUILD when it has them (it matches the installed renderer DLL,
+# 5.21.550); images only a newer build offers (Tiramisu64) come from the newest such build.
 DEFAULT_BUILD = "5.21.550.1031"
 SFX_STUB = 392848
 SEVENZ_MAGIC = b"7z\xbc\xaf\x27\x1c"
@@ -78,18 +93,33 @@ class ImageInfo:
                 f"/Android/{self.name}/{self.name}.exe")
 
 
-def catalog(build: str = DEFAULT_BUILD) -> list[ImageInfo]:
-    imgs = CLIENT_BUILDS[build]["images"]
-    return [ImageInfo(n, a, s, m, build) for n, (a, s, m) in imgs.items()]
+def _builds_newest_first() -> list[str]:
+    return sorted(CLIENT_BUILDS, key=lambda v: tuple(int(x) for x in v.split(".")),
+                  reverse=True)
 
 
-def image_info(name: str) -> ImageInfo:
-    for build in CLIENT_BUILDS:
-        for info in catalog(build):
-            if info.name == name:
-                return info
-    raise KeyError(f"unknown image {name!r} (known: "
-                   f"{', '.join(i.name for b in CLIENT_BUILDS for i in catalog(b))})")
+def image_info(name: str, build: str = "") -> ImageInfo:
+    """The download for `name`: from `build` if given, else DEFAULT_BUILD, else the
+    newest build that offers it."""
+    order = [build] if build else [DEFAULT_BUILD] + _builds_newest_first()
+    for b in order:
+        imgs = CLIENT_BUILDS.get(b, {}).get("images", {})
+        if name in imgs:
+            a, sz, md5 = imgs[name]
+            return ImageInfo(name, a, sz, md5, b)
+    known = sorted({n for b in CLIENT_BUILDS for n in CLIENT_BUILDS[b]["images"]})
+    raise KeyError(f"unknown image {name!r}" + (f" in build {build}" if build else "")
+                   + f" (known: {', '.join(known)})")
+
+
+def catalog(build: str = "") -> list[ImageInfo]:
+    """One entry per image name (see image_info for which build provides it)."""
+    names = []
+    for b in ([build] if build else [DEFAULT_BUILD] + _builds_newest_first()):
+        for n in CLIENT_BUILDS[b]["images"]:
+            if n not in names:
+                names.append(n)
+    return [image_info(n, build) for n in names]
 
 
 def installed_images(root: Path = ASSETS_ROOT) -> list[str]:
@@ -115,10 +145,10 @@ def download(info: ImageInfo, cache: Path = CACHE_DIR, progress: Optional[Progre
              cancel: Optional[Callable[[], bool]] = None) -> Path:
     """Fetch <cache>/<Image>.exe; resumes a .part file; verifies the md5."""
     cache.mkdir(parents=True, exist_ok=True)
-    final = cache / f"{info.name}.exe"
+    final = cache / f"{info.name}-{info.build}.exe"
     if final.exists() and final.stat().st_size == info.size:
         return final
-    part = cache / f"{info.name}.exe.part"
+    part = cache / f"{info.name}-{info.build}.exe.part"
     have = part.stat().st_size if part.exists() else 0
     if have > info.size:
         part.unlink()
@@ -329,9 +359,9 @@ def _android_of(image: str) -> str:
 # -- all stages -------------------------------------------------------------------------
 def install_image(name: str, progress: Optional[ProgressFn] = None,
                   cancel: Optional[Callable[[], bool]] = None, keep_download: bool = False,
-                  out_root: Path = ASSETS_ROOT) -> Path:
+                  out_root: Path = ASSETS_ROOT, build: str = "") -> Path:
     """download -> extract -> patch -> assets/<Image>/. Returns the asset dir."""
-    info = image_info(name)
+    info = image_info(name, build)
     exe = download(info, progress=progress, cancel=cancel)
     staging = CACHE_DIR / f"{name}.staging"
     extract(exe, staging, progress=progress, cancel=cancel)

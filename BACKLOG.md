@@ -43,12 +43,12 @@ NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
 - **Shared folders** (vboxsf: Documents/Pictures/InputMapper) - vmmdev HGCM stubs only.
 
 ## Distribution / platform
-- **Android 13 (Tiramisu64) and newer images** - downloads are keyed per BlueStacks client
-  build (URL = version + a key baked into HD-MultiInstanceManager.exe). 5.21.550 offers
-  Nougat32/64, Pie64, Rvc64 only; add a newer build's version + key to
-  `images.CLIENT_BUILDS` (the user is getting a newer client's files) [10q].
-- **Android 11 (Rvc64) / Nougat beyond boot** - Rvc64 boots to the home screen; games, HPP,
-  rotation etc. untested there; Nougat untested [10q].
+- **Newer BlueStacks builds** - each client build has its own download key (the only 32-hex
+  string in its HD-MultiInstanceManager.exe); add version + key to `images.CLIENT_BUILDS`.
+  Known: 5.21.550 and 5.22.290 (adds Tiramisu64). Their renderer DLL may differ from the
+  installed 5.21.550 one we load; newer image re-releases are therefore opt-in (--build) [10q].
+- **Android 11 / 13 beyond boot** - Rvc64 and Tiramisu64 boot to the home screen; games, HPP,
+  rotation, audio etc. untested there; Nougat untested [10q].
 - **Cleaned-up images** - patch scripts in `patches/<Image>/` (hook already runs between unpack
   and asset build, see patches/README.md): strip ads/bloat, swap the launcher.
 - **Linux host (plan: option A, open-source gfxstream renderer)**. Everything except the renderer

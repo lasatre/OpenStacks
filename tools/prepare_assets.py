@@ -29,6 +29,9 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="list downloadable/installed images")
     ap.add_argument("--download", metavar="IMAGE", help="download IMAGE from BlueStacks' CDN")
     ap.add_argument("--keep-download", action="store_true", help="keep the .exe in deps/images")
+    ap.add_argument("--build", default="", help="BlueStacks client build to download from "
+                    f"({', '.join(images.CLIENT_BUILDS)}; default: {images.DEFAULT_BUILD}, "
+                    "newer only for images it lacks)")
     ap.add_argument("--image", default="Pie64", help="image name for install mode")
     ap.add_argument("--engine", default=str(ENGINE), help="BlueStacks Engine dir (install mode)")
     ap.add_argument("--out", default=str(images.ASSETS_ROOT))
@@ -37,15 +40,16 @@ def main() -> int:
 
     if a.list:
         have = set(images.installed_images(out_root))
-        for info in images.catalog():
+        for info in images.catalog(a.build):
             mark = "installed" if info.name in have else f"download {info.size / 2**20:,.0f} MiB"
-            print(f"  {info.name:<9} Android {info.android:<11} {mark}")
+            print(f"  {info.name:<10} Android {info.android:<11} {mark:<20} (build {info.build})")
         return 0
 
     if a.download:
-        print(f"{a.download}: {images.image_info(a.download).url}")
+        print(f"{a.download}: {images.image_info(a.download, a.build).url}")
         out = images.install_image(a.download, progress=images._cli_progress,
-                                   keep_download=a.keep_download, out_root=out_root)
+                                   keep_download=a.keep_download, out_root=out_root,
+                                   build=a.build)
         print(f"assets ready: {out}")
         return 0
 

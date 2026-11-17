@@ -740,8 +740,10 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
 - Android 13's BlueStacks su (40 KB, a signed whitelist in /data/downloads/.swl) asks the
   host "isDeveloperMode" with hcal 68 (no payload). We never answered it (stale 0), so su
   silently refused. bst_vmsg now answers 1/0 from the instance's bst.enable_root_access.
-- The Kitsune repo has no releases any more: the APK is user-supplied once and cached in
-  dev/deps/magisk/ (validated: x86/x86_64 libs and scripts present).
+- APK: the original Kitsune repo has no releases any more, so it is downloaded from the
+  AndnixSH mirror (github.com/AndnixSH/KitsuneMagisk, tag "backup",
+  Kitsune.Magisk.release.v27.2-kitsune-4.apk). It is pinned by SHA-256 818cfa02... (GitHub's
+  asset digest, identical to the build tested here) and cached in dev/deps/magisk/.
 - Verified on all five images (Nougat32 uses magisk32; Pie64, Rvc64 and Tiramisu64 through
   the player code): Magisk v27.2-kitsune-4 runs, the app shows no warnings, adb `su` is root,
   and an app's su request gets Magisk's Superuser prompt. Removal on Rvc64 brought BlueStacks'

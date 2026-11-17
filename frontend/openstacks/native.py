@@ -35,6 +35,17 @@ if sys.platform == "win32":
     _user32.SetParent.restype = wintypes.HWND
     _user32.IsWindow.argtypes = [wintypes.HWND]
     _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+
+
+def display_rotation(hwnd: int) -> int:
+    """Guest rotation 0..3 published by QEMU in the window title ("... r<o>")."""
+    if sys.platform != "win32" or not hwnd:
+        return 0
+    buf = ctypes.create_unicode_buffer(64)
+    _user32.GetWindowTextW(hwnd, buf, 64)
+    t = buf.value
+    return int(t[-1]) if len(t) > 2 and t[-2] == "r" and t[-1] in "0123" else 0
 
 
 def find_display_hwnd(pid: int) -> int:
@@ -66,15 +77,17 @@ class NativeDisplay(QWidget):
         super().__init__(parent)
         self._pid_provider = pid_provider
         self._aspect = aspect
+        self._rotation = 0
         self._pid = 0
         self._hwnd = 0
         self._win: Optional[QWindow] = None
         self._container: Optional[QWidget] = None
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         self.setMinimumSize(320, 180)
+        self.rotationChanged: Optional[Callable[[int], None]] = None
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._poll)
-        self._timer.start(500)
+        self._timer.start(250)
 
     # -- state ------------------------------------------------------------------
     def state(self) -> str:
@@ -100,6 +113,13 @@ class NativeDisplay(QWidget):
             hwnd = find_display_hwnd(pid)
             if hwnd:
                 self._embed(hwnd)
+        if self._hwnd:
+            rot = display_rotation(self._hwnd)
+            if rot != self._rotation:      # portrait <-> landscape: re-letterbox
+                self._rotation = rot
+                self._layout()
+                if self.rotationChanged is not None:
+                    self.rotationChanged(rot)
 
     def _embed(self, hwnd: int) -> None:
         win = QWindow.fromWinId(hwnd)
@@ -126,8 +146,13 @@ class NativeDisplay(QWidget):
         self._container, self._win, self._hwnd = None, None, 0
 
     # -- layout / paint -------------------------------------------------------------
+    def rotation(self) -> int:
+        return self._rotation
+
     def _target_rect(self) -> QRect:
         aw, ah = self._aspect
+        if self._rotation & 1:       # guest rotated 90/270: the picture is too
+            aw, ah = ah, aw
         w, h = self.width(), self.height()
         if w * ah > h * aw:          # too wide: pillarbox
             tw, th = h * aw // ah, h

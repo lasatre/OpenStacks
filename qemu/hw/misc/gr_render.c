@@ -2528,19 +2528,29 @@ static void gr_input_post(GrInputEv ev)
     aio_bh_schedule_oneshot(qemu_get_aio_context(), gr_input_bh, e);
 }
 
+static int g_orient;                 /* Phase-77: Surface.ROTATION_0..3 */
+
 static void gr_pointer(HWND h, LPARAM l, int down)
 {
     RECT rc;
     int w, hh, x = (short)LOWORD(l), y = (short)HIWORD(l);
+    int64_t px, py, rx, ry, M = INPUT_EVENT_ABS_MAX;
     GetClientRect(h, &rc);
     w = rc.right > 1 ? rc.right : 1;
     hh = rc.bottom > 1 ? rc.bottom : 1;
     x = x < 0 ? 0 : x >= w ? w - 1 : x;
     y = y < 0 ? 0 : y >= hh ? hh - 1 : y;
-    gr_input_post((GrInputEv){ .kind = 0,
-                               .x = (int)((int64_t)x * INPUT_EVENT_ABS_MAX / (w - 1 ? w - 1 : 1)),
-                               .y = (int)((int64_t)y * INPUT_EVENT_ABS_MAX / (hh - 1 ? hh - 1 : 1)),
-                               .down = down });
+    px = (int64_t)x * M / (w - 1 ? w - 1 : 1);       /* view fraction, 0..M */
+    py = (int64_t)y * M / (hh - 1 ? hh - 1 : 1);
+    /* Phase-77: the guest wants coordinates in the UNROTATED panel frame;
+     * HD-Player inverts the rotation on the host (EXE 0x1402ec260).     */
+    switch (qatomic_read(&g_orient)) {
+    case 1:  rx = M - py; ry = px;     break;
+    case 2:  rx = M - px; ry = M - py; break;
+    case 3:  rx = py;     ry = M - px; break;
+    default: rx = px;     ry = py;     break;
+    }
+    gr_input_post((GrInputEv){ .kind = 0, .x = (int)rx, .y = (int)ry, .down = down });
 }
 
 /* returns true when the message was an input message we consumed */
@@ -2616,6 +2626,24 @@ static LRESULT CALLBACK gr_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_SIZE:
         gr_layout(h);
         break;
+    case WM_APP + 1: {                 /* Phase-77: orientation changed */
+        int o = (int)w;
+        wchar_t t[64];
+        swprintf(t, 64, L"OpenStacks display r%d", o);
+        SetWindowTextW(h, t);
+        if (GetWindowLongPtrW(h, GWL_STYLE) & WS_CAPTION) {   /* GR_SHOW */
+            RECT r = { 0, 0, (o & 1) ? GR_H : GR_W, (o & 1) ? GR_W : GR_H };
+            int mx = GetSystemMetrics(SM_CYSCREEN) * 85 / 100;
+            if (r.bottom > mx) {
+                r.right = r.right * mx / r.bottom;
+                r.bottom = mx;
+            }
+            AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+            SetWindowPos(h, NULL, 0, 0, r.right - r.left, r.bottom - r.top,
+                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        return 0;
+    }
     case WM_TIMER:
         if (!g_child) gr_layout(h);
         else KillTimer(h, 1);
@@ -2628,6 +2656,25 @@ static LRESULT CALLBACK gr_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (gr_input_msg(h, m, w, l)) return 0;
     }
     return DefWindowProcW(h, m, w, l);
+}
+
+/* Phase-77 rotation (docs/re/rotation_spec.md): the guest reports
+ * Surface.ROTATION_0..3 via hcal method 7; HD-Player calls grApiInit table
+ * slot +0x40 = void(float, float, int rot) (DLL 0x180136da0 -> zRot
+ * 0/90/180/270, queued to the render thread: any thread may call it), keeps
+ * the rotation for input mapping and resizes its window to the new aspect.
+ * The window title "OpenStacks display r<o>" tells the front-end.        */
+typedef void (*PgaSetRotation_t)(float, float, int);
+
+void gr_render_set_orientation(int o)
+{
+    if (o < 0 || o > 3) return;
+    qatomic_set(&g_orient, o);
+    if (g.ready && TAB(0x40)) {
+        ((PgaSetRotation_t)TAB(0x40))(1.0f, 1.0f, o);
+    }
+    if (g.hwnd) PostMessageW(g.hwnd, WM_APP + 1, (WPARAM)o, 0);
+    gr_log("orientation -> %d (%d deg)", o, o * 90);
 }
 
 static HWND gr_make_window(int w, int h)

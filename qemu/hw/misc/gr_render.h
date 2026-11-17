@@ -53,6 +53,13 @@ bool gr_render_op_request(uint32_t cid, uint32_t cmd, uint32_t len);
 void gr_render_kick(uint32_t cid);
 
 /*
+ * Phase-77: guest display rotation (hcal method 7, Surface.ROTATION_0..3):
+ * rotates the renderer's present, the touch mapping and tells the front-end
+ * (window title "OpenStacks display r<o>"). Thread-safe.
+ */
+void gr_render_set_orientation(int o);
+
+/*
  * Phase-67 live display: latest composited frame from the renderer
  * (RGBA, *w x *h, tightly packed) and a sequence number that changes
  * whenever new pixels arrived. NULL until the first frame.

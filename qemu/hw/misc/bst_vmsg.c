@@ -49,6 +49,7 @@
 #include "system/memory.h"
 #include "ui/input.h"
 #include "system/system.h"
+#include "hw/misc/gr_render.h"
 #include "hw/core/qdev-properties.h"
 
 #define TYPE_BST_VMSG "bstvmsg"
@@ -208,7 +209,18 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
             buf_len, ldl_le_p(in + 0x0c), ldl_le_p(in + 0x10));
     }
 
-    if (method == 1 && buf_len != 0 && buf_len <= (VMSG_OUT_SIZE - 0x100u)) {
+    if (method == 7) {
+        /* Phase-77: hcallOnOrientationChangedRpc: [7][0xc][rotation 0..3]
+         * (the generic "bufLen" slot carries the rotation). Reply: u32 0
+         * at out+0 (the guest reads the first u32 of the out window).  */
+        uint32_t o = ldl_le_p(in + 0x08);
+        fprintf(stderr, "[bstvmsg] hcal OnOrientationChanged rotation=%u\n", o);
+        stl_le_p(out + 0, 0);
+        stl_le_p(out + 4, 0);
+        if (o <= 3) {
+            gr_render_set_orientation((int)o);
+        }
+    } else if (method == 1 && buf_len != 0 && buf_len <= (VMSG_OUT_SIZE - 0x100u)) {
         memset(out, 0, c->out_size);
         resp_len = (uint32_t)MIN(props_len, buf_len);
         memcpy(out, s->props_text->str, resp_len);

@@ -573,6 +573,21 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
 - bstvmsg logs a printable payload for rejected hcal methods: 10 = activity displayed
   (package, activity, JSON), 22 = per-app config, 62 / 7 = package-scoped (unknown).
 
+- Rotation (spec docs/re/rotation_spec.md): the guest reports Surface.ROTATION_0..3 with hcal
+  method 7 ([7][0xc][rot]; the generic bufLen slot is the rotation; reply u32 0 at out+0).
+  bstvmsg -> gr_render_set_orientation(o): grApiInit table +0x40 = void(float, float, int)
+  (DLL maps 0..3 to zRot 0/90/180/270, queued to its render thread); touch is inverted on the
+  host like HD-Player EXE 0x1402ec260 (r1: x'=1-y, y'=x; r2: 1-x, 1-y; r3: y, 1-x); the host
+  window title becomes "OpenStacks display r<o>", which the front-end NativeDisplay polls to
+  letterbox at the rotated aspect (GR_SHOW windows resize themselves). Verified: the Dinosaur
+  game launches -> hcal 7 rotation=1 -> upright portrait in the player. Rotate button toggles
+  user_rotation 0 <-> 1 (accelerometer off).
+- Player: Pop Out (side bar, tab context menu, Ctrl+Shift+P) moves an instance tab into its
+  own player window; Dock / closing that window moves it back (the instance keeps running).
+  The native display releases the renderer window before the move and re-embeds after.
+- Front-end refuses to start an instance whose ports are busy (another QEMU), and reports
+  QEMU's own error if it exits within 1.5 s.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

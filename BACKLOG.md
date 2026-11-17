@@ -4,7 +4,10 @@ Things that are known, not done yet, and probably worth doing. Newest context is
 NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
 
 ## Display / UX
-- **Screen rotation for portrait apps** - in progress (Phase 77).
+- **Home screen stays portrait after a portrait app** - Android keeps rotation 1 when the
+  launcher returns; BlueStacks snaps back to landscape (likely the host forcing orientation over
+  gcal / setGameOrientation, hcal 54 is its reply). Rotate button works around it [10o].
+- **VNC console is not rotated** - the readback frame is the unrotated panel (display=vnc only).
 - **Mouse wheel and multi-touch on the native display** - the embedded renderer window only
   forwards left-button drags as one finger and keys [10m]. BlueStacks maps the wheel to
   scroll/zoom and has a multi-touch mode.

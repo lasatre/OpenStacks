@@ -287,12 +287,16 @@ class PlayerPane(QWidget):
         self._nav("audionext", "recent apps")
 
     def rotate(self) -> None:
+        """Toggle Android between its natural orientation and 90 degrees.
+        Android then reports the rotation (hcal 7) and the display follows;
+        apps that lock their orientation keep it, as on a phone."""
+        cur = self.display.rotation() if self.native else 0
+        target = 0 if cur & 1 else 1
         def job():
-            # best effort via user_rotation system setting
             self.adb.ensure_connected()
-            self.adb.shell("settings", "put", "system", "user_rotation", "1")
             self.adb.shell("settings", "put", "system", "accelerometer_rotation", "0")
-            return "rotate: user_rotation=1 sent"
+            self.adb.shell("settings", "put", "system", "user_rotation", str(target))
+            return f"rotate: user_rotation={target}"
         th = _CallThread(job)
         th.done.connect(lambda s: self.flash(s))
         th.failed.connect(lambda e: self.flash(f"rotate failed: {e}"))

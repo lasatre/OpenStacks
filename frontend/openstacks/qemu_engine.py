@@ -509,6 +509,24 @@ def _port_in_use(port: int) -> bool:
 def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if sys.platform == "win32":
+        # NOT os.kill(pid, 0): on Windows signal 0 is CTRL_C_EVENT (sent to the
+        # process group) and always raised here, so every QEMU we had not
+        # launched ourselves looked dead.
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        h = k32.OpenProcess(0x1000, False, pid)    # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not k32.GetExitCodeProcess(h, ctypes.byref(code)):
+                return False
+            return code.value == 259                  # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
     try:
         os.kill(pid, 0)
         return True

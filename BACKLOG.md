@@ -49,6 +49,23 @@ NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
 - **Other Android versions** - Rvc64 (Android 11), Tiramisu64 (Android 13) images; asset prep
   is per image already (`prepare_assets.py --image`).
 - **Cleaned-up images** - script that strips ads/bloat and swaps the launcher on a local copy.
-- **Linux host** - replace libOpenglRender.dll (Windows-only) with gfxstream/emugl, WHPX with
-  KVM; the devices themselves are portable QEMU code.
+- **Linux host (plan: option A, open-source gfxstream renderer)**. Everything except the renderer
+  is porting work; the renderer swap is the project (estimate: ~2 weeks focused).
+  1. Pluggable renderer backend in gr_render: the DLL only sees the HstSocketHost vtable
+     (peek/recv/recvcopy/alloc/alloccopy/send/createFinish); put that behind an interface.
+  2. gfxstream backend, built and A/B-tested on Windows first against libOpenglRender.dll
+     (same guest, same tools). GL (renderControl + GLES) first, then Vulkan.
+  3. Compatibility: diff the guest encoders' opcode tables (vendor/lib64 lib_renderControl_enc,
+     libGLESv2_enc, the Vulkan encoder) against gfxstream's decoders; fill gaps for BlueStacks'
+     additions (e.g. rcSetColorBufferVulkanMode2, ANDROID_EMU extension negotiation, rcComposeAsync*).
+  4. Port gr_render's Win32 bits (HWND window, SRWLOCK/CONDITION_VARIABLE, LoadLibrary,
+     timeBeginPeriod) to QEMU primitives + SDL/X11 - mostly disappears with gfxstream.
+  5. KVM instead of WHPX: kvm-clock natively (drop the VMware TSC leaf), AVX without the
+     CPUID 0xD patch; audio via PulseAudio/PipeWire; build.cmd -> shell script.
+  6. Front-end: native-window embedding works on X11 (QWindow.fromWinId with an XID); Wayland
+     cannot embed foreign windows -> share frames (dmabuf / shared Vulkan image) or render in
+     the front-end process.
+  7. Assets: the image downloader (no BlueStacks install needed) covers Linux.
+  Rejected alternatives: the DLL under Wine (cross-process window/GPU plumbing, fragile), our
+  own renderer (far too large).
 - **Packaging** - an installer/zip with build/, the front-end and a first-run asset step.

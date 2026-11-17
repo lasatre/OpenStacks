@@ -8,13 +8,16 @@ Workspace: `dev/` (git). `dev/src/hw/misc` is the ONLY canonical device source.
 Build: `dev\build.cmd`. Boot: `python dev\boot.py <run> [--root ..] [--env K=V]`.
 Grade: `python dev\tools\grade.py <run> --write`. Monitor: `dev\tools\mon.py`.
 
-## Current best configuration
+## Current best configuration (Phase 65: Android boots to the BlueStacks home screen)
 
-    python dev\boot.py <name> --root Root_p50.vhd --data Data_fresh.qcow2 ^
-        --env GR_ECHO_MODE=1 --env GR_PAIRARM=0
+    python devoot.py <name> --root Root_p50.vhd --data Data_fresh.qcow2 ^
+        --initrd initramfs_full_p49bak.bin ^
+        --env PGA_SLOTSHIFT=1 --env GR_PURE=1 --env GR_HPP=0
 
--> sfIdx=4 posted on every attempt, `{34,11}` served, `exePrefill 0x2715` (1636-B configs
-blob) committed 6/6, no 262144 storm. The walk then dies before reading the blob (§4).
+-> sys.boot_completed=1 (~3 min), adb works (refs\HD-Adb.exe connect 127.0.0.1:25556),
+focus = com.uncube.launcher3/HomeActivity; 24 GL clients (surfaceflinger, systemui,
+launcher, Play Store, GMS, settings, system_server). Screenshot:
+dev/shots/phase65_bluestacks_home.png. History of how we got here: §5–§10.
 
 ## 0. Environment (2026-11-17, F:\Projects\BluestacksReversing)
 
@@ -238,6 +241,46 @@ All legacy shims stay intact for GR_PURE=0.
    where the DLL threads wait.
 5. Colour: the dump looks dark red; check the channel order in bmp_write/the PNG converter
    (the BMP is written as-is from the DLL's buffer, so it may be RGBA vs BGRA).
+
+## 10. Phase 65: the "stall" was two bugs (now fixed). Android boots fully.
+
+1. gdb thread dump (dev/tools/stall_stacks.py): DLL render threads idle in our pure_take,
+   no host deadlock. The pstall watchdog showed every channel drained, acked and answered:
+   the guest itself had stopped.
+2. Bug 1 (guest kernel panic at about 23 s, in every p64 run; `mon info status` =
+   "paused (shutdown)" because of -no-reboot): Oops in bstpgaipc_read_write <-
+   bstpgaipc_fops_compat_ioctl, comm=ncube.launcher3 (a 32-bit app). The write went to
+   ctl_page - 0xc = the mailbox of cid -1 (open() sets cid = -1; the probe maps one page,
+   ioremap_nocache(BAR1, 0x1000)). Cause: the Phase-50/51 .ko patch (ko sha 78600deb in
+   initramfs_full.bin) put a code cave in compat_ioctl, assuming it was dead in an
+   "x64-only guest". It is not: 32-bit apps use it. The pristine compat_ioctl (ko 495ad40d)
+   re-encodes _IOW size 4 -> 8 for cmds 3/4 and forwards everything to fops_ioctl.
+   Fix: boot qemu_test/initramfs_full_p49bak.bin (pristine .ko; the only other delta vs
+   initramfs_full.bin is the phase-55 blank-Data formatter in bstsetup.env). boot.py
+   gained --initrd.
+3. Bug 2 (lost completions): with the pristine .ko there was no panic, but system_server
+   was killed by the Android Watchdog. Its android.ui thread held the AMS and WM locks while
+   blocked in BpSurfaceComposer::captureScreen, and SurfaceFlinger was the only native
+   process debuggerd could not dump (stuck in the .ko). Cause: bst_pgaipc pga_complete wrote
+   the single served-cid register (BAR1+0x870) even while the previous completion's IRQ was
+   unacked, so the earlier cid was lost and its waiter slept forever. HD-Player's
+   hstRaiseInterruptAcked (0x1402aa750) waits for the ack first. Fix: a completion FIFO;
+   the next cid is delivered on the BAR0+8 ack (queue depth reached 2 in p65G).
+4. Side findings: the DLL's real GL extension string has no native_sync and no
+   host_composition (Vulkan features + GLES 3.2), so GR_NO_NATIVESYNC was a dead end (knob
+   kept, harmless). mon.py now resolves dump paths to absolute (QEMU's cwd is the run
+   dir). HD-Adb (v36) kills a newer adb server (v41) on the host when it starts. The QEMU
+   process also hosts RivaTuner's Vulkan layer and both NVIDIA and AMD ICDs (dual GPU):
+   keep in mind if GPU issues appear.
+5. Result p65G_cq: boot_completed=1, the BlueStacks home screen renders.
+
+## 11. Next
+
+- Make the good path the default: PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0, pristine initramfs.
+- Try the pristine Root.vhd (no libEGL patches). The p50 markers should be unnecessary now.
+- Display + input: present frames live (VNC / the openstacks front-end) instead of 2 s BMP
+  dumps; the input path (bstinput via bstvmsg) is untested.
+- bstaudio (stub), big-slot (BAR2) clients, and Linux portability (gfxstream).
 
 ## Pitfalls (new)
 

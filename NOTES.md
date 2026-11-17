@@ -124,6 +124,31 @@ tools/dump_guestlibs.sh; image libEGL_emulation.so == qemu_test/dpyfix/libEGL_em
 - Usage: libs under /android/system/... inside the image (BlueStacks layout); the VHDs
   are DYNAMIC (type 3, 8 GiB virtual), so convert with qemu-img (now in WSL Debian).
 
+## 6. The "small-index records" are host residue, not guest data (Phase 62)
+
+1. Follow-up decode (subagent): eglDisplay::initialize has NO false-return path after
+   rcGetNumConfigs (0x181ad) on the p50 image (all later gates are marker stores; 0x18354
+   is unreachable). rcGetNumConfigs_enc (lib_renderControl_enc 0x94a0) = write
+   {0x2714,0xc,4} + exactly two 4-byte readbacks (numAttribs, then ret = numConfigs);
+   rcGetConfigs_enc (0x95c0) = write {0x2715,0x10,bs,bs} + readback(buf, bs) + readback(ret,4).
+   Our 34/11 match numAttribs=34, numConfigs=11 (bs = 34*12*4 = 1632). The observed THIRD
+   4-byte read matches neither encoder function.
+2. p61A serve/write interleave: the first dword of EVERY small guestwrite equals the reply
+   served immediately before it (03->03, ANDR->ANDR, GL E->GL E, 01->01, 04->04). The
+   "[idx][arg] index records" that phases 12-59 translated into sfIdx frames are
+   our own read reply left at win[0..4).
+3. p62A (GR_WINDUMP=1, dev build knob): for every write after the hello, the nonzero extent
+   of win[0..0x10000) is [0..8], exactly the residue of our last reply plus our own
+   post-relocation zero-fill. The guest's 8/8/16-byte writes add NO bytes to the client
+   region. On a fresh connection the real goldfish record ({0x2711,16,4,4} =
+   rcGetEGLVersion) IS at win[0..16), overlaying the hello (doorbell len=276).
+   => The guest's stream protocol is still unknown: the records go somewhere other than
+   win[0..0x10000), or the small doorbells carry no payload. HstStream decode
+   (libOpenglSystemCommon, OpenCode DeepSeek V4.1 Flash) is in flight.
+4. Consequence: everything keyed on sfIdx (exeFrame translation, pair machinery, the 0x2715
+   commit) is driven by our own reply bytes. Its "success" in p61 is coincidental pacing,
+   not protocol fidelity.
+
 ## Pitfalls (new)
 
 - `dev\build.cmd` taskkills QEMU, so a running boot dies on rebuild. Grade it first.

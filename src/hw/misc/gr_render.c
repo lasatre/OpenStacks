@@ -1079,6 +1079,7 @@ static void vt_table_init(void)
 static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win);
 static int gr_echo_mode(void);   /* Phase-60 GR_ECHO_MODE knob */
 static int gr_pairarm(void);     /* Phase-61 GR_PAIRARM knob   */
+static int gr_windump(void);     /* Phase-62 GR_WINDUMP knob   */
 static void post_install(void);   /* forward decl (exe readpix lane) */
 
 /* ================================================================= */
@@ -2112,6 +2113,25 @@ static void worker_dispatch_op(const GrOp *op)
                         gr_log("guestwrite cid=%u off=%u n=%u first=0x%x: %s",
                                cid, (unsigned)0, len, fdw, hex);
                     }
+                    /* Phase-62 window tap (GR_WINDUMP=1, unthrottled for
+                     * the first 400 writes): the "index record" first
+                     * dword equals the previous read reply (dev/NOTES §6),
+                     * so the guest writes somewhere other than +0. Dump
+                     * win[0..96) and the nonzero extent of the client
+                     * region so the real record position is visible.     */
+                    if (gr_windump() && gr_gw_this <= 400) {
+                        char h2[3 * 96 + 4];
+                        unsigned k, o2 = 0, hi = 0, lo = 0xffffffffu;
+                        for (k = 0; k < 96; k++) {
+                            o2 += sprintf(h2 + o2, "%02x ", recdst[k]);
+                        }
+                        h2[o2] = 0;
+                        for (k = 0; k < GR_WIN_REPLY; k++) {
+                            if (recdst[k]) { if (k < lo) lo = k; hi = k; }
+                        }
+                        gr_log("windump cid=%u len=%u nz=[%u..%u] w0: %s",
+                               cid, len, lo == 0xffffffffu ? 0 : lo, hi, h2);
+                    }
                     /* Phase-27: the guest's 276-B name record
                      * ("/system/bin/<proc> (pid N)") — the exe's
                      * createFinish name read has been observing all
@@ -3133,6 +3153,20 @@ static int gr_pairarm(void)
         DWORD n = GetEnvironmentVariableA("GR_PAIRARM", buf, sizeof(buf));
         cached = (n > 0 && buf[0] == '0') ? 0 : 1;
         gr_log("GR_PAIRARM=%d", cached);
+    }
+    return cached;
+}
+
+/* Phase-62 knob GR_WINDUMP (read once): 1 = log the window around every
+ * guest write (diagnostic only, no behaviour change).                  */
+static int gr_windump(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        char buf[8] = {0};
+        DWORD n = GetEnvironmentVariableA("GR_WINDUMP", buf, sizeof(buf));
+        cached = (n > 0 && buf[0] == '1') ? 1 : 0;
+        gr_log("GR_WINDUMP=%d", cached);
     }
     return cached;
 }

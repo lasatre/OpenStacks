@@ -41,21 +41,21 @@ blob) committed 6/6, no 262144 storm. The walk then dies before reading the blob
    Cave C, and the fresh-Data test, so the Phase-60 "echo pacing" premise (HANDOFF §4) is
    refuted as the root cause.
 3. **The "raw 0x2714 record" of 52A is not a cid=1 post.** The first 16 bytes of every
-   reconnect hello (cid>=2, n=276) carry her goldfish-encoder record that was queued
+   reconnect hello (cid>=2, n=276) carry the guest goldfish-encoder record that was queued
    when the previous connection died: `{op, totalSize, args}`. The lead op tracks walk
    depth: phase 51 = 0x2711, 52A = 0x2714, 53..59 = 0x2715.
 4. **From phase 53 on, the 0x2715 lead has bufSize 0x17DD0290 in every boot** (53, 56,
    57, 58A/B, 59B, and the dev setup repro), even across builds and images. Factorisation
    with the true ret=11 gives count = 0x007F4563. Those bytes appear in no served
-   reply we logged. Best reading: she never sends numConfigs on the p52+ images; the NOPed
-   value gates (state-4) let her go on with an uninitialised count.
+   reply we logged. Best reading: the guest never sends numConfigs on the p52+ images; the NOPed
+   value gates (state-4) let it go on with an uninitialised count.
 5. **The 262144 "storm" follows the IMAGE, not the environment.** Same exe + same Data:
    Root_p54 -> wantLen=262144 x3051 in 20 s; Root_p50 -> 0 (p60A). REPORT §52's
    "environment-class / Data drift" attribution is refuted. The p52+ image edits (FIX G:
    NOP 0x18123 + all value gates NOPed + alloca mask) are the prime suspect.
 6. **Phase 59b's "real small-index records are exactly 8 B" is false.** 52A's own log:
    `guestwrite cid=2 n=16 first=0x4: 04 00 .. -> exeFrame sfIdx=4`. On Root_p50 the 59b
-   rule drops her `{4}` n=16 record on every reconnect (p60A).
+   rule drops the guest `{4}` n=16 record on every reconnect (p60A).
 7. **Phase 59 #1 (raw-0x2714 pair arm) is reachable and harmful** once `{4}` passes: our
    sfIdx=4 translation writes 0x2714 at RBASE, rcTryParse arms the pair at reply+0, and
    the exe's own prefill lands at reply+8 (wpos=16). p48ret's wpos==8 gate never matches,
@@ -108,3 +108,8 @@ shape as 52A (which REPORT §52 attributes to the alloca bomb at 0x18201 on that
   `recDropped` and `exeFrame` lines are not throttled.
 - Boot runs reach surfaceflinger in ~20 s under WHPX; 2–3 minutes is enough to grade
   the EGL init loop.
+
+## Language convention
+
+Refer to the guest process as "the guest", "surfaceflinger" or "the EGL client" and use "it".
+The old canon personifies it ("she/her"); don't carry that over.

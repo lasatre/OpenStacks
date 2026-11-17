@@ -1713,7 +1713,7 @@ static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win)
      * is already INTACT (qhead==0 && wpos==8): a mid-pair dead attempt
      * must restage, an intact pair must survive a repeated record. */
     /* Phase-61 (dev/NOTES.md §3): GR_PAIRARM=0 disables this arm. Its
-     * premise is false: her {4} records DO occur (59b dropped them);
+     * premise is false: the guest {4} records DO occur (59b dropped them);
      * once they pass, our sfIdx=4 translation writes a raw 0x2714 at
      * RBASE, this arm stages the pair at reply+0, and the exe's own
      * prefill then lands at reply+8 (wpos=16) - p48ret's wpos==8 gate
@@ -2171,7 +2171,7 @@ static void worker_dispatch_op(const GrOp *op)
                      * records are exactly 8 B") is contradicted by 52A's
                      * own log: the healthy sfIdx=4 frames came from n=16
                      * `04 00 ..` writes, and on Root_p50 this rule drops
-                     * her {4} record on every reconnect.               */
+                     * the guest {4} record on every reconnect.               */
                     if (rec_ok && fdw2 <= 63 && gr_echo_mode() >= 2) {
                         uint32_t second = (len >= 8)
                                              ? ldl_le_p(recdst + 4) : 1;

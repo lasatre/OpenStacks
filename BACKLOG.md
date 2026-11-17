@@ -17,14 +17,14 @@ NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
 - **Thumbnails in the manager** use `adb screencap`; could use the renderer instead.
 
 ## Performance
+- **Full host CPU model** - we now expose SSE4 + AVX/AVX2/FMA/BMI/F16C/MOVBE on a qemu64
+  base; `-cpu host` (AVX-512 etc.) is untested since the CPUID 0xD fix [10p].
 - **BAR1 (small-slot windows) is still uncachable** - it sits in the 32-bit PCI hole (MTRR UC);
   surfaceflinger/systemui traffic goes through it. Moving it above 4 GiB needs the guest
   bstpgaipc.ko to accept a 64-bit BAR at index 1 (it reads BAR2 at resource index 2) [10n].
 - **kvm-clock instead of the VMware TSC leaf** - BlueStacks uses the KVM paravirt clock
   (GIM/Provider=KVM). Our VMware-leaf TSC works; kvm-clock would need MSR handling in the
   WHPX backend [10n].
-- **No AVX in the guest** - `-cpu host`/AVX models crash the initramfs `sh` under WHPX
-  (likely XSAVE state handling). Some games/houdini paths would benefit [10k].
 - **bstaudio ISR spam** - its ISR logs `Unknown cmd = 0` for every interrupt on its line
   (now IRQ 11: network + bstvmsg). Harmless with loglevel=3, still fills dmesg [10m, 10n].
 

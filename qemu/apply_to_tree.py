@@ -135,6 +135,28 @@ def main() -> int:
     else:
         print("meson.build already patched")
 
+    # WHPX CPUID leaf 0xD: sub-leaf 0 EBX (XSAVE size for the CURRENT XCR0)
+    # and sub-leaf 1 EBX (XCR0|XSS) are the dynamic ones; upstream takes the
+    # hypervisor value for 1 and 2 (2 = fixed AVX offset) and leaves 0 at
+    # QEMU's model, which still sees XCR0 = x87|SSE (576 B). With AVX the
+    # guest then sizes its XSAVE buffers too small and corrupts memory
+    # (initramfs sh jumps to 0). Phase 78.
+    whpx = os.path.join(tree, "target", "i386", "whpx", "whpx-all.c")
+    if os.path.exists(whpx):
+        with open(whpx, "r", encoding="utf-8") as f:
+            src = f.read()
+        old = ("                if (vcpu->exit_ctx.CpuidAccess.Rcx == 1\n"
+               "                    || vcpu->exit_ctx.CpuidAccess.Rcx == 2) {")
+        new = ("                if (vcpu->exit_ctx.CpuidAccess.Rcx == 0 /* bst-patch */\n"
+               "                    || vcpu->exit_ctx.CpuidAccess.Rcx == 1) {")
+        if old in src:
+            with open(whpx, "w", encoding="utf-8") as f:
+                f.write(src.replace(old, new, 1))
+            print("patched target/i386/whpx/whpx-all.c (CPUID 0xD sub-leaf 0 dynamic)")
+        else:
+            print("whpx-all.c already patched" if "bst-patch" in src
+                  else "WARNING: whpx-all.c CPUID 0xD hunk not found")
+
     print("done - now run configure and ninja")
     return 0
 

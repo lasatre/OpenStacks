@@ -66,8 +66,8 @@ def main():
     ap.add_argument("--mem", type=int, default=4096, help="guest RAM MiB")
     ap.add_argument("--console-verbose", action="store_true",
                     help="print every kernel message to serial.log (slower)")
-    ap.add_argument("--cpu", default="qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on",
-                    help="QEMU -cpu (SSE4 family for houdini; host/AVX models crash the guest under WHPX)")
+    ap.add_argument("--cpu", default="qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on,+xsave,+avx,+avx2,+fma,+f16c,+bmi1,+bmi2,+movbe",
+                    help="QEMU -cpu (SSE4/AVX2 for houdini + games; AVX needs the WHPX CPUID 0xD patch)")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")
     ap.add_argument("--props", default="host", choices=["host", "min"],

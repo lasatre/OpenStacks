@@ -48,7 +48,9 @@ MSYS2_BIN = r"C:\msys64\ucrt64\bin"          # DLLs needed by the patched build
 # QEMU report VMware and the TSC frequency, so the guest kernel uses the TSC
 # clocksource instead of the HPET, whose every read is an MMIO exit. (Real
 # BlueStacks gives the guest a paravirtual KVM clock for the same reason.)
-QEMU_CPU = "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on"
+# Phase-78: + AVX/AVX2/FMA/BMI (houdini emits AVX for some games -> SIGILL
+# without it); needs the WHPX CPUID 0xD fix in qemu/apply_to_tree.py.
+QEMU_CPU = "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on,+xsave,+avx,+avx2,+fma,+f16c,+bmi1,+bmi2,+movbe"
 
 def disk_format(path: Path) -> str:
     return {".qcow2": "qcow2", ".vhdx": "vhdx", ".vhd": "vpc",

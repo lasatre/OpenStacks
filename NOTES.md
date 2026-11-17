@@ -599,6 +599,23 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
   hcall*Rpc functions in libhostcall_jni: 1 GetProps ... 22 SetAppConfigDbParams,
   23 GoogleAccountListUpdated, 24 IsAppLaunchAllowed, ...)
 
+## 10p. Phase 78: AVX in the guest (QEMU WHPX CPUID 0xD bug)
+
+- Trigger: com.game.merge.anything SIGILL (ILL_ILLOPN) in houdini's translation cache at
+  `c4 e1 f9 6e` = VEX vmovq: libhoudini emits AVX for some code, our CPU model had none.
+- Earlier AVX attempts (-cpu host, EPYC-Milan) crashed the initramfs `sh` (jump to 0). Cause:
+  the kernel warned in init_xstate_size - CPUID(0xD,0).EBX said 576 B while XCR0 = x87|SSE|AVX
+  needs 832, so XSAVE buffers were too small and AVX state saves corrupted memory. Upstream
+  WHPX (target/i386/whpx/whpx-all.c) takes the hypervisor's dynamic EBX for sub-leaves 1 and
+  2 and leaves sub-leaf 0 at QEMU's model (stale XCR0). qemu/apply_to_tree.py now patches it
+  to sub-leaves 0 and 1 (2 is the fixed AVX offset).
+- Default -cpu (boot.py, front-end): qemu64 + ssse3/sse4.1/sse4.2/popcnt/invtsc/
+  vmware-cpuid-freq + xsave/avx/avx2/fma/f16c/bmi1/bmi2/movbe. Verified on the user's Rvc64_2
+  data: boots ("context size is 832 bytes"), Merge Anything runs (60 fps, no crash), Dinosaur
+  59.8 fps, ShurikenCut 59.9 fps.
+- The "Dinosaur crashes" report on Rvc64_2 was the low memory killer (2 GB instance, the game
+  needs ~1.6 GB): Rvc64_2 is now 4096 MB in the user's instances.conf.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

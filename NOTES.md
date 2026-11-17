@@ -101,6 +101,29 @@ shape as 52A (which REPORT §52 attributes to the alloca bomb at 0x18201 on that
 4. Untested pieces still in the code: phase-57 reply-echo drop (ECHO_MODE=0 would test
    it), phase-59 #2–#4 reserves.
 
+## 5. Phase 61 freeze — the death is a surfaceflinger NULL-string crash (p61B_freeze)
+
+Freeze 3 s after the 3rd `exePrefill 0x2715` (dev/tools/freeze_on.py; dumps in
+runs/p61B_freeze/freeze, ~5 GB, untracked). 4 tombstones, all identical:
+`SIGSEGV fault addr 0x0` in surfaceflinger: `#00 libc strlen+17 <- #01 libutils
+String8::setTo+24 <- (#02 GLExtensions::initWithEGLStrings 0xa6618 <- #03
+RenderEngine::create 0xa94dd, subagent static decode) <- #04 SurfaceFlinger::init+894`.
+
+Static decode (subagent; libs dumped from Root_p50 into dev/guestlibs/ via
+tools/dump_guestlibs.sh; image libEGL_emulation.so == qemu_test/dpyfix/libEGL_emulation.p50.so):
+- stock libEGL.so egl_display_t::initialize ALWAYS returns 1; if the driver's
+  eglInitialize fails it only logs a warning (level 5), and the cached EGL_VERSION/EXTENSIONS
+  stay NULL. RenderEngine::create -> initWithEGLStrings(NULL, ..) -> strlen(NULL).
+  => **the driver's eglDisplay::initialize (0x18060) returns false.**
+- The driver's queryString never returns NULL once the init flag ([s_display+0x28]) is set.
+- Image p50 bytes: 0x18123 `jne 0x1832a` INTACT (rcGetEGLVersion must be 1);
+  0x181b6/0x181c1/0x18220 = phase-47 marker stores (mov byte [0x53018],0xd1/d2/d3 + NOPs);
+  0x181e0 alloca mask movabs 0x7fffffff0 unpatched.
+- The host trace shows the guest past 0x18123 (it reaches rcGetNumConfigs), so the false
+  return is later; follow-up decode pending.
+- Usage: libs under /android/system/... inside the image (BlueStacks layout); the VHDs
+  are DYNAMIC (type 3, 8 GiB virtual), so convert with qemu-img (now in WSL Debian).
+
 ## Pitfalls (new)
 
 - `dev\build.cmd` taskkills QEMU, so a running boot dies on rebuild. Grade it first.

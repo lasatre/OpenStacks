@@ -6,8 +6,9 @@ reimplemented BlueStacks paravirtual devices and BlueStacks' own renderer
 home screen with live display, touch, keyboard, network, audio, full ADB and
 third-party/Unity apps (ARM translation via the guest's libhoudini).
 
-Nothing BlueStacks-owned is stored in this repo: the images are extracted from the
-user's own BlueStacks 5 install by `tools/prepare_assets.py`.
+Nothing BlueStacks-owned is stored in this repo: `tools/prepare_assets.py` (or the manager's
+New dialog) downloads the Android images from BlueStacks' CDN, or takes them from a local
+BlueStacks 5 install, and prepares them locally.
 
 ## Requirements (Windows 10/11 x64)
 

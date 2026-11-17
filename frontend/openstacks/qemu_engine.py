@@ -312,6 +312,15 @@ class QemuEngine:
             return LaunchResult(False, argv, warnings,
                                 "kernel/initramfs missing - fix assets_dir in instances.conf")
         self.logs_dir.mkdir(parents=True, exist_ok=True)
+        # an instance that is already up (e.g. started by another tool) holds
+        # its ports; QEMU would exit at once with "address in use"
+        busy = [f"{what} {port}" for what, port in
+                (("monitor", inst.monitor_port), ("adb", inst.adb_port),
+                 ("vnc", inst.vnc_port)) if _port_in_use(int(port))]
+        if busy:
+            return LaunchResult(False, argv, warnings,
+                                f"{inst.name} looks already running: port(s) in use "
+                                f"({', '.join(busy)}). Stop the other QEMU first.")
         env = os.environ.copy()
         if "qemu_bst" in argv[0] or Path(argv[0]).parent.name == "build":
             env["PATH"] = MSYS2_BIN + os.pathsep + env.get("PATH", "")
@@ -348,6 +357,16 @@ class QemuEngine:
                     logf.write(f"[openstacks] {w}\n".encode())
                 except OSError:
                     pass
+        # QEMU rejects bad options / busy resources within a moment: report it
+        try:
+            proc.wait(timeout=1.5)
+            tail = self.qemu_log_path(inst.name).read_text(
+                encoding="utf-8", errors="replace").splitlines()[-3:]
+            return LaunchResult(False, argv, warnings,
+                                f"QEMU exited at startup (code {proc.returncode}): "
+                                + " | ".join(tail))
+        except subprocess.TimeoutExpired:
+            pass
         inst_obj = QemuInstance(inst.name, proc, argv, self)
         self.instances[inst.name] = inst_obj
         try:
@@ -423,6 +442,15 @@ class QemuEngine:
             return int(self.pid_path(name).read_text(encoding="ascii").strip())
         except (OSError, ValueError):
             return None
+
+
+def _port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+            return False
+        except OSError:
+            return True
 
 
 def _pid_alive(pid: int) -> bool:

@@ -36,7 +36,7 @@ from typing import Optional
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
-from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QMainWindow,
+from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
                                QPushButton, QTabWidget, QToolButton,
                                QToolBar, QVBoxLayout, QWidget)
 
@@ -475,6 +475,7 @@ class PlayerWindow(QMainWindow):
         self.tabs.setMovable(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._on_current_tab)
+        self._bg_threads: list[_CallThread] = []
         self._build_sidebar()
         self.statusBar().showMessage("OpenStacks player ready - launch an instance from the manager.")
 
@@ -580,7 +581,29 @@ class PlayerWindow(QMainWindow):
     def _close_tab(self, idx: int) -> None:
         w = self.tabs.widget(idx)
         if isinstance(w, PlayerPane):
+            stop = False
+            if qemu_engine.is_running(w.inst):
+                box = QMessageBox(self)
+                box.setWindowTitle("Close instance")
+                box.setText(f"Shut down {w.inst.name}?")
+                box.setInformativeText("Keep running closes only this tab; the instance "
+                                       "stays up and can be reopened from the manager.")
+                b_stop = box.addButton("Shut down", QMessageBox.DestructiveRole)
+                box.addButton("Keep running", QMessageBox.AcceptRole)
+                b_cancel = box.addButton(QMessageBox.Cancel)
+                box.setDefaultButton(b_stop)
+                box.exec()
+                if box.clickedButton() is b_cancel:
+                    return
+                stop = box.clickedButton() is b_stop
             w.shutdown()
+            if stop:
+                inst = w.inst
+                th = _CallThread(lambda: "ok" if qemu_engine.shutdown(inst) else "")
+                th.done.connect(lambda ok, n=inst.name: self.statusBar().showMessage(
+                    f"{n} shut down" if ok == "ok" else f"{n}: QEMU did not stop", 5000))
+                th.start()
+                self._bg_threads.append(th)
         self.tabs.removeTab(idx)
 
     # -- manager-facing API -------------------------------------------------------------

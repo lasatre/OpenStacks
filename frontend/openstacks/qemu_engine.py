@@ -429,6 +429,35 @@ class QemuEngine:
         audionext (163) APP_SWITCH."""
         self.monitor(inst, f"sendkey {qcode}")
 
+    def shutdown(self, inst: Instance, timeout: float = 8.0) -> bool:
+        """Stop an instance whether or not this process launched it: QEMU
+        launched here is stopped via its handle; otherwise the pid file's
+        process (verified to be qemu-system-x86_64) gets the monitor `quit`,
+        then a kill."""
+        if inst.name in self.instances:
+            return self.stop(inst.name, timeout=timeout)
+        pid = self._read_pidfile(inst.name)
+        if pid is None or not _pid_alive(pid) or not _is_qemu(pid):
+            return True
+        try:
+            self.monitor(inst, "quit", timeout=2.0)
+        except OSError:
+            pass
+        for _ in range(int(timeout * 10)):
+            if not _pid_alive(pid):
+                break
+            time.sleep(0.1)
+        if _pid_alive(pid) and _is_qemu(pid):
+            try:
+                os.kill(pid, 9)          # TerminateProcess on Windows
+            except OSError:
+                pass
+        try:
+            self.pid_path(inst.name).unlink()
+        except OSError:
+            pass
+        return not _pid_alive(pid)
+
     def is_running(self, inst: Instance | str) -> bool:
         name = inst.name if isinstance(inst, Instance) else inst
         obj = self.instances.get(name)
@@ -442,6 +471,30 @@ class QemuEngine:
             return int(self.pid_path(name).read_text(encoding="ascii").strip())
         except (OSError, ValueError):
             return None
+
+
+def _is_qemu(pid: int) -> bool:
+    """True if `pid` is a qemu-system-x86_64 process (guards pid reuse)."""
+    if sys.platform != "win32":
+        try:
+            return "qemu-system" in Path(f"/proc/{pid}/exe").resolve().name
+        except OSError:
+            return False
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    h = k32.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        n = wintypes.DWORD(1024)
+        if not k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+            return False
+        return Path(buf.value).name.lower().startswith("qemu-system")
+    finally:
+        k32.CloseHandle(h)
 
 
 def _port_in_use(port: int) -> bool:

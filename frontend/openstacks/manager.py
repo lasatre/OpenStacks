@@ -401,6 +401,17 @@ class ManagerWindow(QMainWindow):
         th.start()
         self._threads.append(th)
 
+    def closeEvent(self, ev) -> None:
+        running = [i.name for i in self.store.instances() if self._is_running(i.name)]
+        if self._player is not None:
+            self._player.close()
+        if running:
+            self.statusBar().showMessage(f"Shutting down {', '.join(running)}...")
+            QApplication.processEvents()
+            _shutdown_all(self.store)
+        super().closeEvent(ev)
+        QApplication.quit()
+
     def showEvent(self, ev) -> None:  # keep current icon size applied
         self.list.setIconSize(self._icon_size())
         super().showEvent(ev)
@@ -419,6 +430,16 @@ class _LaunchThread(QThread):
             self.done.emit(self._fn())
         except Exception as e:                  # QemuNotFoundError etc.
             self.failed.emit(str(e))
+
+
+def _shutdown_all(store: Store) -> None:
+    """Instance manager closed: no UI is left to use the VMs, stop them all."""
+    for inst in store.instances():
+        try:
+            if qemu_engine.is_running(inst):
+                qemu_engine.shutdown(inst, timeout=6.0)
+        except Exception:                      # never block the exit
+            pass
 
 
 def main() -> None:

@@ -36,7 +36,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
-from PySide6.QtWidgets import (QFileDialog, QMainWindow, QTabWidget,
+from PySide6.QtWidgets import (QFileDialog, QMainWindow, QMenu, QTabWidget,
                                QToolBar, QVBoxLayout, QWidget)
 
 from .adb import Adb, AdbError, BootState
@@ -367,9 +367,12 @@ class _CallThread(QThread):
 class PlayerWindow(QMainWindow):
     """Window shell: closable instance tabs + shared sidebar + status bar."""
 
-    def __init__(self, store: Store, parent=None):
+    def __init__(self, store: Store, parent=None, home: "PlayerWindow | None" = None):
         super().__init__(parent)
         self.store = store
+        # home = the main player window this one was popped out of (None = main)
+        self.home = home
+        self._popouts: list["PlayerWindow"] = []
         self.setWindowTitle("OpenStacks Player")
         self.resize(1280, 760)
 
@@ -378,6 +381,8 @@ class PlayerWindow(QMainWindow):
         self.tabs.setMovable(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._on_current_tab)
+        self.tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabs.tabBar().customContextMenuRequested.connect(self._tab_menu)
         self.setCentralWidget(self.tabs)
 
         self._build_sidebar()
@@ -417,6 +422,16 @@ class PlayerWindow(QMainWindow):
             keys = {"rotate": "Ctrl+Shift+R", "screenshot": "Ctrl+S",
                     "install_apk": "Ctrl+I"}
             add(method.replace("_", " ").title(), tips[method], keys.get(method, ""))
+
+        # pop the instance out into its own window / dock it back
+        self.act_popout = add("Dock" if self.home else "Pop Out",
+                              "Move this instance back into the main player window"
+                              if self.home else
+                              "Open this instance in its own window (Ctrl+Shift+P)",
+                              "Ctrl+Shift+P")
+        self.act_popout.triggered.connect(
+            lambda: self._dock(self.tabs.currentIndex()) if self.home
+            else self._pop_out(self.tabs.currentIndex()))
 
         # Android navigation, like BlueStacks' side bar (bottom group)
         bar.addSeparator()
@@ -465,26 +480,122 @@ class PlayerWindow(QMainWindow):
         if isinstance(w, PlayerPane):
             w.shutdown()
         self.tabs.removeTab(idx)
+        if self.home is not None and self.tabs.count() == 0:
+            self._closing_empty = True
+            self.close()
 
-    # -- manager-facing API -------------------------------------------------------------
-    def open_instance(self, inst: Instance) -> PlayerPane:
-        for i in range(self.tabs.count()):
-            w = self.tabs.widget(i)
-            if isinstance(w, PlayerPane) and w.inst.name == inst.name:
-                self.tabs.setCurrentIndex(i)
-                return w
-        pane = PlayerPane(inst, self.store, self)
-        pane.statusChanged.connect(
-            lambda text: self.statusBar().showMessage(text))
-        i = self.tabs.addTab(pane, QIcon(), inst.name)
+    # -- pop-out / dock -------------------------------------------------------------------
+    def _tab_menu(self, pos) -> None:
+        idx = self.tabs.tabBar().tabAt(pos)
+        if idx < 0:
+            return
+        menu = QMenu(self)
+        if self.home is None:
+            menu.addAction("Pop out to its own window", lambda: self._pop_out(idx))
+        else:
+            menu.addAction("Dock to the main player window", lambda: self._dock(idx))
+        menu.addSeparator()
+        menu.addAction("Close tab", lambda: self._close_tab(idx))
+        menu.exec(self.tabs.tabBar().mapToGlobal(pos))
+
+    def _on_status(self, text: str) -> None:
+        self.statusBar().showMessage(text)
+
+    def _adopt(self, pane: "PlayerPane") -> int:
+        pane.statusChanged.connect(self._on_status)
+        i = self.tabs.addTab(pane, QIcon(), pane.inst.name)
+        inst = pane.inst
         self.tabs.setTabToolTip(i, f"{inst.name}: adb {inst.adb_port}, "
                                    f"vnc {inst.vnc_port}, {inst.resolution}@{inst.dpi}dpi")
         self.tabs.setCurrentIndex(i)
+        return i
+
+    def _detach(self, idx: int) -> "PlayerPane | None":
+        pane = self.tabs.widget(idx)
+        if not isinstance(pane, PlayerPane):
+            return None
+        if pane.native:
+            # hand the renderer window back to the desktop before the move;
+            # the display re-embeds it in its new parent within ~0.5 s
+            pane.display.release()
+        try:
+            pane.statusChanged.disconnect(self._on_status)
+        except (RuntimeError, TypeError):
+            pass
+        self.tabs.removeTab(idx)
+        return pane
+
+    def _pop_out(self, idx: int) -> None:
+        if idx < 0:
+            return
+        pane = self._detach(idx)
+        if pane is None:
+            return
+        win = PlayerWindow(self.store, home=self)
+        win.setWindowTitle(f"OpenStacks - {pane.inst.name}")
+        win._adopt(pane)
+        w, h = pane.inst.res_wh()
+        # size the popped window to the guest's aspect (+ side bar / tabs)
+        scale = min(1.0, 860 / max(h, 1), 1500 / max(w, 1))
+        win.resize(int(w * scale) + 110, int(h * scale) + 90)
+        win.show()
+        self._popouts.append(win)
+        if self.tabs.count() == 0:
+            self.hide()
+
+    def _dock(self, idx: int) -> None:
+        if self.home is None or idx < 0:
+            return
+        pane = self._detach(idx)
+        if pane is None:
+            return
+        self.home._adopt(pane)
+        self.home.show()
+        self.home.raise_()
+        if self.tabs.count() == 0:
+            self._closing_empty = True
+            self.close()
+
+    def find_pane(self, name: str) -> "tuple[PlayerWindow, int] | None":
+        """Locate an instance's tab here or in a popped-out window."""
+        for win in [self] + [w for w in self._popouts if w.isVisible()]:
+            for i in range(win.tabs.count()):
+                w = win.tabs.widget(i)
+                if isinstance(w, PlayerPane) and w.inst.name == name:
+                    return win, i
+        return None
+
+    # -- manager-facing API -------------------------------------------------------------
+    def open_instance(self, inst: Instance) -> PlayerPane:
+        found = self.find_pane(inst.name)
+        if found is not None:
+            win, i = found
+            win.tabs.setCurrentIndex(i)
+            win.show()
+            win.raise_()
+            win.activateWindow()
+            return win.tabs.widget(i)
+        pane = PlayerPane(inst, self.store, self)
+        self._adopt(pane)
         pane.start()
         pane.refresh_adb()
         return pane
 
     def closeEvent(self, ev) -> None:
+        if self.home is not None and not getattr(self, "_closing_empty", False):
+            # closing a popped-out window docks its instances back (they keep
+            # running); stopping an instance stays the manager's job
+            while self.tabs.count():
+                pane = self._detach(0)
+                if pane is not None:
+                    self.home._adopt(pane)
+            self.home.show()
+            super().closeEvent(ev)
+            return
+        if self.home is None:
+            for win in list(self._popouts):
+                win.home = None           # app is closing: shut down, no docking
+                win.close()
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
             if isinstance(w, PlayerPane):

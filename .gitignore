@@ -1,0 +1,6 @@
+build/
+__pycache__/
+runs/**
+!runs/*/
+!runs/*/grade.txt
+!runs/*/meta.txt

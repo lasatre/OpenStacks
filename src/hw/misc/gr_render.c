@@ -1223,6 +1223,17 @@ static uint8_t *pure_take(GrSock *s, uint32_t n, bool advance,
         pure_ack_write_locked(s);        /* chunk drained: let the next come */
         if (S_DISC(s)) break;
         if (timeoutMs >= 0 && waited >= timeoutMs) break;
+        if (waited == 5000) {            /* Phase-65 stall watchdog (once per wait) */
+            char hc[3 * 16 + 4];
+            uint32_t cl = s->pCarryLen - s->pCarryPos;
+            hexn(hc, s->pCarry ? s->pCarry + s->pCarryPos : (uint8_t *)"",
+                 cl < 16 ? cl : 16);
+            gr_log("pstall cid=%u need=%u adv=%d carry=%u wcnt=%u rpos=%u "
+                   "wPend=%d rPend=%d want=%u staged=%u W=%u R=%u S=%u carry0: %s",
+                   s->cid, n, advance, cl, S_WCNT(s), S_RPOS(s),
+                   s->pWritePending, s->pReadPending, s->pReadWant, s->pWpos,
+                   s->pWrites, s->pReads, s->pSends, hc);
+        }
         S_UNLOCK(s);
         Sleep(1);
         waited++;
@@ -1326,6 +1337,49 @@ static int pure_flush(GrSock *s)
     pure_ack_write_locked(s);
     uint8_t *win = GR_WIN(s->cid);
     uint32_t wsz = (uint32_t)GR_WSZ(s->cid);
+    /* Phase-65 diagnostic GR_NO_NATIVESYNC=1: hide ANDROID_EMU_native_sync_v*
+     * from the GL extension reply (same length) so the guest falls back to
+     * synchronous swaps: tests whether the stall is unsignalled sync fences. */
+    {
+        static int ns = -1;
+        if (ns < 0) {
+            char b[4] = {0};
+            ns = (GetEnvironmentVariableA("GR_NO_NATIVESYNC", b, sizeof(b)) > 0 &&
+                  b[0] == '1');
+            gr_log("GR_NO_NATIVESYNC=%d", ns);
+        }
+        {   /* log the DLL's real extension strings once per distinct reply */
+            static unsigned logged;
+            bool has = false;
+            if (logged < 4 && total > 32 && total < 0x2000) {
+                uint32_t k;
+                for (k = 0; k + 11 <= total && !has; k++) {
+                    has = memcmp(s->pRbuf + k, "ANDROID_EMU", 11) == 0;
+                }
+            }
+            if (has) {
+                char txt[0x2000];
+                uint32_t i;
+                for (i = 0; i < total && i < sizeof(txt) - 1; i++) {
+                    uint8_t c = s->pRbuf[i];
+                    txt[i] = (c >= 0x20 && c < 0x7f) ? (char)c : '|';
+                }
+                txt[i] = 0;
+                logged++;
+                gr_log("extreply cid=%u len=%u: %s", s->cid, total, txt);
+            }
+        }
+        if (ns && total > 26) {
+            uint32_t i, hits = 0;
+            for (i = 0; i + 26 <= total; i++) {
+                if (memcmp(s->pRbuf + i, "ANDROID_EMU_native_sync_v", 25) == 0) {
+                    s->pRbuf[i + 12] = 'X';    /* ANDROID_EMU_Xative_sync_vN */
+                    hits++;
+                }
+            }
+            if (hits) gr_log("native_sync hidden x%u in cid=%u reply", hits, s->cid);
+        }
+    }
     /* HD-Player flush (0x1402aabc0): replies larger than the window go out
      * in window-sized chunks, one guest READ per chunk.                  */
     while (pos < total) {

@@ -70,6 +70,7 @@ class Mon:
 
 
 def freeze(outdir, stay):
+    outdir = os.path.abspath(outdir)
     os.makedirs(outdir, exist_ok=True)
     m = Mon()
     m.cmd("stop", 5)

@@ -37,6 +37,7 @@ def main():
     ap.add_argument("name")
     ap.add_argument("--root", default="Root_p54.vhd")
     ap.add_argument("--data", default="Data_fresh.qcow2")
+    ap.add_argument("--initrd", default="initramfs_full.bin")
     ap.add_argument("--persist", action="store_true")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")
@@ -69,7 +70,7 @@ def main():
         "-L", os.path.join(os.path.dirname(exe), "pc-bios"),
         "-machine", "pc", "-accel", "whpx", "-m", "4096", "-smp", "2",
         "-kernel", os.path.join(IMAGES, "kernel.bin"),
-        "-initrd", os.path.join(IMAGES, "initramfs_full.bin"),
+        "-initrd", os.path.join(IMAGES, a.initrd),
         "-append", APPEND,
         "-drive", "file=%s,format=vpc,if=ide,index=0%s" % (img(a.root), snap),
         "-drive", "file=%s,format=qcow2,if=ide,index=1%s" % (img(a.data), snap),

@@ -116,6 +116,9 @@ struct BstPgaipcState {
     uint8_t *shm;   /* BAR1 */
     uint8_t *mem;   /* BAR2 */
     bool irq_asserted;
+    /* Phase-65: completions queued while an IRQ is unacked (see pga_complete) */
+    uint32_t cq[1024];
+    unsigned cq_head, cq_tail, cq_max, cq_drops;
 
     /* Phase-2 render bridge */
     bool gr;
@@ -162,13 +165,35 @@ static size_t pga_window_size(uint32_t cid)
     return (cid < 0x7f) ? PGAIPC_SMALL_WIN : PGAIPC_BIG_WIN;
 }
 
+static void pga_deliver(BstPgaipcState *s, uint32_t cid)
+{
+    stl_le_p(s->shm + PGAIPC_SERVED_CID_REG, cid);
+    s->irq_asserted = true;
+    pci_irq_assert(PCI_DEVICE(s));
+}
+
+/* Phase-65 (dev/NOTES.md §10): there is ONE served-cid register. Writing it
+ * while the previous completion's IRQ is still unacked overwrote that cid,
+ * and its waiter slept forever (surfaceflinger stuck in the .ko, then the
+ * system_server Watchdog kill). HD-Player's hstRaiseInterruptAcked
+ * (0x1402aa750) waits for the ack before reporting the next cid: queue
+ * completions and deliver the next one on the guest's BAR0+8 ack.     */
 static void pga_complete(BstPgaipcState *s, uint32_t cid)
 {
-    /* served-cid report + shared INTx */
-    stl_le_p(s->shm + PGAIPC_SERVED_CID_REG, cid);
     if (!s->irq_asserted) {
-        s->irq_asserted = true;
-        pci_irq_assert(PCI_DEVICE(s));
+        pga_deliver(s, cid);
+        return;
+    }
+    unsigned depth = s->cq_tail - s->cq_head;
+    if (depth >= ARRAY_SIZE(s->cq)) {
+        s->cq_drops++;
+        fprintf(stderr, "[bstpgaipc] completion queue FULL, cid=%u dropped\n", cid);
+        return;
+    }
+    s->cq[s->cq_tail++ % ARRAY_SIZE(s->cq)] = cid;
+    if (depth + 1 > s->cq_max) {
+        s->cq_max = depth + 1;
+        fprintf(stderr, "[bstpgaipc] completion queue depth %u\n", s->cq_max);
     }
 }
 
@@ -439,6 +464,9 @@ static void bst_pgaipc_bar0_write(void *opaque, hwaddr addr, uint64_t val,
          */
         s->irq_asserted = false;
         pci_irq_deassert(PCI_DEVICE(s));
+        if (s->cq_head != s->cq_tail) {      /* Phase-65: next queued completion */
+            pga_deliver(s, s->cq[s->cq_head++ % ARRAY_SIZE(s->cq)]);
+        }
         break;
     default:
         break;

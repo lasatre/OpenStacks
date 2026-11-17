@@ -45,6 +45,8 @@ def main():
     ap.add_argument("--audio", default="dsound", choices=["dsound", "wav", "none"],
                     help="bstaudio backend: host speakers, runs/<name>/audio.wav, or silent")
     ap.add_argument("--persist", action="store_true")
+    ap.add_argument("--cpu", default="qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt",
+                    help="QEMU -cpu (SSE4 family for houdini; host/AVX models crash the guest under WHPX)")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")
     ap.add_argument("--props", default="host", choices=["host", "min"],
@@ -88,7 +90,7 @@ def main():
     argv = [
         exe, "-name", "openstacks-" + a.name,
         "-L", os.path.join(os.path.dirname(exe), "pc-bios"),
-        "-machine", "pc", "-accel", "whpx", "-m", "4096", "-smp", "2",
+        "-machine", "pc", "-accel", "whpx", "-cpu", a.cpu, "-m", "4096", "-smp", "2",
         "-kernel", os.path.join(IMAGES, "kernel.bin"),
         "-initrd", os.path.join(IMAGES, a.initrd),
         "-append", APPEND,

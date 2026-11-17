@@ -288,6 +288,13 @@ typedef struct GrSock {
     uint8_t *pOut;             /* copy-out for chunk-tail reads           */
     uint32_t pOutCap;
     uint32_t pWrites, pReads, pSends, pAcks, pSpans;
+    /* --- Phase-73 HPP lane (big slots, dev/re_scratch/hpp_spec.md) --- */
+    bool     hpp;              /* shared-memory ring mode on this cid     */
+    uint8_t *hRx;              /* request bytes pulled from the ring      */
+    uint32_t hRxCap, hRxValid, hRxCons;
+    uint32_t hKicks, hRaises, hSlots, hFlushes;
+    uint32_t hOps[48][2];      /* opcode census (op, count) for the log   */
+    uint32_t hOpN, hLastOps[8], hLastPos;
 } GrSock;
 
 typedef struct GrState {
@@ -1123,6 +1130,8 @@ static void pure_reset(GrSock *s)
     s->pReadWant = 0;
     s->pWpos = 0;
     s->pCarryLen = s->pCarryPos = 0;
+    s->hpp = false;
+    s->hRxValid = s->hRxCons = 0;
 }
 
 static bool pure_ensure(uint8_t **buf, uint32_t *cap, uint32_t need)
@@ -1245,6 +1254,234 @@ static uint8_t *pure_take(GrSock *s, uint32_t n, bool advance,
 
 static int pure_flush(GrSock *s);
 
+/* ================================================================== */
+/* Phase-73 HPP lane: BlueStacks' shared-memory ring for big slots      */
+/* (cid 0x7f..0x86, 4 MiB windows in BAR2). The guest flips itself into */
+/* this mode after the handshake when its 3rd int is 1 (every third-   */
+/* party app). Spec + evidence: dev/re_scratch/hpp_spec.md. Layout:     */
+/*   W+0 lock (0x55 free / 0xaa held)  W+1 guest state  W+2 host state  */
+/*   W+3 reply ready  W+4 head  W+8 tail  W+0xc slotLen[1022]           */
+/*   W+0x2000 + i*0x1000 slot data. Replies go contiguous from +0x2000. */
+/* The DLL is unaware: only peek/recv/send change underneath.           */
+
+#define HPP_HDR     0x2000u
+#define HPP_SLOT    0x1000u
+#define HPP_WAITMS  10
+
+static inline uint32_t hpp_nslots(GrSock *s)
+{
+    return (uint32_t)((GR_WSZ(s->cid) - HPP_HDR) / HPP_SLOT);
+}
+
+static bool hpp_lock(GrSock *s, uint8_t *W)
+{
+    unsigned i;
+    for (i = 0;; i++) {
+        uint8_t old = __atomic_exchange_n(&W[0], 0xaa, __ATOMIC_ACQ_REL);
+        if (old == 0x55) return true;
+        if (old != 0xaa) {
+            gr_once(0xc0, "hpp cid=%u: lock byte 0x%02x (expected 0x55/0xaa)",
+                    s->cid, old);
+            __atomic_store_n(&W[0], 0x55, __ATOMIC_RELEASE);
+            return true;
+        }
+        if (S_DISC(s)) return false;
+        if (i > 100000) SwitchToThread();
+        else YieldProcessor();
+    }
+}
+
+static inline void hpp_unlock(uint8_t *W)
+{
+    __atomic_store_n(&W[0], 0x55, __ATOMIC_RELEASE);
+}
+
+static inline uint32_t hpp_ld(uint8_t *W, uint32_t off)
+{
+    return __atomic_load_n((uint32_t *)(W + off), __ATOMIC_ACQUIRE);
+}
+
+static inline void hpp_st(uint8_t *W, uint32_t off, uint32_t v)
+{
+    __atomic_store_n((uint32_t *)(W + off), v, __ATOMIC_RELEASE);
+}
+
+/* guest ioctl 0x7006 -> doorbell cmd 6 (vCPU context, must not block) */
+void gr_render_kick(uint32_t cid)
+{
+    if (cid > GR_MAX_CID) return;
+    GrSock *s = &g.socks[cid];
+    S_LOCK(s);
+    S_RUN(s) = 1;
+    s->hKicks++;
+    S_UNLOCK(s);
+    WakeAllConditionVariable(S_CNDP(s));
+}
+
+/* wait for a kick (or disconnect); bounded so a lost wakeup costs a few ms */
+static bool hpp_wait_kick(GrSock *s)
+{
+    bool k;
+    S_LOCK(s);
+    if (!S_RUN(s) && !S_DISC(s)) {
+        SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), HPP_WAITMS, 0);
+    }
+    k = S_RUN(s);
+    S_RUN(s) = 0;
+    S_UNLOCK(s);
+    return k;
+}
+
+/* raise the cid IRQ: wakes a guest sleeping in ioctl 0x7005 */
+static void hpp_raise(GrSock *s)
+{
+    s->hRaises++;
+    GR_DONE(s->cid);
+}
+
+static void hpp_init(GrSock *s)
+{
+    uint8_t *W = GR_WIN(s->cid);
+    if (!W) return;
+    memset(W, 0, HPP_HDR);
+    __atomic_store_n(&W[0], 0x55, __ATOMIC_RELEASE);   /* NegotiatePipeType */
+    if (!s->hRx) {
+        s->hRx = (uint8_t *)malloc(0x80000);
+        s->hRxCap = s->hRx ? 0x80000 : 0;
+    }
+    s->hRxValid = s->hRxCons = 0;
+    s->hKicks = s->hRaises = s->hSlots = s->hFlushes = 0;
+    s->hOpN = s->hLastPos = 0;
+    memset(s->hLastOps, 0, sizeof(s->hLastOps));
+    s->hpp = true;
+    gr_log("hpp init cid=%u window=%p size=0x%zx slots=%u", s->cid, (void *)W,
+           (size_t)GR_WSZ(s->cid), hpp_nslots(s));
+}
+
+/* post the staged reply (HD-Player hppFlush 0x1402ad0b0) */
+static int hpp_flush(GrSock *s)
+{
+    uint8_t *W = GR_WIN(s->cid);
+    uint32_t total = s->pWpos, pos = 0, N = hpp_nslots(s);
+    uint32_t cap = N * HPP_SLOT;
+    if (total == 0 || !W) return 0;
+    hpp_st(W, 4, 0);
+    hpp_st(W, 8, 0);
+    while (pos < total) {
+        uint32_t rem = total - pos, n, count, last;
+        uint8_t fin, c;
+        if (!hpp_lock(s, W)) return 0x68;
+        W[2] = 1;
+        hpp_unlock(W);
+        if (rem > cap) {
+            n = cap; count = N; last = HPP_SLOT; fin = 3;
+        } else {
+            n = rem; count = (n + HPP_SLOT - 1) / HPP_SLOT;
+            last = (n & (HPP_SLOT - 1)) ? (n & (HPP_SLOT - 1)) : HPP_SLOT;
+            fin = 0;
+        }
+        memcpy(W + HPP_HDR, s->pRbuf + pos, n);
+        hpp_st(W, 0xc + 4 * (count - 1), last);
+        hpp_st(W, 8, count);
+        S_LOCK(s); S_RUN(s) = 0; S_UNLOCK(s);   /* only kicks after this count */
+        if (!hpp_lock(s, W)) return 0x68;
+        W[2] = fin;
+        c = W[1];
+        W[3] = 1;
+        if (c == 3) W[1] = 1;
+        hpp_unlock(W);
+        if (c == 3) hpp_raise(s);
+        else if (c == 2) gr_once(0xc1, "hpp cid=%u: reply posted while guest "
+                                 "waits for ring space", s->cid);
+        pos += n;
+        if (fin == 3) {                  /* guest kicks after each chunk */
+            while (!S_DISC(s) && !hpp_wait_kick(s)) {
+            }
+        }
+    }
+    if (s->hFlushes++ < 12) {
+        gr_log("hpp flush cid=%u len=%u (chunks %u)", s->cid, total,
+               (total + cap - 1) / cap);
+    }
+    s->pWpos = 0;
+    /* wait until the guest took it (W[3] cleared); sleep as "kick me" */
+    while (__atomic_load_n(&W[3], __ATOMIC_ACQUIRE) != 0 && !S_DISC(s)) {
+        uint8_t c;
+        if (!hpp_lock(s, W)) return 0x68;
+        c = W[1];
+        if (c == 1 || c == 3) W[2] = 2;
+        if (c == 3) W[1] = 1;
+        hpp_unlock(W);
+        if (c == 3) hpp_raise(s);
+        if (__atomic_load_n(&W[3], __ATOMIC_ACQUIRE) == 0) {
+            if (hpp_lock(s, W)) { W[2] = 0; hpp_unlock(W); }
+            break;
+        }
+        if (c == 1 || c == 3) hpp_wait_kick(s);
+        else SwitchToThread();
+        if (!hpp_lock(s, W)) return 0x68;
+        W[2] = 0;
+        hpp_unlock(W);
+    }
+    return S_DISC(s) ? 0x68 : 0;
+}
+
+/* make `need` request bytes available at hRx+hRxCons (HD-Player 0x1402ad5a0) */
+static uint8_t *hpp_take(GrSock *s, uint32_t need, bool advance, bool atPeek)
+{
+    uint8_t *W = GR_WIN(s->cid);
+    uint32_t N = hpp_nslots(s);
+    if (!W || need == 0) return NULL;
+    if (atPeek && s->hRxCons) {          /* new message: compact */
+        uint32_t left = s->hRxValid - s->hRxCons;
+        if (left) memmove(s->hRx, s->hRx + s->hRxCons, left);
+        s->hRxValid = left;
+        s->hRxCons = 0;
+    }
+    while (s->hRxValid - s->hRxCons < need) {
+        uint32_t head, tail;
+        if (S_DISC(s)) return NULL;
+        head = hpp_ld(W, 4);
+        tail = hpp_ld(W, 8);
+        if (head == tail) {
+            uint8_t c;
+            if (!hpp_lock(s, W)) return NULL;
+            c = W[1];
+            if (c != 3) W[2] = 2;                    /* asleep: kick me */
+            if (hpp_ld(W, 8) != head && c != 3) {    /* raced a publish */
+                W[2] = 0;
+                hpp_unlock(W);
+                continue;
+            }
+            if (c == 2) W[1] = 0;
+            hpp_unlock(W);
+            if (c == 2) hpp_raise(s);                /* ring-space / sync waiter */
+            if (c != 3) hpp_wait_kick(s);
+            else SwitchToThread();
+            if (!hpp_lock(s, W)) return NULL;
+            W[2] = 0;
+            hpp_unlock(W);
+            continue;
+        }
+        while (head != tail) {
+            uint32_t slot = head % N;
+            uint32_t len = hpp_ld(W, 0xc + 4 * slot);
+            if (len > HPP_SLOT) len = HPP_SLOT;
+            if (!pure_ensure(&s->hRx, &s->hRxCap, s->hRxValid + len)) return NULL;
+            memcpy(s->hRx + s->hRxValid, W + HPP_HDR + slot * HPP_SLOT, len);
+            s->hRxValid += len;
+            head++;
+            hpp_st(W, 4, head);
+            s->hSlots++;
+            if (s->hRxValid > 0x20000 && s->hRxValid - s->hRxCons >= need) break;
+            tail = hpp_ld(W, 8);
+        }
+    }
+    uint8_t *p = s->hRx + s->hRxCons;
+    if (advance) s->hRxCons += need;
+    return p;
+}
+
 /* DLL RenderThread::main (0x18012b64c..849) calls peek(this, needed, &out)
  * with NO timeout argument (r9 is stale); ANY non-zero return ends the
  * render thread. HD-Player's hstPeekTimed (0x1402abde0) first flushes the
@@ -1255,6 +1492,21 @@ static int pvt_peek4(void *w, uint32_t needed, void **out, int64_t timeout)
     GrSock *s = ww ? ww->sock : NULL;
     (void)timeout;
     if (!s) return 0x68;
+    if (s->hpp) {
+        if (hpp_flush(s) != 0) return 0x68;
+        uint8_t *hp = hpp_take(s, needed ? needed : 1, false, true);
+        if (!hp) return 0x68;
+        if (needed >= 4) {
+            uint32_t op = ldl_le_p(hp), k;
+            s->hLastOps[s->hLastPos++ & 7] = op;
+            for (k = 0; k < s->hOpN && s->hOps[k][0] != op; k++) {
+            }
+            if (k < s->hOpN) s->hOps[k][1]++;
+            else if (s->hOpN < 48) { s->hOps[s->hOpN][0] = op; s->hOps[s->hOpN++][1] = 1; }
+        }
+        if (out) *out = hp;
+        return 0;
+    }
     if (pure_flush(s) != 0) return 0x68;
     uint8_t *p = pure_take(s, needed ? needed : 1, false, -1);
     if (!p) return 0x68;                 /* only on disconnect */
@@ -1272,7 +1524,8 @@ static int pvt_recv(void *w, int32_t len, void **out)
     GrWrapper *ww = (GrWrapper *)w;
     GrSock *s = ww ? ww->sock : NULL;
     if (!s) return -1;
-    uint8_t *p = pure_take(s, len <= 0 ? 1 : (uint32_t)len, true, -1);
+    uint8_t *p = s->hpp ? hpp_take(s, len <= 0 ? 1 : (uint32_t)len, true, false)
+                        : pure_take(s, len <= 0 ? 1 : (uint32_t)len, true, -1);
     if (out) *out = p;
     return p ? 0 : 0x68;                 /* only fails on disconnect */
 }
@@ -1282,7 +1535,8 @@ static int pvt_recvcopy(void *w, void *dst, int len)
     GrWrapper *ww = (GrWrapper *)w;
     GrSock *s = ww ? ww->sock : NULL;
     if (!s || !dst || len <= 0) return -1;
-    uint8_t *p = pure_take(s, (uint32_t)len, true, -1);
+    uint8_t *p = s->hpp ? hpp_take(s, (uint32_t)len, true, false)
+                        : pure_take(s, (uint32_t)len, true, -1);
     if (!p) return 0x68;                 /* only fails on disconnect */
     memcpy(dst, p, (size_t)len);
     return 0;
@@ -1321,7 +1575,7 @@ static int pvt_send(void *w)
     GrWrapper *ww = (GrWrapper *)w;
     GrSock *s = ww ? ww->sock : NULL;
     if (!s) return 0x68;
-    return pure_flush(s);
+    return s->hpp ? hpp_flush(s) : pure_flush(s);
 }
 
 /* Deliver the staged reply (HD-Player flush 0x1402aabc0): ack the current
@@ -1431,16 +1685,32 @@ static int pvt_createfinish(void *w)
     if (!s) return -1;
     char *namebuf = (char *)s->raw + 0x30;   /* the exe's [sock+0x30] */
     memset(namebuf, 0, 0x100);
-    if (pvt_recvcopy(w, namebuf, 0x100) != 0) return -1;
+    /* peek (no ack): for HPP the window header must be initialised
+     * BEFORE the handshake WRITE is acked (HD-Player createFinish
+     * 0x1402aa6e0: recv name, NegotiatePipeType, then raiseInterrupt). */
+    uint8_t *hs = pure_take(s, 0x100, false, -1);
+    if (!hs) return -1;
+    memcpy(namebuf, hs, 0x100);
     namebuf[0xff] = 0;
-    {
-        char proc[0x100] = {0};
-        int pid = 0, tid = 0, a4 = 0, a5 = 0, a6 = 0;
-        int k = sscanf(namebuf, "%255s (pid %d, tid %d) %d %d %d",
-                       proc, &pid, &tid, &a4, &a5, &a6);
-        gr_log("pure createFinish cid=%u '%.60s' parsed=%d hpp=%s", s->cid,
-               namebuf, k, (k == 6 && a6 != 0) ? "REQUESTED(unsupported)" : "no");
+    char proc[0x100] = {0};
+    int pid = 0, tid = 0, a4 = 0, a5 = 0, a6 = 0;
+    int k = sscanf(namebuf, "%255s (pid %d, tid %d) %d %d %d",
+                   proc, &pid, &tid, &a4, &a5, &a6);
+    bool hpp = (k == 6 && a6 != 0 && GR_WSZ(s->cid) == 0x400000);
+    gr_log("pure createFinish cid=%u '%.60s' parsed=%d hpp=%s", s->cid,
+           namebuf, k, hpp ? "on" : (k == 6 && a6 != 0) ? "REQUESTED(small slot!)" : "no");
+    if (hpp) {
+        S_LOCK(s);
+        S_RPOS(s) = S_WCNT(s);           /* the handshake is the whole WRITE */
+        S_UNLOCK(s);
+        hpp_init(s);
+        S_LOCK(s);
+        pure_ack_write_locked(s);        /* ack only after the W[0]=0x55 init */
+        S_UNLOCK(s);
+        return 0;
     }
+    if (pvt_recvcopy(w, namebuf, 0x100) != 0) return -1;   /* consume + ack */
+    namebuf[0xff] = 0;
     return 0;
 }
 
@@ -2545,6 +2815,22 @@ static void worker_dispatch_op(const GrOp *op)
         S_LOCK(s);
         S_DISC(s) = 1;
         S_UNLOCK(s);
+        WakeAllConditionVariable(S_CNDP(s));   /* HPP waiters exit (0x68) */
+        if (s->hpp) {
+            char ob[48 * 20 + 1];
+            unsigned k, o = 0;
+            gr_log("hpp close cid=%u kicks=%u raises=%u slots=%u flushes=%u",
+                   cid, s->hKicks, s->hRaises, s->hSlots, s->hFlushes);
+            for (k = 0; k < s->hOpN; k++) {
+                o += sprintf(ob + o, "%x:%u ", s->hOps[k][0], s->hOps[k][1]);
+            }
+            gr_log("hpp ops cid=%u: %s", cid, ob);
+            o = 0;
+            for (k = 0; k < 8; k++) {
+                o += sprintf(ob + o, "%x ", s->hLastOps[(s->hLastPos + k) & 7]);
+            }
+            gr_log("hpp last ops cid=%u: %s", cid, ob);
+        }
         s->used = false;
         mbox_set(mb, 0, 0);
         break;

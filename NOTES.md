@@ -444,6 +444,35 @@ Front-end: qemu_engine adds -audiodev dsound,id=snd0 + bstaudio audiodev=snd0.
   hpp=REQUESTED(unsupported), the client disconnects and the app aborts with
   "FORTIFY: pthread_mutex_lock called on a destroyed mutex". Needs the HPP / big-slot path.
 
+## 10k. Phase 73: Unity / third-party apps run (HPP big slots + guest CPU features)
+
+Two independent blockers, both fixed:
+1. HPP transport (spec: dev/re_scratch/hpp_spec.md, from guest libOpenglSystemCommon,
+   bstpgaipc.ko and HD-Player disassembly). Every third-party app (uid >= 10000, not
+   com.bluestacks/com.google/com.android/...) asks the .ko for a BIG slot (cid 0x7f..0x86,
+   BAR2 + (cid-0x7f)*4 MiB) and, after the 0x100 handshake ("... 0 0 1"), switches itself to
+   a shared-memory ring: W[0] lock 0x55/0xaa, W[1] guest state, W[2] host state, W[3] reply
+   ready, head +4, tail +8, slotLen[1022] at +0xc, 4 KiB slots from +0x2000; replies are
+   written contiguously from +0x2000 (chunked, W[2]=3 = more follows). The host must
+   memset the header and set W[0]=0x55 BEFORE acking the handshake WRITE, otherwise the
+   guest's first lock reads 0 -> "Unexpected condition" -> exit(1) ("pthread_mutex_lock
+   called on a destroyed mutex"). Kick = ioctl 0x7006 -> doorbell cmd 6: wake the render
+   thread only, no IRQ (a spurious IRQ breaks the state machine). Host IRQ only when W[1] is
+   2 (ring space / sync waiter, raised when the ring is found empty) or 3 (reply waiter).
+   gr_render.c: hpp_init/hpp_take/hpp_flush/gr_render_kick under the unchanged pure vtable
+   (the DLL is unaware); bst_pgaipc.c handles cmd 6 inline. Op census logged at close.
+2. Guest CPU: QEMU's default qemu64 has no SSSE3/SSE4/POPCNT; libhoudini (ARM translation)
+   then aborts translated apps via its deliberate crash at 0xdead0000 (libhoudini 0x2f1ab7).
+   `-cpu host` and EPYC-Milan (AVX/XSAVE) make the initramfs `sh` jump to 0 and panic under
+   WHPX, so the default is now `qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt` (boot.py --cpu,
+   front-end QEMU_CPU / env OST_CPU). AVX under WHPX is an open item (games may want it).
+- Result (Rvc64_2, user's data disk): com.mindolin.nicedice (2D Unity) and
+  com.Kayac.ShurikenCut (3D Unity) run, several HPP channels each, no crashes
+  (dev/shots/phase73_unity_*.png). Portrait games are shown unrotated (display rotation
+  is not applied to the console yet).
+- Also seen: every bstpgaipc IRQ makes the guest bstaudio ISR print "Unknown cmd = 0" on
+  the shared line (serial printk per interrupt): costly, fix with the perf work.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

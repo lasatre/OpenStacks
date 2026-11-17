@@ -47,6 +47,12 @@ bool gr_render_op_disconnect(uint32_t cid);
 bool gr_render_op_request(uint32_t cid, uint32_t cmd, uint32_t len);
 
 /*
+ * Phase-73 HPP kick (guest ioctl 0x7006 -> doorbell cmd 6): wakes the
+ * cid's render thread; no mbox result beyond status, NO IRQ. Non-blocking.
+ */
+void gr_render_kick(uint32_t cid);
+
+/*
  * Phase-67 live display: latest composited frame from the renderer
  * (RGBA, *w x *h, tightly packed) and a sequence number that changes
  * whenever new pixels arrived. NULL until the first frame.

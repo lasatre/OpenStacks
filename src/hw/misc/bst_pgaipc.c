@@ -353,6 +353,12 @@ static void pga_doorbell(BstPgaipcState *s, uint32_t cid)
             }
             break;         /* legacy read path below */
         case PGAIPC_CMD_HYPERCALL:
+            /* Phase-73: HPP kick. HD-Player 0x1402ab270 only signals the
+             * sock (S_RUN + cond); the .ko does not wait for an IRQ and a
+             * spurious one breaks the guest's HPP state machine. */
+            stl_le_p(mb + 0x08, 0);
+            gr_render_kick(cid);
+            return;
         case PGAIPC_CMD_HDIRECT:
             if (gr_render_op_request(cid, cmd, len)) {
                 return;

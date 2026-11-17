@@ -338,6 +338,11 @@ send it; dev/tools/vnc_tap.py now does).
 Result p68D: a VNC click on App Center opens com.bluestacks.gamecenter/AppCenterActivity
 (dev/shots/phase68_after_tap.png).
 
+- Keyboard: VNC keys -> QEMU PS/2 keyboard -> guest "AT Translated Set 2 keyboard" -> Android
+  (InputDispatcher RecentQueue shows the KeyEvents; dev/tools/vnc_type.py). getevent prints
+  nothing from adb shell here (no access), so use `dumpsys input` to verify input.
+- Networking works: App Center's Store loads its online catalogue (phase68_typed.png).
+
 ## 11. Next
 
 - Make the good path the default: PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0, pristine initramfs.

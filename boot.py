@@ -12,7 +12,9 @@ log can never be overwritten by the next boot.
 Disks: images live in assets\\Pie64 (tools\\prepare_assets.py; --images for others).
 By default BOTH drives use snapshot=on
 (writes go to a temp overlay, the image files stay byte-identical), so every
-boot starts from the same disk state. --persist writes through (back up first!).
+boot starts from the same disk state. --persist keeps /data across boots of the same run name:
+the data template is copied once to runs/<name>/Data.<ext> (the shared assets are never
+written; Root.vhd always stays snapshot=on).
 """
 import argparse
 import os
@@ -57,7 +59,9 @@ def main():
                     help="VNC display N (127.0.0.1:590N) showing the renderer console")
     ap.add_argument("--audio", default="dsound", choices=["dsound", "wav", "none"],
                     help="bstaudio backend: host speakers, runs/<name>/audio.wav, or silent")
-    ap.add_argument("--persist", action="store_true")
+    ap.add_argument("--persist", action="store_true",
+                    help="private writable /data copy in the run dir (reused with --reuse)")
+    ap.add_argument("--reuse", action="store_true", help="allow an existing run folder")
     ap.add_argument("--smp", type=int, default=4)
     ap.add_argument("--res", default="1600x900", help="guest display WxH (renderer framebuffer + props)")
     ap.add_argument("--accel", default="whpx,hyperv=off",
@@ -79,13 +83,19 @@ def main():
     images = os.path.abspath(a.images)
 
     run = os.path.join(DEV, "runs", a.name)
-    if os.path.exists(run):
-        sys.exit("run folder exists: %s (pick a new name)" % run)
+    if os.path.exists(run) and not a.reuse:
+        sys.exit("run folder exists: %s (pick a new name, or --reuse)" % run)
     exe = EXES[a.exe]
     for p in (exe, os.path.join(images, a.root)) + (() if a.data == "none" else (os.path.join(images, a.data),)):
         if not os.path.exists(p):
             sys.exit("missing: %s" % p)
-    os.makedirs(run)
+    os.makedirs(run, exist_ok=True)
+    data_path = os.path.join(images, a.data)
+    if a.persist and a.data != "none":
+        data_path = os.path.join(run, "Data" + os.path.splitext(a.data)[1])
+        if not os.path.exists(data_path):
+            import shutil
+            shutil.copy2(os.path.join(images, a.data), data_path)
 
     subprocess.run(["taskkill", "/f", "/im", "qemu-system-x86_64.exe"],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -134,7 +144,7 @@ def main():
         "-initrd", os.path.join(images, a.initrd),
         "-append", APPEND + ("" if a.console_verbose else QUIET) + (" " + a.append if a.append else ""),
     ] + disk_args(os.path.join(images, a.root),
-                  None if a.data == "none" else os.path.join(images, a.data), fmt(a.data), not a.persist, not a.persist, fmt(a.root)) + [
+                  None if a.data == "none" else data_path, fmt(a.data), True, not a.persist, fmt(a.root)) + [
         "-nic", "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:25556-10.0.2.15:5555",
         "-device", vmsg,
         "-device", "bstpgaipc,id=bstpgaipc0,gr=on,addr=0x05" + pgaipc_opts(os.path.join(images, "kernel.bin")),

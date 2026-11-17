@@ -128,6 +128,7 @@ typedef struct BstVmsgState {
     GString *props_text;
     unsigned reqlog;
     bool gcal_parked_logged;
+    bool devmode_logged;
 } BstVmsgState;
 
 /* identity/config text bstconf serves (REA_BSTCONF.md 6). No spaces around
@@ -217,6 +218,19 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
          * answer was whatever byte 0 held from an earlier reply, so launches
          * from the launcher broke once hcal 7 wrote 0 there (Phase 77). */
         stl_le_p(out + 0, 1);
+    } else if (method == 68) {
+        /* Phase-83: Android 13's BlueStacks su ("isDeveloperMode") asks the
+         * host over /dev/bstvmsg before granting root (no payload, bufLen 0;
+         * first u32 of the out window, non-zero = developer mode / root on).
+         * Unanswered, out+0 held a stale 0 and su silently refused. Follow
+         * the instance's bst.enable_root_access prop like the older images'
+         * su does (off for Magisk-rooted instances). */
+        bool root = strstr(s->props_text->str, "bst.enable_root_access=1") != NULL;
+        if (!s->devmode_logged) {
+            s->devmode_logged = true;
+            fprintf(stderr, "[bstvmsg] hcal 68 isDeveloperMode -> %d\n", root);
+        }
+        stl_le_p(out + 0, root ? 1 : 0);
     } else if (method == 7) {
         /* Phase-77: hcallOnOrientationChangedRpc: [7][0xc][rotation 0..3]
          * (the generic "bufLen" slot carries the rotation). Reply: u32 0

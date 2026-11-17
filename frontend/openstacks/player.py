@@ -477,6 +477,108 @@ class PlayerPane(QWidget):
         th.start()
         self._adb_threads.append(th)
 
+    # -- root (Magisk) ------------------------------------------------------------------
+    def root(self) -> None:
+        """Install Magisk (Kitsune) on this instance, or remove it. Restarts the instance."""
+        from . import magisk
+        if getattr(self, "_root_busy", False):
+            self.flash("root: already working on it...")
+            return
+        if not qemu_engine.is_running(self.inst):
+            self.flash("root: start the instance first")
+            return
+        name = self.inst.name
+        if self.inst.magisk:
+            if QMessageBox.question(
+                    self, "Remove Magisk",
+                    f"Remove Magisk from {name}?\n\nThe Magisk app, modules and root grants "
+                    "are deleted and the instance restarts.") != QMessageBox.Yes:
+                return
+            self._run_root(lambda log: magisk.uninstall(self.adb, log), rooted=False)
+            return
+
+        apk = magisk.cached_apk()
+        if apk is None:
+            QMessageBox.information(
+                self, "Magisk APK needed",
+                "Pick a Kitsune Magisk APK (e.g. Magisk-27.2-kitsune-4.apk). Kitsune has no "
+                "public releases any more, so it is not downloaded automatically. It is "
+                "copied to deps/magisk/ and reused for other instances.")
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Kitsune Magisk APK", str(Path.home() / "Desktop"),
+                "APK files (*.apk)")
+            if not path:
+                return
+            try:
+                apk = magisk.import_apk(Path(path))
+            except ValueError as e:
+                QMessageBox.warning(self, "Not a usable Magisk APK", str(e))
+                return
+        if QMessageBox.question(
+                self, "Root with Magisk",
+                f"Root {name} with {apk.name}?\n\n"
+                "Magisk is started from OpenStacks' boot ramdisk (the shared system image "
+                "is not modified) and the Magisk app is installed; apps then ask for root "
+                "through Magisk. adb shell keeps root. The instance restarts once.\n\n"
+                "Remove it again with the same button.") != QMessageBox.Yes:
+            return
+        self._run_root(lambda log: magisk.install(self.adb, apk, log), rooted=True)
+
+    def _run_root(self, job, rooted: bool) -> None:
+        self._root_busy = True
+        th = _CallThread(None, self)
+
+        def work():
+            job(th.progress.emit)
+            th.progress.emit("syncing and restarting...")
+            try:
+                self.adb.shell("sync", timeout=30)
+            except AdbError:
+                pass
+            return "ok"
+        th._fn = work
+        th.progress.connect(lambda s: self.flash(f"root: {s}"))
+        th.done.connect(lambda _: self._root_restart(rooted))
+        th.failed.connect(self._root_failed)
+        th.start()
+        self._adb_threads.append(th)
+
+    def _root_failed(self, err: str) -> None:
+        self._root_busy = False
+        QMessageBox.warning(self, "Root", f"{self.inst.name}: {err}")
+        self.flash(f"root failed: {err}")
+
+    def _root_restart(self, rooted: bool) -> None:
+        self.inst.magisk = rooted               # props: BlueStacks su off when rooted
+        self.store.update(self.inst)
+        self._root_busy = False
+        win = self.window()
+        if hasattr(win, "restart_instance"):
+            win.restart_instance(self.inst, after_boot=self._root_after_boot if rooted
+                                 else lambda pane: pane.flash("Magisk removed"))
+
+    @staticmethod
+    def _root_after_boot(pane: "PlayerPane") -> None:
+        from . import magisk
+        th = _CallThread(None, pane)
+
+        def work():
+            pane.adb._connected = False
+            if not pane.adb.wait_boot(timeout=600):
+                raise AdbError("the instance did not finish booting")
+            time.sleep(3)                    # magiskd boot-complete hook
+            return magisk.finish(pane.adb, th.progress.emit)
+        th._fn = work
+        th.progress.connect(lambda s: pane.flash(f"root: {s}"))
+        th.done.connect(lambda v: (pane.flash(f"rooted: Magisk {v}"),
+                                   QMessageBox.information(
+                                       pane, "Rooted", f"{pane.inst.name} is rooted "
+                                       f"(Magisk {v}). Open the Magisk app to manage root "
+                                       "access and modules.")))
+        th.failed.connect(pane._root_failed)
+        th.start()
+        pane._adb_threads.append(th)
+
     def flash(self, text: str) -> None:
         self.statusChanged.emit(text)
         QTimer.singleShot(4000, self._emit_status)   # fade back to standard text
@@ -486,6 +588,7 @@ class _CallThread(QThread):
     """One-off async helper running blocking adb work off the GUI thread."""
     done = Signal(str)
     failed = Signal(str)
+    progress = Signal(str)
 
     def __init__(self, fn, parent=None):
         super().__init__(parent)
@@ -542,6 +645,7 @@ class PlayerWindow(QMainWindow):
         ("install_apk", "install_apk", "Install APK", "Ctrl+I"),
         ("files", "files", "Files: move files in and out of the VM "
          "(or drop files on the window)", "Ctrl+Shift+F"),
+        ("root", "root", "Root this instance with Magisk / remove Magisk", ""),
         ("pop_screen", "pop_screen", "Pop the screen out into its own window / bring it back",
          "Ctrl+Shift+P"),
         ("keymap", "keymap", "Game controls / key mapping (coming soon)", ""),
@@ -660,6 +764,35 @@ class PlayerWindow(QMainWindow):
                 th.start()
                 self._bg_threads.append(th)
         self.tabs.removeTab(idx)
+
+    def restart_instance(self, inst: Instance, after_boot=None) -> None:
+        """Stop QEMU, start it again with fresh props, reopen the tab; after_boot(pane)
+        runs once the new pane exists (it should wait for the guest itself)."""
+        for i in range(self.tabs.count()):
+            w = self.tabs.widget(i)
+            if isinstance(w, PlayerPane) and w.inst.name == inst.name:
+                w.shutdown()
+                self.tabs.removeTab(i)
+                break
+        self.statusBar().showMessage(f"restarting {inst.name}...")
+
+        def job():
+            qemu_engine.shutdown(inst, timeout=10)
+            res = qemu_engine.start(inst, self.store.global_settings)
+            if not res.ok:
+                raise RuntimeError(res.error or "; ".join(res.warnings) or "start failed")
+            return "ok"
+        th = _CallThread(job, self)
+
+        def started(_):
+            pane = self.open_instance(inst)
+            if after_boot:
+                after_boot(pane)
+        th.done.connect(started)
+        th.failed.connect(lambda e: QMessageBox.critical(self, "Restart failed",
+                                                         f"{inst.name}: {e}"))
+        th.start()
+        self._bg_threads.append(th)
 
     # -- manager-facing API -------------------------------------------------------------
     def open_instance(self, inst: Instance) -> PlayerPane:

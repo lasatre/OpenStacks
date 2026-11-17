@@ -281,6 +281,9 @@ class QemuEngine:
               "ram": inst.ram_mb, "status.adb_port": inst.adb_port}
         if inst.android_id:
             ov["android_id"] = inst.android_id
+        if inst.magisk:
+            # Magisk root: BlueStacks' own setuid su must not hand out silent root
+            ov["enable_root_access"] = "0"
         path = self.serial_log_path(inst).with_name(f"{inst.name}.bst.props")
         path.parent.mkdir(parents=True, exist_ok=True)
         ov.setdefault("instance", inst.image)

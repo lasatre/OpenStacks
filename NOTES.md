@@ -712,6 +712,43 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
 - Not done: a true shared folder (the image ships vboxsf.ko and our vmmdev already answers
   SHFL_FN_QUERY_FEATURES; a full VBoxSharedFolders HGCM service would allow a live mount).
 
+## 10t. Phase 83: one-click Magisk root (Kitsune, "system mode" from the ramdisk)
+
+- Kitsune's own system-mode install (app res/raw/manager.sh `direct_install_system`) copies
+  magisk32/64, magiskpolicy, magiskinit and stub.apk to /system/etc/init/magisk and adds an
+  .rc: `magiskpolicy --live --magisk`, `magiskNN --auto-selinux --setup-sbin <dir> /sbin`,
+  then `/sbin/magisk --post-fs-data / --service / --boot-complete / --zygote-restart`. Our
+  Root.vhd is a shared snapshot, so `patches/all/20_magisk.py` does the same from stage2 on
+  every boot, but only when the instance's /data has `/data/adb/.ost_magisk`. It copies
+  /data/adb/magisk/* to rootfs /ost_magisk, writes /init.ost_magisk.rc and imports it once:
+  - Android <= 9 runs rootfs /init.rc, so the import goes there.
+  - Android 10+ runs /system/etc/init/hw/init.rc, so the import goes into the first rootfs
+    file that one imports (/init.environ.rc).
+- SELinux is disabled on Pie/Rvc/Tiramisu, so the hook writes `exec -` with no seclabel;
+  Nougat has SELinux and gets u:r:su:s0. The hook also binds a copy of /system/xbin without
+  BlueStacks' su over /system/xbin, because otherwise Magisk reports "Abnormal State";
+  xbin/bstk/su stays for BlueStacks' own use.
+- Host (`frontend/openstacks/magisk.py`, player rail "Root" button):
+  - Install: pushes the guest-ABI binaries plus scripts into /data/adb/magisk (via
+    BlueStacks' su) and installs the app. It also writes /data/adb/service.d/ost_adb_root.sh,
+    which re-grants uid 2000 every boot. Magisk's db read fails early in boot here
+    ("sqlite3_exec: disk I/O error"); the shell's first su then times out and the manager
+    stores DENY forever.
+  - Then it sets instance `magisk=true`, which makes the props say `bst.enable_root_access=0`
+    so BlueStacks' su gives nobody silent root, restarts, and checks `magisk -v` plus adb
+    `su`. The same button removes Magisk (flag, bin dir, db, modules, app, then a restart).
+- Android 13's BlueStacks su (40 KB, a signed whitelist in /data/downloads/.swl) asks the
+  host "isDeveloperMode" with hcal 68 (no payload). We never answered it (stale 0), so su
+  silently refused. bst_vmsg now answers 1/0 from the instance's bst.enable_root_access.
+- The Kitsune repo has no releases any more: the APK is user-supplied once and cached in
+  dev/deps/magisk/ (validated: x86/x86_64 libs and scripts present).
+- Verified on all five images (Nougat32 uses magisk32; Pie64, Rvc64 and Tiramisu64 through
+  the player code): Magisk v27.2-kitsune-4 runs, the app shows no warnings, adb `su` is root,
+  and an app's su request gets Magisk's Superuser prompt. Removal on Rvc64 brought BlueStacks'
+  su back and removed the app.
+- boot.py `--persist` now copies the data template into the run dir (it used to write
+  assets/<Image>/Data_template.vhdx in place); `--reuse` reboots the same run.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

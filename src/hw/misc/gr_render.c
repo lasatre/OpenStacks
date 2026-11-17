@@ -2274,7 +2274,23 @@ static bool bmp_write(const char *path, const uint8_t *bg, int w, int h)
     FILE *f = fopen(path, "wb");
     if (!f) return false;
     fwrite(hdr, 1, sizeof(hdr), f);
-    fwrite(bg, 1, (size_t)w * h * 4, f);
+    /* Phase-66: the DLL's frame buffer is RGBA; BMP pixels are BGRA. */
+    {
+        static uint8_t *row;
+        static size_t rowCap;
+        size_t rb = (size_t)w * 4;
+        if (rowCap < rb) { free(row); row = (uint8_t *)malloc(rb); rowCap = row ? rb : 0; }
+        for (int y = 0; y < h && row; y++) {
+            const uint8_t *src = bg + (size_t)y * rb;
+            for (int x = 0; x < w; x++) {
+                row[x * 4 + 0] = src[x * 4 + 2];
+                row[x * 4 + 1] = src[x * 4 + 1];
+                row[x * 4 + 2] = src[x * 4 + 0];
+                row[x * 4 + 3] = src[x * 4 + 3];
+            }
+            fwrite(row, 1, rb, f);
+        }
+    }
     fclose(f);
     return true;
 }

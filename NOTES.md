@@ -274,6 +274,16 @@ All legacy shims stay intact for GR_PURE=0.
    keep in mind if GPU issues appear.
 5. Result p65G_cq: boot_completed=1, the BlueStacks home screen renders.
 
+## 10b. Phase 66: pristine Root.vhd boots too; colour fix
+
+- p66A_rootpristine: --root Root.vhd (pristine, no libEGL patches) + the Phase-65 defaults
+  gives boot_completed=1, launcher HomeActivity focused, 23 GL clients, no panic. The p50
+  image patches are no longer needed.
+- Colour: the DLL frame buffer is RGBA, but bmp_write dumped it as BMP (BGRA), so captures
+  looked dark red. The real BlueStacks background is dark blue. bmp_write now converts;
+  dev/tools/shot.py makes PNGs (--rgba for older captures). Screens:
+  dev/shots/phase66_home_pristine_root.png (correct colours).
+
 ## 11. Next
 
 - Make the good path the default: PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0, pristine initramfs.

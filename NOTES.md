@@ -343,12 +343,19 @@ Result p68D: a VNC click on App Center opens com.bluestacks.gamecenter/AppCenter
   nothing from adb shell here (no access), so use `dumpsys input` to verify input.
 - Networking works: App Center's Store loads its online catalogue (phase68_typed.png).
 
+## 10f. Front-end launch verified (openstacks.qemu_engine, no GUI)
+
+Starting instance Pie64 through QemuEngine.start boots to the home screen; a VNC frame on
+5901 = dev/shots/phase68_frontend_boot.png. Front-end fixes (outside git): qemu_bios_dir in
+instances.conf pointed at the old machine; `-vnc 127.0.0.1::PORT` was never valid (the old
+build had no VNC), it is now `127.0.0.1:(PORT-5900)`; Root.vhd is attached with snapshot=on
+so the pristine image is never modified (user data lives on Data_ost1.qcow2).
+
 ## 11. Next
 
 - Make the good path the default: PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0, pristine initramfs.
 - Try the pristine Root.vhd (no libEGL patches). The p50 markers should be unnecessary now.
-- Display + input: present frames live (VNC / the openstacks front-end) instead of 2 s BMP
-  dumps; the input path (bstinput via bstvmsg) is untested.
+- DONE: live display (VNC console), touch (bstinput), keyboard (PS/2), front-end launch.
 - bstaudio (stub), big-slot (BAR2) clients, and Linux portability (gfxstream).
 
 ## Pitfalls (new)

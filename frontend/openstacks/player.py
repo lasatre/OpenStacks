@@ -503,11 +503,7 @@ class PlayerWindow(QMainWindow):
         rail = QWidget(self)
         rail.setObjectName("sideRail")
         rail.setFixedWidth(46)
-        rail.setStyleSheet(
-            "#sideRail { background: #1b1f26; border-left: 1px solid #2a2f38; }"
-            "#sideRail QToolButton { border: none; border-radius: 6px; padding: 0; }"
-            "#sideRail QToolButton:hover { background: #2c323c; }"
-            "#sideRail QToolButton:pressed { background: #3a414d; }")
+        # native look: the window background + the style's flat tool buttons
         col = QVBoxLayout(rail)
         col.setContentsMargins(4, 8, 4, 8)
         col.setSpacing(4)
@@ -527,6 +523,7 @@ class PlayerWindow(QMainWindow):
             b.setIconSize(QSize(22, 22))
             b.setFixedSize(38, 38)
             b.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            b.setAutoRaise(True)
             col.addWidget(b, 0, Qt.AlignHCenter)
             self._rail_buttons[method] = b
             return b

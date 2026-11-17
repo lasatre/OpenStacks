@@ -72,8 +72,13 @@ def _draw(name: str, p: QPainter) -> None:
 
 
 def icon(name: str) -> QIcon:
+    """Stroke in the theme's text colour so the icons match the rest of the UI."""
+    from PySide6.QtGui import QGuiApplication, QPalette
+    pal = QGuiApplication.palette()
+    normal = pal.color(QPalette.Active, QPalette.WindowText)
+    disabled = pal.color(QPalette.Disabled, QPalette.WindowText)
     ic = QIcon()
-    for mode, color in ((QIcon.Normal, STROKE), (QIcon.Disabled, STROKE_DISABLED)):
+    for mode, color in ((QIcon.Normal, normal), (QIcon.Disabled, disabled)):
         for scale in (1, 2, 3):
             pm = QPixmap(24 * scale, 24 * scale)
             pm.setDevicePixelRatio(scale)

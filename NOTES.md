@@ -590,6 +590,15 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
 - Front-end refuses to start an instance whose ports are busy (another QEMU), and reports
   QEMU's own error if it exits within 1.5 s.
 
+- REGRESSION fixed: hcal 24 = hcallIsAppLaunchAllowedRpc (launcher asks before starting an
+  app; [24][msglen][strlen+1][pkg][u8]); the guest reads the FIRST BYTE of the out window,
+  non-zero = allowed. We never answered it; byte 0 held "b" (from the GetProps text), so it
+  "worked" by accident until the hcal 7 handler wrote 0 at out+0 -> every launcher launch was
+  refused after the first rotation. Now answered explicitly (out+0 = 1). Lesson: hcal replies
+  share one out window; unhandled calls read stale bytes. (Method ids = the order of the
+  hcall*Rpc functions in libhostcall_jni: 1 GetProps ... 22 SetAppConfigDbParams,
+  23 GoogleAccountListUpdated, 24 IsAppLaunchAllowed, ...)
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

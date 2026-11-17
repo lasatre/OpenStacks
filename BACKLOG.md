@@ -32,8 +32,10 @@ NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
 - **Microphone capture** - bstaudio capture delivers silence [10g].
 - **gcal host->guest calls** - the channel is parked; nothing sends BlueStacks host commands
   (open URL, install from host, etc.) [10n].
-- **Unknown hcal methods** are rejected (3, 5, 6, 8, 10, 22, 44, 62...): app-install sync,
-  activity/top-app notifications, ... Some may matter (e.g. orientation) [10j].
+- **Unknown hcal methods** are rejected (3, 5, 6, 8, 10, 22, 44, 62...). They all share one
+  reply window, so a call that reads its answer from a different spot than our reject path
+  writes sees stale bytes (that is how IsAppLaunchAllowed broke). Audit each hcall*Rpc reply
+  format in libhostcall_jni and answer them explicitly [10o].
 - **Google sign-in seeding** - Chrome / Play Store / GMS updates over adb need a com.google
   account (BlueStacks rule) [10h].
 - **bst.version 5.22+ rules** - .config.db has per-app tweaks gated on prodversion_gte 5.22;

@@ -209,7 +209,14 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
             buf_len, ldl_le_p(in + 0x0c), ldl_le_p(in + 0x10));
     }
 
-    if (method == 7) {
+    if (method == 24) {
+        /* hcallIsAppLaunchAllowedRpc (libhostcall_jni 0x15ea0): request
+         * [24][msglen][strlen+1][package\0][u8 flag]; the guest reads the
+         * FIRST BYTE of the out window, non-zero = allowed. Unhandled, the
+         * answer was whatever byte 0 held from an earlier reply, so launches
+         * from the launcher broke once hcal 7 wrote 0 there (Phase 77). */
+        stl_le_p(out + 0, 1);
+    } else if (method == 7) {
         /* Phase-77: hcallOnOrientationChangedRpc: [7][0xc][rotation 0..3]
          * (the generic "bufLen" slot carries the rotation). Reply: u32 0
          * at out+0 (the guest reads the first u32 of the out window).  */

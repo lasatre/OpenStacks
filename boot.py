@@ -26,8 +26,10 @@ EXES = {
     "dev": os.path.join(DEV, "build", "qemu-system-x86_64.exe"),
     "p59": os.path.join(PROJ, "qemu_bst", "build", "qemu-system-x86_64.exe"),
 }
+# Phase 65 defaults = the working path (dev/NOTES.md "Current best configuration").
+# Override any of them with --env K=V (e.g. --env GR_PURE=0 for the legacy lane).
 BASE_ENV = {"GR_BRIDGE": "1", "GR_SYN_MODE": "1", "GR_RENDERER_MODE": "1",
-            "GR_HPP": "1", "GR_RCVER": "3"}   # GR_RCVER MUST stay 3
+            "GR_HPP": "0", "GR_RCVER": "3", "GR_PURE": "1", "PGA_SLOTSHIFT": "1"}
 APPEND = ("earlyprintk=serial,keep idle=nomwait vmalloc=160M nosmap nosmep "
           "bstandroid=pie64 nokaslr console=ttyS0 BST_ANDROID_ID=bfd0e87474aa4028")
 
@@ -35,9 +37,9 @@ APPEND = ("earlyprintk=serial,keep idle=nomwait vmalloc=160M nosmap nosmep "
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("name")
-    ap.add_argument("--root", default="Root_p54.vhd")
+    ap.add_argument("--root", default="Root_p50.vhd")
     ap.add_argument("--data", default="Data_fresh.qcow2")
-    ap.add_argument("--initrd", default="initramfs_full.bin")
+    ap.add_argument("--initrd", default="initramfs_full_p49bak.bin")  # pristine .ko
     ap.add_argument("--persist", action="store_true")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")

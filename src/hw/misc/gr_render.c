@@ -276,6 +276,18 @@ typedef struct GrSock {
     char     nameCopy[0x100];  /* Phase-27 cached guest name post        */
     uint8_t  recv[0x40000];
     int32_t  recvLen;
+    /* --- Phase-64 GR_PURE lane state (dev/NOTES.md §9) --- */
+    bool     pWritePending;    /* guest WRITE not yet acked               */
+    uint32_t pWriteLen;
+    bool     pReadPending;     /* guest READ waiting for the DLL's send   */
+    uint32_t pReadWant;
+    uint8_t *pRbuf;            /* private reply buffer (hstAlloc)         */
+    uint32_t pWpos;
+    uint8_t *pCarry;           /* chunk-spanning record assembly          */
+    uint32_t pCarryCap, pCarryLen, pCarryPos;
+    uint8_t *pOut;             /* copy-out for chunk-tail reads           */
+    uint32_t pOutCap;
+    uint32_t pWrites, pReads, pSends, pAcks, pSpans;
 } GrSock;
 
 typedef struct GrState {
@@ -421,8 +433,11 @@ static void syn_producer_thread(void *obj, unsigned long long a2,
 /* exe HPP staging buffer (NegotiatePipeType mallocs 0x80000 here)     */
 #define S_STAGE(s)     (*(void         **)((s)->raw + 0x18))
 
+static void pure_reset(GrSock *s);   /* Phase-64 GR_PURE lane */
+
 static void sock_prepare(GrSock *s, uint32_t cid)
 {
+    pure_reset(s);
     if (s->wrapper != NULL) {
         /* RECONNECT on a live sock (exe refcounts it at +0x208): only
          * reset the ring cursors and the disconnect flag; the SRWLock
@@ -1074,6 +1089,364 @@ static void vt_table_init(void)
     g_vt[13] = (void *)vt_stub_i;        /* vt+0x68                   */
     g_vt[14] = (void *)vt_stub_b;
     g_vt[15] = (void *)vt_stub_i;
+}
+
+/* ================================================================= */
+/* Phase-64 GR_PURE: a faithful HstSocketHost lane (dev/NOTES.md §9). */
+/* Guest contract (libOpenglSystemCommon HstStream decode, NOTES §7):  */
+/*   WRITE(len): records at guest window [0..len); READ(want): the     */
+/*   guest copies `want` bytes from window+0, mbox ret = bytes served   */
+/*   (> want allowed: the guest keeps the excess for its next read).   */
+/* The DLL reads the guest's bytes in place and stages replies in a    */
+/* private buffer; hstSend publishes them when the guest READ arrives. */
+/* No synthetic replies, translation, prefill or reserves.            */
+
+#define PURE_RBUF_CAP  (8u << 20)
+
+static int gr_pure(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        char buf[8] = {0};
+        DWORD n = GetEnvironmentVariableA("GR_PURE", buf, sizeof(buf));
+        cached = (n > 0 && buf[0] == '1') ? 1 : 0;
+        gr_log("GR_PURE=%d", cached);
+    }
+    return cached;
+}
+
+static void pure_reset(GrSock *s)
+{
+    s->pWritePending = false;
+    s->pWriteLen = 0;
+    s->pReadPending = false;
+    s->pReadWant = 0;
+    s->pWpos = 0;
+    s->pCarryLen = s->pCarryPos = 0;
+}
+
+static bool pure_ensure(uint8_t **buf, uint32_t *cap, uint32_t need)
+{
+    if (*cap >= need && *buf) return true;
+    uint32_t nc = *cap ? *cap : 0x100000;
+    while (nc < need) nc *= 2;
+    uint8_t *nb = (uint8_t *)realloc(*buf, nc);
+    if (!nb) return false;
+    *buf = nb;
+    *cap = nc;
+    return true;
+}
+
+/* caller holds S_LOCK */
+static void pure_ack_write_locked(GrSock *s)
+{
+    if (!s->pWritePending) return;
+    uint8_t *mb = GR_MBOX(s->cid);
+    s->pWritePending = false;
+    if (mb) mbox_set(mb, (int32_t)s->pWriteLen, 0);
+    s->pAcks++;
+    GR_DONE(s->cid);
+}
+
+static void hexn(char *o, const uint8_t *p, unsigned n)
+{
+    unsigned i, k = 0;
+    for (i = 0; i < n; i++) k += sprintf(o + k, "%02x ", p[i]);
+    o[k] = 0;
+}
+
+/* Return a pointer to n contiguous stream bytes (carry first, then the
+ * guest window), blocking for the guest's next WRITE chunk if needed.
+ * advance: consume them. Reads that end a chunk are copied out before
+ * the WRITE ack, because the guest may reuse its window right away.
+ * timeoutMs < 0 = wait until disconnect. NULL = disconnect/timeout.  */
+static uint8_t *pure_take(GrSock *s, uint32_t n, bool advance,
+                          int64_t timeoutMs)
+{
+    uint8_t *win = GR_WIN(s->cid);
+    int64_t waited = 0;
+    static unsigned dbg;
+    if (!win || n == 0) return NULL;
+    if (dbg < 300) {
+        dbg++;
+        gr_log("ptake cid=%u n=%u adv=%d rpos=%u wcnt=%u carry=%u to=%lld",
+               s->cid, n, advance, S_RPOS(s), S_WCNT(s),
+               s->pCarryLen - s->pCarryPos, (long long)timeoutMs);
+    }
+    S_LOCK(s);
+    for (;;) {
+        uint32_t cav = s->pCarryLen - s->pCarryPos;
+        uint32_t wav = S_WCNT(s) > S_RPOS(s) ? S_WCNT(s) - S_RPOS(s) : 0;
+        if (cav == 0 && wav >= n) {
+            uint8_t *p = win + S_RPOS(s);
+            if (advance) {
+                if (wav == n) {
+                    if (!pure_ensure(&s->pOut, &s->pOutCap, n)) break;
+                    memcpy(s->pOut, p, n);
+                    p = s->pOut;
+                    S_RPOS(s) = S_WCNT(s);
+                    pure_ack_write_locked(s);
+                } else {
+                    S_RPOS(s) += n;
+                }
+            }
+            S_UNLOCK(s);
+            return p;
+        }
+        if (cav >= n) {
+            uint8_t *p = s->pCarry + s->pCarryPos;
+            if (advance) {
+                if (!pure_ensure(&s->pOut, &s->pOutCap, n)) break;
+                memcpy(s->pOut, p, n);
+                p = s->pOut;
+                s->pCarryPos += n;
+                if (s->pCarryPos == s->pCarryLen) {
+                    s->pCarryPos = s->pCarryLen = 0;
+                }
+            }
+            S_UNLOCK(s);
+            return p;
+        }
+        if (wav) {                       /* spanning: pull the chunk into carry */
+            if (s->pCarryPos) {
+                memmove(s->pCarry, s->pCarry + s->pCarryPos, cav);
+                s->pCarryLen = cav;
+                s->pCarryPos = 0;
+            }
+            if (!pure_ensure(&s->pCarry, &s->pCarryCap, cav + wav)) break;
+            memcpy(s->pCarry + s->pCarryLen, win + S_RPOS(s), wav);
+            s->pCarryLen += wav;
+            S_RPOS(s) = S_WCNT(s);
+            s->pSpans++;
+            continue;
+        }
+        pure_ack_write_locked(s);        /* chunk drained: let the next come */
+        if (S_DISC(s)) break;
+        if (timeoutMs >= 0 && waited >= timeoutMs) break;
+        S_UNLOCK(s);
+        Sleep(1);
+        waited++;
+        S_LOCK(s);
+    }
+    S_UNLOCK(s);
+    return NULL;
+}
+
+static int pure_flush(GrSock *s);
+
+/* DLL RenderThread::main (0x18012b64c..849) calls peek(this, needed, &out)
+ * with NO timeout argument (r9 is stale); ANY non-zero return ends the
+ * render thread. HD-Player's hstPeekTimed (0x1402abde0) first flushes the
+ * pending reply (0x1402aabc0), then waits for data. So: flush, then block. */
+static int pvt_peek4(void *w, uint32_t needed, void **out, int64_t timeout)
+{
+    GrWrapper *ww = (GrWrapper *)w;
+    GrSock *s = ww ? ww->sock : NULL;
+    (void)timeout;
+    if (!s) return 0x68;
+    if (pure_flush(s) != 0) return 0x68;
+    uint8_t *p = pure_take(s, needed ? needed : 1, false, -1);
+    if (!p) return 0x68;                 /* only on disconnect */
+    if (out) *out = p;
+    return 0;
+}
+
+static int pvt_peek3(void *w, uint32_t needed, void **out)
+{
+    return pvt_peek4(w, needed, out, -1);
+}
+
+static int pvt_recv(void *w, int32_t len, void **out)
+{
+    GrWrapper *ww = (GrWrapper *)w;
+    GrSock *s = ww ? ww->sock : NULL;
+    if (!s) return -1;
+    uint8_t *p = pure_take(s, len <= 0 ? 1 : (uint32_t)len, true, -1);
+    if (out) *out = p;
+    return p ? 0 : 0x68;                 /* only fails on disconnect */
+}
+
+static int pvt_recvcopy(void *w, void *dst, int len)
+{
+    GrWrapper *ww = (GrWrapper *)w;
+    GrSock *s = ww ? ww->sock : NULL;
+    if (!s || !dst || len <= 0) return -1;
+    uint8_t *p = pure_take(s, (uint32_t)len, true, -1);
+    if (!p) return 0x68;                 /* only fails on disconnect */
+    memcpy(dst, p, (size_t)len);
+    return 0;
+}
+
+static void *pvt_alloc(void *w, uint32_t len)
+{
+    GrWrapper *ww = (GrWrapper *)w;
+    GrSock *s = ww ? ww->sock : NULL;
+    if (!s) return NULL;
+    S_LOCK(s);
+    if (!s->pRbuf) s->pRbuf = (uint8_t *)calloc(1, PURE_RBUF_CAP);
+    if (!s->pRbuf || s->pWpos + len > PURE_RBUF_CAP) {
+        S_UNLOCK(s);
+        gr_log("pure alloc FAIL cid=%u len=%u wpos=%u", s->cid, len, s->pWpos);
+        return NULL;
+    }
+    uint8_t *p = s->pRbuf + s->pWpos;
+    s->pWpos += len;
+    S_UNLOCK(s);
+    gr_log("palloc cid=%u len=%u -> wpos=%u", s->cid, len, s->pWpos);
+    return p;
+}
+
+static int pvt_alloccopy(void *w, void *src, int len)
+{
+    if (len <= 0 || !src) return -1;
+    void *dst = pvt_alloc(w, (uint32_t)len);
+    if (!dst) return -1;
+    memcpy(dst, src, (size_t)len);
+    return 0;
+}
+
+static int pvt_send(void *w)
+{
+    GrWrapper *ww = (GrWrapper *)w;
+    GrSock *s = ww ? ww->sock : NULL;
+    if (!s) return 0x68;
+    return pure_flush(s);
+}
+
+/* Deliver the staged reply (HD-Player flush 0x1402aabc0): ack the current
+ * guest WRITE, wait for its READ, copy the reply to window+0, ret = bytes. */
+static int pure_flush(GrSock *s)
+{
+    S_LOCK(s);
+    uint32_t total = s->pWpos, pos = 0;
+    if (total == 0) {                    /* nothing staged: no guest-visible event */
+        S_UNLOCK(s);
+        return 0;
+    }
+    pure_ack_write_locked(s);
+    uint8_t *win = GR_WIN(s->cid);
+    uint32_t wsz = (uint32_t)GR_WSZ(s->cid);
+    /* HD-Player flush (0x1402aabc0): replies larger than the window go out
+     * in window-sized chunks, one guest READ per chunk.                  */
+    while (pos < total) {
+        unsigned spins = 0;
+        while (!s->pReadPending) {
+            if (S_DISC(s)) {
+                s->pWpos = 0;
+                S_UNLOCK(s);
+                return -1;
+            }
+            S_UNLOCK(s);
+            Sleep(1);
+            if (++spins == 3000) {
+                gr_log("pure send cid=%u waiting >3 s for the guest READ "
+                       "(staged %u B, sent %u)", s->cid, total, pos);
+            }
+            S_LOCK(s);
+        }
+        uint32_t n = total - pos;
+        uint32_t want = s->pReadWant;
+        if (n > wsz) n = wsz;
+        if (win) memcpy(win, s->pRbuf + pos, n);
+        pos += n;
+        s->pReadPending = false;
+        s->pSends++;
+        {
+            uint8_t *mb = GR_MBOX(s->cid);
+            if (mb) mbox_set(mb, (int32_t)n, 0);
+        }
+        S_UNLOCK(s);
+        if (total <= wsz || pos == n || pos == total) {
+            char h[3 * 16 + 4];
+            hexn(h, win ? win : (uint8_t *)"", n < 16 ? n : 16);
+            gr_log("psend cid=%u want=%u served=%u (%u/%u): %s", s->cid, want,
+                   n, pos, total, h);
+        }
+        GR_DONE(s->cid);
+        S_LOCK(s);
+    }
+    s->pWpos = 0;
+    S_UNLOCK(s);
+    return 0;
+}
+
+static int pvt_createfinish(void *w)
+{
+    GrWrapper *ww = (GrWrapper *)w;
+    GrSock *s = ww ? ww->sock : NULL;
+    if (!s) return -1;
+    char *namebuf = (char *)s->raw + 0x30;   /* the exe's [sock+0x30] */
+    memset(namebuf, 0, 0x100);
+    if (pvt_recvcopy(w, namebuf, 0x100) != 0) return -1;
+    namebuf[0xff] = 0;
+    {
+        char proc[0x100] = {0};
+        int pid = 0, tid = 0, a4 = 0, a5 = 0, a6 = 0;
+        int k = sscanf(namebuf, "%255s (pid %d, tid %d) %d %d %d",
+                       proc, &pid, &tid, &a4, &a5, &a6);
+        gr_log("pure createFinish cid=%u '%.60s' parsed=%d hpp=%s", s->cid,
+               namebuf, k, (k == 6 && a6 != 0) ? "REQUESTED(unsupported)" : "no");
+    }
+    return 0;
+}
+
+static void *g_vt_pure[16];
+
+/* logging stubs for the slots the pure lane does not implement */
+#define PSTUB(N) \
+    static int64_t pstub_##N(void *a, int64_t b, int64_t c) \
+    { (void)a; gr_once(0xa0 + N, "pure vt slot %d (+0x%x) called b=%lld c=%lld", \
+                       N, N * 8, (long long)b, (long long)c); return 0; }
+PSTUB(7) PSTUB(8) PSTUB(9) PSTUB(12) PSTUB(13) PSTUB(14) PSTUB(15)
+
+static void vt_pure_table_init(void)
+{
+    memcpy(g_vt_pure, g_vt, sizeof(g_vt_pure));
+    g_vt_pure[7] = (void *)pstub_7;
+    g_vt_pure[8] = (void *)pstub_8;
+    g_vt_pure[9] = (void *)pstub_9;
+    g_vt_pure[12] = (void *)pstub_12;
+    g_vt_pure[13] = (void *)pstub_13;
+    g_vt_pure[14] = (void *)pstub_14;
+    g_vt_pure[15] = (void *)pstub_15;
+    g_vt_pure[0] = (void *)pvt_recv;
+    g_vt_pure[1] = (void *)pvt_peek4;
+    g_vt_pure[2] = (void *)pvt_peek3;
+    g_vt_pure[3] = (void *)pvt_alloccopy;
+    g_vt_pure[4] = (void *)pvt_recvcopy;
+    g_vt_pure[5] = (void *)pvt_send;
+    g_vt_pure[6] = (void *)pvt_alloc;
+    g_vt_pure[10] = (void *)pvt_createfinish;
+}
+
+static void pure_write(GrSock *s, uint8_t *mb, uint32_t len)
+{
+    uint8_t *win = GR_WIN(s->cid);
+    char h[3 * 16 + 4];
+    S_LOCK(s);
+    if (s->pWritePending) {
+        gr_log("pure WRITE cid=%u while previous unacked (rpos=%u wcnt=%u)",
+               s->cid, S_RPOS(s), S_WCNT(s));
+    }
+    S_WCNT(s) = len;
+    S_RPOS(s) = 0;
+    s->pWritePending = true;
+    s->pWriteLen = len;
+    s->pWrites++;
+    S_UNLOCK(s);
+    sock_req_prepare(s, mb);
+    hexn(h, win ? win : (uint8_t *)"", len < 16 ? len : 16);
+    gr_log("pwrite cid=%u len=%u: %s", s->cid, len, h);
+}
+
+static void pure_read(GrSock *s, uint32_t want)
+{
+    S_LOCK(s);
+    s->pReadPending = true;
+    s->pReadWant = want;
+    s->pReads++;
+    S_UNLOCK(s);
+    gr_log("pread cid=%u want=%u", s->cid, want);
 }
 
 static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win);
@@ -1778,6 +2151,21 @@ static HWND gr_make_window(int w, int h)
     return hwnd;
 }
 
+static HANDLE g_uiReady;
+
+static DWORD WINAPI gr_ui_thread(LPVOID arg)
+{
+    MSG m;
+    (void)arg;
+    g.hwnd = gr_make_window(GR_W, GR_H);
+    SetEvent(g_uiReady);
+    while (GetMessageW(&m, NULL, 0, 0) > 0) {
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+    }
+    return 0;
+}
+
 /* [dll+0xb25670] post hook state */
 typedef struct GrPostCtx { uint8_t *buf; unsigned posts; } GrPostCtx;
 static GrPostCtx g_postctx;
@@ -1958,7 +2346,12 @@ static bool gr_init_dll_and_host(void)
     g.table = (uint8_t *)calloc(1, 0xE0);
     if (!g.table) { g.failed = true; return false; }
 
-    g.hwnd = gr_make_window(GR_W, GR_H);
+    /* Phase-64: the render window lives on its own UI thread with a real
+     * message loop. Created on the worker (which never pumps messages),
+     * any SendMessage from the DLL's present/post path would block forever. */
+    g_uiReady = CreateEventW(NULL, TRUE, FALSE, NULL);
+    CloseHandle(CreateThread(NULL, 0, gr_ui_thread, NULL, 0, NULL));
+    WaitForSingleObject(g_uiReady, 10000);
     if (!g.hwnd) {
         gr_log("CreateWindowExW failed err=%lu", (unsigned long)GetLastError());
         g.failed = true;
@@ -1968,6 +2361,7 @@ static bool gr_init_dll_and_host(void)
            mode1 ? 1 : 2);
 
     vt_table_init();
+    vt_pure_table_init();
 
     gr_log("calling grApiInit...");
     int rc = ((grApiInit_t)(void *)gf)(g.table, g.objA, g.objB, g.logPair);
@@ -2040,7 +2434,7 @@ static void worker_dispatch_op(const GrOp *op)
                 mbox_set(mb, 0, 0);
                 break;
             }
-            ((GrWrapper *)s->wrapper)->vtable = g_vt;
+            ((GrWrapper *)s->wrapper)->vtable = gr_pure() ? g_vt_pure : g_vt;
             ((GrWrapper *)s->wrapper)->sock = s;
         }
         PgaHandConn_t hand = (PgaHandConn_t)TAB(0x88);
@@ -2072,6 +2466,10 @@ static void worker_dispatch_op(const GrOp *op)
         mbox_set(mb, 0, 0);
         break;
     case OP_WRITE:
+        if (gr_pure()) {                 /* Phase-64: acked by the DLL's drain */
+            pure_write(s, mb, len);
+            return;
+        }
         sock_req_prepare(s, mb);
         /* Phase-9: DOORBELL-SCOPED framing (the Phase-3/5 shape, now
          * intended): each sf flush chunk is its own exe-visible record
@@ -2473,6 +2871,10 @@ write_done:                            /* Phase-57: dropped-record exit */
         stl_le_p(mb + 0x08, 0);
         break;
     case OP_READ: {
+        if (gr_pure()) {                 /* Phase-64: completed by the DLL's hstSend */
+            pure_read(s, len);
+            return;
+        }
         uint32_t wantLen, pending, served;
         bool batchLane;
         const char *serveSrc = "exe";   /* Phase-42: src of served bytes */

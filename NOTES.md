@@ -191,6 +191,54 @@ on READ. Plan:
 4. Re-test on Root.vhd (pristine, no libEGL patches) once the pure lane works: most image
    patches compensated for garbage replies and should become unnecessary.
 
+## 9. Phase 64: GR_PURE, a faithful HstSocketHost lane (first Android UI)
+
+Code: gr_render.c "Phase-64 GR_PURE" block (pure_* / pvt_*), installed as a separate
+vtable (g_vt_pure) when GR_PURE=1; OP_WRITE/OP_READ branch early into pure_write/pure_read.
+All legacy shims stay intact for GR_PURE=0.
+
+1. Contract (decoded, not guessed):
+   - Guest (libOpenglSystemCommon HstStream, §7.1): WRITE(len) = records at window[0..len);
+     READ(want) copies `want` bytes from window+0; ret = bytes served.
+   - HD-Player hstPeekTimed 0x1402abde0: flush first (0x1402aabc0), then return data if
+     avail >= needed; else ack the current request (0x1402aa750) and wait (0x1402acc90):
+     0 = new request, 0x6e = ETIMEDOUT, 0x68 = disconnect. Flush: replies larger than the
+     window go out in window-sized chunks (one guest READ each); small ones get ret = sendWpos.
+     vt+0x38 = destroy (frees the 0x228 sock).
+   - DLL RenderThread::main (libOpenglRender 0x18012b64c..849, Sonnet subagent decode):
+     createFinish(+0x50); loop { +0x40 (release prev packet); peek(+0x08, 8, &out)
+     (NO timeout argument: r9 is stale); recv(+0x00, size) = full packet incl. header;
+     decoders }. ANY non-zero peek/recv return ends the thread and leads to destroy.
+     Decoders alloc replies via +0x30 and flush via +0x28 or the next peek.
+2. Implementation: guest bytes are read in place from the guest window. The WRITE is acked
+   when the DLL consumes its last byte (tail copied out first) or before a flush. Replies are
+   staged in a private 8 MiB buffer and delivered by pure_flush (called from peek and +0x28)
+   on the guest READ, chunked by window size. createFinish consumes the 0x100 handshake
+   (parses "%s (pid %d, tid %d) %d %d %d"; HPP only if the 3rd int != 0; sf sends "0 0 0").
+3. Boots (Root_p50, Data_fresh, PGA_SLOTSHIFT=1, GR_HPP=0):
+   - p64A/B: peek returned -1/0x6e on "no data" -> DLL destroy right after the first reply.
+   - p64D (flush-in-peek, blocking peek): the full real renderControl conversation:
+     GLString, RendererVersion=1, EGLVersion {1,4}, NumConfigs (34 attribs, 10 configs),
+     GetConfigs 1500 B, EGL vendor/ext strings, ChooseConfig, CreateContext=1,
+     CreateWindowSurface=2, CreateColorBuffer=3, MakeCurrent, ... 854 writes / 681 replies.
+     Stalled at rcReadColorBuffer (0x2727, 5.76 MB reply > 256 KiB window: no chunking).
+   - p64E (chunked flush): 7 channels: surfaceflinger x2 (cid0 = the rcFBPost lane),
+     com.android.settings x2, com.android.systemui x2, system_server. Then a stall.
+   - p64F (+ the render window moved to a UI thread with a message loop; it used to be made
+     on the worker, which never pumps messages): screen_pga.bmp = real composited frame,
+     the status-bar clock "9:10" (5,758,200 of 5,760,000 bytes nonzero).
+4. Open: all channels stop after roughly 20-60 s with WRITEs unconsumed (the DLL render
+   threads are blocked inside the DLL, not in our callbacks; no "waiting >3 s" flush logs).
+   Last ops: cid0 rcFBPost (0x2722), cid1 rcSetWindowColorBuffer-class 0x271f, GLES
+   traffic on the app channels. Suspects: a DLL-internal lock held across the post
+   callback / readPixels lane (readpix_engine calls FB getPixels every ~10 s; post_install
+   starts PgaStartReadPixels), a sync/fence wait (rcCreateSyncKHR family + SyncThread),
+   or the DLL expecting HD-Player's display/subwindow callbacks. Next: per-thread stack
+   snapshot of the QEMU process during the stall (e.g. procdump / WinDbg `~*k`) to see
+   where the DLL threads wait.
+5. Colour: the dump looks dark red; check the channel order in bmp_write/the PNG converter
+   (the BMP is written as-is from the DLL's buffer, so it may be RGBA vs BGRA).
+
 ## Pitfalls (new)
 
 - `dev\build.cmd` taskkills QEMU, so a running boot dies on rebuild. Grade it first.

@@ -10,7 +10,7 @@ Grade: `python dev\tools\grade.py <run> --write`. Monitor: `dev\tools\mon.py`.
 
 ## Current best configuration (Phase 65: Android boots to the BlueStacks home screen)
 
-    python devoot.py <name> --root Root_p50.vhd --data Data_fresh.qcow2 ^
+    python dev\boot.py <name> --root Root_p50.vhd --data Data_fresh.qcow2 ^
         --initrd initramfs_full_p49bak.bin ^
         --env PGA_SLOTSHIFT=1 --env GR_PURE=1 --env GR_HPP=0
 

@@ -164,7 +164,7 @@ class ManagerWindow(QMainWindow):
 
         self.list = QListWidget(central)
         self.list.setIconSize(self._icon_size())
-        self.list.itemDoubleClicked.connect(self._open_player)
+        self.list.itemDoubleClicked.connect(self._activate)
         lay.addWidget(self.list, 1)
 
         btns = QHBoxLayout()

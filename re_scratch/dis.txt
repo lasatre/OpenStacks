@@ -1,0 +1,1779 @@
+
+/mnt/f/Projects/BluestacksReversing/qemu_test/initramfs_x/boot/bstmods/bstaudio.ko:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <bstaudio_snd_pcm_ops_hw_params>:
+       0:	push   rbp
+       1:	mov    eax,0x1
+       6:	mov    rbp,rsp
+       9:	pop    rbp
+       a:	ret
+       b:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000010 <bstaudio_snd_pcm_ops_close>:
+      10:	movsxd rax,DWORD PTR [rdi+0x3c]
+      14:	push   rbp
+      15:	mov    rbp,rsp
+      18:	lea    rdx,[rax+rax*4]
+      1c:	lea    rdx,[rax+rdx*8]
+      20:	mov    rax,QWORD PTR [rdi+0x10]
+      24:	mov    QWORD PTR [rax+rdx*8+0x130],0x0
+      30:	xor    eax,eax
+      32:	pop    rbp
+      33:	ret
+      34:	data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000040 <AUD_Rate_shift_info>:
+      40:	push   rbp
+      41:	xor    eax,eax
+      43:	mov    DWORD PTR [rsi+0x40],0x2
+      4a:	mov    DWORD PTR [rsi+0x48],0x1
+      51:	mov    QWORD PTR [rsi+0x50],0x13880
+      59:	mov    rbp,rsp
+      5c:	mov    QWORD PTR [rsi+0x58],0x1d4c0
+      64:	mov    QWORD PTR [rsi+0x60],0x1
+      6c:	pop    rbp
+      6d:	ret
+      6e:	xchg   ax,ax
+
+0000000000000070 <AUD_Rate_shift_get>:
+      70:	mov    rax,QWORD PTR [rdi+0x80]
+      77:	push   rbp
+      78:	mov    rbp,rsp
+      7b:	mov    eax,DWORD PTR [rax+0x4]
+      7e:	pop    rbp
+      7f:	mov    QWORD PTR [rsi+0x48],rax
+      83:	xor    eax,eax
+      85:	ret
+      86:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000090 <AUD_Rate_shift_put>:
+      90:	mov    edx,DWORD PTR [rsi+0x48]
+      93:	push   rbp
+      94:	mov    rcx,QWORD PTR [rdi+0x80]
+      9b:	mov    rbp,rsp
+      9e:	cmp    edx,0x1387f
+      a4:	jbe    c2 <AUD_Rate_shift_put+0x32>
+      a6:	cmp    edx,0x1d4c1
+      ac:	mov    eax,0x1d4c0
+      b1:	cmovae edx,eax
+      b4:	xor    eax,eax
+      b6:	cmp    DWORD PTR [rcx+0x4],edx
+      b9:	je     c0 <AUD_Rate_shift_put+0x30>
+      bb:	mov    DWORD PTR [rcx+0x4],edx
+      be:	mov    al,0x1
+      c0:	pop    rbp
+      c1:	ret
+      c2:	mov    edx,0x13880
+      c7:	jmp    b4 <AUD_Rate_shift_put+0x24>
+      c9:	nop    DWORD PTR [rax+0x0]
+
+00000000000000d0 <bstaudio_notify_get>:
+      d0:	mov    rax,QWORD PTR [rdi+0x80]
+      d7:	push   rbp
+      d8:	mov    rbp,rsp
+      db:	movzx  eax,BYTE PTR [rax]
+      de:	pop    rbp
+      df:	and    eax,0x1
+      e2:	mov    QWORD PTR [rsi+0x48],rax
+      e6:	xor    eax,eax
+      e8:	ret
+      e9:	nop    DWORD PTR [rax+0x0]
+
+00000000000000f0 <bstaudio_notify_put>:
+      f0:	push   rbp
+      f1:	mov    rdx,QWORD PTR [rdi+0x80]
+      f8:	mov    r8d,0x1
+      fe:	cmp    QWORD PTR [rsi+0x48],0x0
+     103:	mov    rbp,rsp
+     106:	movzx  esi,BYTE PTR [rdx]
+     109:	setne  cl
+     10c:	xor    eax,eax
+     10e:	movzx  edi,cl
+     111:	and    r8d,esi
+     114:	cmp    r8d,edi
+     117:	je     127 <bstaudio_notify_put+0x37>
+     119:	mov    eax,esi
+     11b:	and    eax,0xfffffffe
+     11e:	or     eax,ecx
+     120:	mov    BYTE PTR [rdx],al
+     122:	mov    eax,0x1
+     127:	pop    rbp
+     128:	ret
+     129:	nop    DWORD PTR [rax+0x0]
+
+0000000000000130 <bstaudio_active_get>:
+     130:	mov    rax,QWORD PTR [rdi+0x80]
+     137:	push   rbp
+     138:	mov    rbp,rsp
+     13b:	mov    eax,DWORD PTR [rax+0x124]
+     141:	pop    rbp
+     142:	test   eax,eax
+     144:	setne  al
+     147:	movzx  eax,al
+     14a:	mov    QWORD PTR [rsi+0x48],rax
+     14e:	xor    eax,eax
+     150:	ret
+     151:	data16 data16 data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000160 <bstaudio_format_info>:
+     160:	push   rbp
+     161:	xor    eax,eax
+     163:	mov    DWORD PTR [rsi+0x40],0x2
+     16a:	mov    DWORD PTR [rsi+0x48],0x1
+     171:	mov    QWORD PTR [rsi+0x50],0x0
+     179:	mov    rbp,rsp
+     17c:	mov    QWORD PTR [rsi+0x58],0x34
+     184:	mov    QWORD PTR [rsi+0x60],0x1
+     18c:	pop    rbp
+     18d:	ret
+     18e:	xchg   ax,ax
+
+0000000000000190 <bstaudio_format_get>:
+     190:	mov    rax,QWORD PTR [rdi+0x80]
+     197:	push   rbp
+     198:	mov    rbp,rsp
+     19b:	mov    eax,DWORD PTR [rax+0x8]
+     19e:	pop    rbp
+     19f:	mov    QWORD PTR [rsi+0x48],rax
+     1a3:	xor    eax,eax
+     1a5:	ret
+     1a6:	cs nop WORD PTR [rax+rax*1+0x0]
+
+00000000000001b0 <AUD_Rate_info>:
+     1b0:	push   rbp
+     1b1:	xor    eax,eax
+     1b3:	mov    DWORD PTR [rsi+0x40],0x2
+     1ba:	mov    DWORD PTR [rsi+0x48],0x1
+     1c1:	mov    QWORD PTR [rsi+0x50],0x0
+     1c9:	mov    rbp,rsp
+     1cc:	mov    QWORD PTR [rsi+0x58],0x2ee00
+     1d4:	mov    QWORD PTR [rsi+0x60],0x1
+     1dc:	pop    rbp
+     1dd:	ret
+     1de:	xchg   ax,ax
+
+00000000000001e0 <AUD_Rate_get>:
+     1e0:	mov    rax,QWORD PTR [rdi+0x80]
+     1e7:	push   rbp
+     1e8:	mov    rbp,rsp
+     1eb:	mov    eax,DWORD PTR [rax+0xc]
+     1ee:	pop    rbp
+     1ef:	mov    QWORD PTR [rsi+0x48],rax
+     1f3:	xor    eax,eax
+     1f5:	ret
+     1f6:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000200 <bstaudio_channels_info>:
+     200:	push   rbp
+     201:	xor    eax,eax
+     203:	mov    DWORD PTR [rsi+0x40],0x2
+     20a:	mov    DWORD PTR [rsi+0x48],0x1
+     211:	mov    QWORD PTR [rsi+0x50],0x1
+     219:	mov    rbp,rsp
+     21c:	mov    QWORD PTR [rsi+0x58],0x400
+     224:	mov    QWORD PTR [rsi+0x60],0x1
+     22c:	pop    rbp
+     22d:	ret
+     22e:	xchg   ax,ax
+
+0000000000000230 <bstaudio_channels_get>:
+     230:	mov    rax,QWORD PTR [rdi+0x80]
+     237:	push   rbp
+     238:	mov    rbp,rsp
+     23b:	mov    eax,DWORD PTR [rax+0x10]
+     23e:	pop    rbp
+     23f:	mov    QWORD PTR [rsi+0x48],rax
+     243:	xor    eax,eax
+     245:	ret
+     246:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000250 <bstaudio_volume_info>:
+     250:	push   rbp
+     251:	xor    eax,eax
+     253:	mov    DWORD PTR [rsi+0x40],0x2
+     25a:	mov    DWORD PTR [rsi+0x48],0x2
+     261:	mov    QWORD PTR [rsi+0x50],0x0
+     269:	mov    rbp,rsp
+     26c:	mov    QWORD PTR [rsi+0x58],0x3f
+     274:	pop    rbp
+     275:	ret
+     276:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000280 <bstaudio_volume_get>:
+     280:	push   rbp
+     281:	xor    eax,eax
+     283:	mov    rbp,rsp
+     286:	pop    rbp
+     287:	ret
+     288:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000290 <bstaudio_volume_set>:
+     290:	push   rbp
+     291:	xor    eax,eax
+     293:	mov    rbp,rsp
+     296:	pop    rbp
+     297:	ret
+     298:	nop    DWORD PTR [rax+rax*1+0x0]
+
+00000000000002a0 <bstaudio_snd_pcm_ops_copy_user>:
+     2a0:	push   rbp
+     2a1:	mov    rbp,rsp
+     2a4:	sub    rsp,0x30
+     2a8:	mov    QWORD PTR [rbp-0x18],rbx
+     2ac:	mov    QWORD PTR [rbp-0x10],r12
+     2b0:	mov    rbx,rdx
+     2b3:	mov    QWORD PTR [rbp-0x8],r13
+     2b7:	mov    edx,DWORD PTR [rdi+0x3c]
+     2ba:	mov    r12,r8
+     2bd:	movsxd rax,edx
+     2c0:	lea    rsi,[rax+rax*4]
+     2c4:	lea    rax,[rax+rsi*8]
+     2c8:	lea    rax,[rax*8+0x10]
+     2d0:	add    rax,QWORD PTR [rdi+0x10]
+     2d4:	add    rax,0x8
+     2d8:	test   edx,edx
+     2da:	jne    343 <bstaudio_snd_pcm_ops_copy_user+0xa3>
+     2dc:	movsxd rdx,DWORD PTR [rax+0x140]
+     2e3:	mov    esi,0xffffffea
+     2e8:	sub    rdx,rbx
+     2eb:	cmp    rdx,r8
+     2ee:	jb     3a5 <bstaudio_snd_pcm_ops_copy_user+0x105>
+     2f4:	mov    r13,rbx
+     2f7:	add    r13,QWORD PTR [rax+0x138]
+     2fe:	xor    edx,edx
+     300:	mov    rsi,r8
+     303:	mov    QWORD PTR [rbp-0x28],rcx
+     307:	mov    rdi,r13
+     30a:	call   30f <bstaudio_snd_pcm_ops_copy_user+0x6f>
+			30b: R_X86_64_PC32	__check_object_size-0x4
+     30f:	mov    rcx,QWORD PTR [rbp-0x28]
+     313:	mov    rdx,r12
+     316:	mov    rdi,r13
+     319:	mov    rsi,rcx
+     31c:	call   321 <bstaudio_snd_pcm_ops_copy_user+0x81>
+			31d: R_X86_64_PC32	_copy_from_user-0x4
+     321:	test   rax,rax
+     324:	jne    3b1 <bstaudio_snd_pcm_ops_copy_user+0x111>
+     32a:	test   r12,r12
+     32d:	jne    3a2 <bstaudio_snd_pcm_ops_copy_user+0x102>
+     32f:	xor    r13d,r13d
+     332:	mov    eax,r13d
+     335:	mov    rbx,QWORD PTR [rbp-0x18]
+     339:	mov    r12,QWORD PTR [rbp-0x10]
+     33d:	mov    r13,QWORD PTR [rbp-0x8]
+     341:	leave
+     342:	ret
+     343:	xor    r13d,r13d
+     346:	cmp    edx,0x1
+     349:	jne    332 <bstaudio_snd_pcm_ops_copy_user+0x92>
+     34b:	movsxd rdx,DWORD PTR [rax+0x140]
+     352:	sub    rdx,rbx
+     355:	cmp    r8,rdx
+     358:	ja     332 <bstaudio_snd_pcm_ops_copy_user+0x92>
+     35a:	add    rbx,QWORD PTR [rax+0x138]
+     361:	mov    rsi,r8
+     364:	mov    edx,0x1
+     369:	mov    QWORD PTR [rbp-0x28],rcx
+     36d:	mov    rdi,rbx
+     370:	call   375 <bstaudio_snd_pcm_ops_copy_user+0xd5>
+			371: R_X86_64_PC32	__check_object_size-0x4
+     375:	mov    rcx,QWORD PTR [rbp-0x28]
+     379:	mov    rdx,r12
+     37c:	mov    rsi,rbx
+     37f:	mov    rdi,rcx
+     382:	call   387 <bstaudio_snd_pcm_ops_copy_user+0xe7>
+			383: R_X86_64_PC32	_copy_to_user-0x4
+     387:	test   rax,rax
+     38a:	je     332 <bstaudio_snd_pcm_ops_copy_user+0x92>
+     38c:	mov    rdi,0x0
+			38f: R_X86_64_32S	.rodata.str1.8
+     393:	xor    eax,eax
+     395:	mov    r13d,0xfffffff2
+     39b:	call   3a0 <bstaudio_snd_pcm_ops_copy_user+0x100>
+			39c: R_X86_64_PC32	printk-0x4
+     3a0:	jmp    332 <bstaudio_snd_pcm_ops_copy_user+0x92>
+     3a2:	mov    esi,r12d
+     3a5:	mov    edi,ebx
+     3a7:	call   3ac <bstaudio_snd_pcm_ops_copy_user+0x10c>
+			3a8: R_X86_64_PC32	bstaudio_playback_data_available_cmd-0x4
+     3ac:	mov    r13d,eax
+     3af:	jmp    332 <bstaudio_snd_pcm_ops_copy_user+0x92>
+     3b1:	mov    rdi,0x0
+			3b4: R_X86_64_32S	.rodata.str1.8
+     3b8:	xor    eax,eax
+     3ba:	call   3bf <bstaudio_snd_pcm_ops_copy_user+0x11f>
+			3bb: R_X86_64_PC32	printk-0x4
+     3bf:	jmp    32a <bstaudio_snd_pcm_ops_copy_user+0x8a>
+     3c4:	data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+00000000000003d0 <bstaudio_snd_pcm_ops_pointer>:
+     3d0:	push   rbp
+     3d1:	mov    rbp,rsp
+     3d4:	push   rbx
+     3d5:	sub    rsp,0x8
+     3d9:	mov    edx,DWORD PTR [rdi+0x3c]
+     3dc:	mov    rbx,QWORD PTR [rdi+0x1a0]
+     3e3:	test   edx,edx
+     3e5:	je     409 <bstaudio_snd_pcm_ops_pointer+0x39>
+     3e7:	cmp    edx,0x1
+     3ea:	je     410 <bstaudio_snd_pcm_ops_pointer+0x40>
+     3ec:	mov    ecx,DWORD PTR [rbx+0x98]
+     3f2:	mov    eax,eax
+     3f4:	add    rsp,0x8
+     3f8:	shl    rax,0x3
+     3fc:	mov    rdx,rax
+     3ff:	sar    rdx,0x3f
+     403:	pop    rbx
+     404:	idiv   rcx
+     407:	pop    rbp
+     408:	ret
+     409:	call   40e <bstaudio_snd_pcm_ops_pointer+0x3e>
+			40a: R_X86_64_PC32	bstaudio_get_playback_offset_for_alsa-0x4
+     40e:	jmp    3ec <bstaudio_snd_pcm_ops_pointer+0x1c>
+     410:	call   415 <bstaudio_snd_pcm_ops_pointer+0x45>
+			411: R_X86_64_PC32	bstaudio_get_capture_offset_for_alsa-0x4
+     415:	jmp    3ec <bstaudio_snd_pcm_ops_pointer+0x1c>
+     417:	nop    WORD PTR [rax+rax*1+0x0]
+
+0000000000000420 <bstaudio_snd_pcm_ops_trigger>:
+     420:	push   rbp
+     421:	mov    rbp,rsp
+     424:	push   rbx
+     425:	sub    rsp,0x8
+     429:	movsxd rax,DWORD PTR [rdi+0x3c]
+     42d:	mov    rcx,QWORD PTR [rdi+0x10]
+     431:	test   esi,esi
+     433:	lea    rdx,[rax+rax*4]
+     437:	lea    rax,[rax+rdx*8]
+     43b:	lea    rdx,[rcx+rax*8+0x10]
+     440:	lea    rax,[rdx+0x8]
+     444:	jne    467 <bstaudio_snd_pcm_ops_trigger+0x47>
+     446:	mov    DWORD PTR [rax+0x124],0x0
+     450:	mov    eax,DWORD PTR [rdi+0x3c]
+     453:	test   eax,eax
+     455:	je     495 <bstaudio_snd_pcm_ops_trigger+0x75>
+     457:	xor    ebx,ebx
+     459:	cmp    eax,0x1
+     45c:	je     4b5 <bstaudio_snd_pcm_ops_trigger+0x95>
+     45e:	add    rsp,0x8
+     462:	mov    eax,ebx
+     464:	pop    rbx
+     465:	pop    rbp
+     466:	ret
+     467:	cmp    esi,0x1
+     46a:	mov    ebx,0xffffffea
+     46f:	jne    45e <bstaudio_snd_pcm_ops_trigger+0x3e>
+     471:	mov    DWORD PTR [rax+0x124],0x1
+     47b:	mov    eax,DWORD PTR [rdi+0x3c]
+     47e:	test   eax,eax
+     480:	je     4c2 <bstaudio_snd_pcm_ops_trigger+0xa2>
+     482:	xor    ebx,ebx
+     484:	cmp    eax,0x1
+     487:	jne    45e <bstaudio_snd_pcm_ops_trigger+0x3e>
+     489:	mov    edi,0xb
+     48e:	call   493 <bstaudio_snd_pcm_ops_trigger+0x73>
+			48f: R_X86_64_PC32	AUD_CMD_params_0-0x4
+     493:	jmp    45e <bstaudio_snd_pcm_ops_trigger+0x3e>
+     495:	mov    rdi,QWORD PTR [rcx+0x8]
+     499:	add    rdx,0x1c
+     49d:	mov    esi,0x1
+     4a2:	xor    ebx,ebx
+     4a4:	call   4a9 <bstaudio_snd_pcm_ops_trigger+0x89>
+			4a5: R_X86_64_PC32	snd_ctl_notify-0x4
+     4a9:	mov    edi,0x5
+     4ae:	call   4b3 <bstaudio_snd_pcm_ops_trigger+0x93>
+			4af: R_X86_64_PC32	AUD_CMD_params_0-0x4
+     4b3:	jmp    45e <bstaudio_snd_pcm_ops_trigger+0x3e>
+     4b5:	mov    edi,0xc
+     4ba:	call   4bf <bstaudio_snd_pcm_ops_trigger+0x9f>
+			4bb: R_X86_64_PC32	AUD_CMD_params_0-0x4
+     4bf:	nop
+     4c0:	jmp    45e <bstaudio_snd_pcm_ops_trigger+0x3e>
+     4c2:	mov    rdi,QWORD PTR [rcx+0x8]
+     4c6:	add    rdx,0x1c
+     4ca:	xor    ebx,ebx
+     4cc:	call   4d1 <bstaudio_snd_pcm_ops_trigger+0xb1>
+			4cd: R_X86_64_PC32	snd_ctl_notify-0x4
+     4d1:	mov    edi,0x4
+     4d6:	call   4db <bstaudio_snd_pcm_ops_trigger+0xbb>
+			4d7: R_X86_64_PC32	AUD_CMD_params_0-0x4
+     4db:	jmp    45e <bstaudio_snd_pcm_ops_trigger+0x3e>
+     4dd:	nop    DWORD PTR [rax]
+
+00000000000004e0 <bstaudio_snd_pcm_ops_prepare>:
+     4e0:	push   rbp
+     4e1:	mov    rbp,rsp
+     4e4:	push   r13
+     4e6:	push   r12
+     4e8:	push   rbx
+     4e9:	mov    rbx,rdi
+     4ec:	sub    rsp,0x18
+     4f0:	mov    r13,QWORD PTR [rdi+0x1a0]
+     4f7:	mov    r12,QWORD PTR [rdi+0x10]
+     4fb:	mov    edi,DWORD PTR [r13+0x5c]
+     4ff:	call   504 <bstaudio_snd_pcm_ops_prepare+0x24>
+			500: R_X86_64_PC32	snd_pcm_format_width-0x4
+     504:	imul   eax,DWORD PTR [r13+0x68]
+     509:	mov    edx,DWORD PTR [r13+0x64]
+     50d:	shr    eax,0x3
+     510:	imul   edx,eax
+     513:	test   edx,edx
+     515:	jle    710 <bstaudio_snd_pcm_ops_prepare+0x230>
+     51b:	test   eax,eax
+     51d:	je     710 <bstaudio_snd_pcm_ops_prepare+0x230>
+     523:	movsxd rcx,DWORD PTR [rbx+0x3c]
+     527:	lea    rsi,[rcx+rcx*4]
+     52b:	lea    rcx,[rcx+rsi*8]
+     52f:	lea    r12,[r12+rcx*8+0x18]
+     534:	mov    ecx,DWORD PTR [r13+0x98]
+     53b:	imul   rcx,QWORD PTR [r13+0x80]
+     543:	lea    rsi,[rcx+0x7]
+     547:	test   rcx,rcx
+     54a:	cmovns rsi,rcx
+     54e:	sar    rsi,0x3
+     552:	mov    DWORD PTR [r12+0x128],esi
+     55a:	mov    ecx,DWORD PTR [r13+0x98]
+     561:	mov    edi,esi
+     563:	imul   rcx,QWORD PTR [r13+0x70]
+     568:	mov    DWORD PTR [r12+0x130],edx
+     570:	mov    DWORD PTR [r12+0x134],eax
+     578:	mov    DWORD PTR [r12+0x120],0x1
+     584:	lea    r8,[rcx+0x7]
+     588:	test   rcx,rcx
+     58b:	cmovs  rcx,r8
+     58f:	sar    rcx,0x3
+     593:	mov    DWORD PTR [r12+0x12c],ecx
+     59b:	mov    eax,DWORD PTR [rbx+0x3c]
+     59e:	test   eax,eax
+     5a0:	je     663 <bstaudio_snd_pcm_ops_prepare+0x183>
+     5a6:	cmp    eax,0x1
+     5a9:	je     6f4 <bstaudio_snd_pcm_ops_prepare+0x214>
+     5af:	mov    rax,QWORD PTR [r12+0x138]
+     5b7:	test   rax,rax
+     5ba:	mov    DWORD PTR [r12+0x140],edi
+     5c2:	je     689 <bstaudio_snd_pcm_ops_prepare+0x1a9>
+     5c8:	mov    eax,DWORD PTR [rbx+0x3c]
+     5cb:	test   eax,eax
+     5cd:	je     6ca <bstaudio_snd_pcm_ops_prepare+0x1ea>
+     5d3:	cmp    eax,0x1
+     5d6:	je     6df <bstaudio_snd_pcm_ops_prepare+0x1ff>
+     5dc:	mov    r13,QWORD PTR [rbx+0x1a0]
+     5e3:	cdqe
+     5e5:	lea    rdx,[rax+rax*4]
+     5e9:	mov    edi,DWORD PTR [r13+0x5c]
+     5ed:	lea    rax,[rax+rdx*8]
+     5f1:	lea    r12,[rax*8+0x10]
+     5f9:	add    r12,QWORD PTR [rbx+0x10]
+     5fd:	call   602 <bstaudio_snd_pcm_ops_prepare+0x122>
+			5fe: R_X86_64_PC32	snd_pcm_format_width-0x4
+     602:	mov    edx,DWORD PTR [rbx+0x3c]
+     605:	mov    edi,0x3
+     60a:	add    r12,0x8
+     60e:	test   edx,edx
+     610:	jne    653 <bstaudio_snd_pcm_ops_prepare+0x173>
+     612:	mov    edx,DWORD PTR [r12+0x134]
+     61a:	mov    r9d,DWORD PTR [r12+0x12c]
+     622:	mov    r8d,DWORD PTR [r12+0x128]
+     62a:	mov    ecx,DWORD PTR [r13+0x68]
+     62e:	mov    esi,DWORD PTR [r13+0x64]
+     632:	mov    DWORD PTR [rsp+0x8],edx
+     636:	mov    edx,DWORD PTR [r12+0x130]
+     63e:	mov    DWORD PTR [rsp],edx
+     641:	mov    edx,eax
+     643:	call   648 <bstaudio_snd_pcm_ops_prepare+0x168>
+			644: R_X86_64_PC32	bstaudio_config_cmd-0x4
+     648:	add    rsp,0x18
+     64c:	pop    rbx
+     64d:	pop    r12
+     64f:	pop    r13
+     651:	pop    rbp
+     652:	ret
+     653:	xor    dil,dil
+     656:	cmp    edx,0x1
+     659:	mov    edx,0xa
+     65e:	cmove  edi,edx
+     661:	jmp    612 <bstaudio_snd_pcm_ops_prepare+0x132>
+     663:	call   668 <bstaudio_snd_pcm_ops_prepare+0x188>
+			664: R_X86_64_PC32	bstaudio_alloc_g_to_h_shmem_buffer-0x4
+     668:	mov    edi,DWORD PTR [r12+0x128]
+     670:	test   rax,rax
+     673:	mov    QWORD PTR [r12+0x138],rax
+     67b:	mov    DWORD PTR [r12+0x140],edi
+     683:	jne    5c8 <bstaudio_snd_pcm_ops_prepare+0xe8>
+     689:	mov    eax,DWORD PTR [r13+0x98]
+     690:	mov    edx,0x20000
+     695:	mov    rdi,0x0
+			698: R_X86_64_32S	.rodata.str1.8+0x60
+     69c:	imul   rax,QWORD PTR [r13+0x80]
+     6a4:	lea    rsi,[rax+0x7]
+     6a8:	test   rax,rax
+     6ab:	cmovns rsi,rax
+     6af:	xor    eax,eax
+     6b1:	sar    rsi,0x3
+     6b5:	call   6ba <bstaudio_snd_pcm_ops_prepare+0x1da>
+			6b6: R_X86_64_PC32	printk-0x4
+     6ba:	add    rsp,0x18
+     6be:	mov    eax,0xfffffff4
+     6c3:	pop    rbx
+     6c4:	pop    r12
+     6c6:	pop    r13
+     6c8:	pop    rbp
+     6c9:	ret
+     6ca:	mov    esi,DWORD PTR [r12+0x12c]
+     6d2:	call   6d7 <bstaudio_snd_pcm_ops_prepare+0x1f7>
+			6d3: R_X86_64_PC32	bstaudio_playback_stream_prepared-0x4
+     6d7:	mov    eax,DWORD PTR [rbx+0x3c]
+     6da:	jmp    5dc <bstaudio_snd_pcm_ops_prepare+0xfc>
+     6df:	mov    esi,DWORD PTR [r12+0x12c]
+     6e7:	call   6ec <bstaudio_snd_pcm_ops_prepare+0x20c>
+			6e8: R_X86_64_PC32	bstaudio_capture_stream_prepared-0x4
+     6ec:	mov    eax,DWORD PTR [rbx+0x3c]
+     6ef:	jmp    5dc <bstaudio_snd_pcm_ops_prepare+0xfc>
+     6f4:	mov    edi,esi
+     6f6:	call   6fb <bstaudio_snd_pcm_ops_prepare+0x21b>
+			6f7: R_X86_64_PC32	bstaudio_alloc_h_to_g_shmem_buffer-0x4
+     6fb:	mov    edi,DWORD PTR [r12+0x128]
+     703:	mov    QWORD PTR [r12+0x138],rax
+     70b:	jmp    5b7 <bstaudio_snd_pcm_ops_prepare+0xd7>
+     710:	mov    ecx,eax
+     712:	mov    rsi,0x0
+			715: R_X86_64_32S	.rodata
+     719:	mov    rdi,0x0
+			71c: R_X86_64_32S	.rodata.str1.8+0x28
+     720:	xor    eax,eax
+     722:	call   727 <bstaudio_snd_pcm_ops_prepare+0x247>
+			723: R_X86_64_PC32	printk-0x4
+     727:	mov    eax,0xffffffea
+     72c:	jmp    648 <bstaudio_snd_pcm_ops_prepare+0x168>
+     731:	data16 data16 data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000740 <bstaudio_snd_pcm_ops_hw_free>:
+     740:	push   rbp
+     741:	mov    rbp,rsp
+     744:	push   r12
+     746:	push   rbx
+     747:	movsxd rax,DWORD PTR [rdi+0x3c]
+     74b:	mov    rbx,rdi
+     74e:	lea    rdx,[rax+rax*4]
+     752:	lea    rax,[rax+rdx*8]
+     756:	lea    r12,[rax*8+0x10]
+     75e:	add    r12,QWORD PTR [rdi+0x10]
+     762:	add    r12,0x8
+     766:	mov    DWORD PTR [r12+0x120],0x0
+     772:	mov    eax,DWORD PTR [rdi+0x3c]
+     775:	test   eax,eax
+     777:	je     7a3 <bstaudio_snd_pcm_ops_hw_free+0x63>
+     779:	cmp    eax,0x1
+     77c:	je     7b2 <bstaudio_snd_pcm_ops_hw_free+0x72>
+     77e:	mov    QWORD PTR [r12+0x138],0x0
+     78a:	mov    DWORD PTR [r12+0x140],0x0
+     796:	mov    rdi,rbx
+     799:	call   79e <bstaudio_snd_pcm_ops_hw_free+0x5e>
+			79a: R_X86_64_PC32	snd_pcm_lib_free_pages-0x4
+     79e:	pop    rbx
+     79f:	pop    r12
+     7a1:	pop    rbp
+     7a2:	ret
+     7a3:	mov    rdi,QWORD PTR [r12+0x138]
+     7ab:	call   7b0 <bstaudio_snd_pcm_ops_hw_free+0x70>
+			7ac: R_X86_64_PC32	bstaudio_free_g_to_h_shmem_buffer-0x4
+     7b0:	jmp    77e <bstaudio_snd_pcm_ops_hw_free+0x3e>
+     7b2:	mov    rdi,QWORD PTR [r12+0x138]
+     7ba:	call   7bf <bstaudio_snd_pcm_ops_hw_free+0x7f>
+			7bb: R_X86_64_PC32	bstaudio_free_h_to_g_shmem_buffer-0x4
+     7bf:	jmp    77e <bstaudio_snd_pcm_ops_hw_free+0x3e>
+     7c1:	data16 data16 data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+00000000000007d0 <bstaudio_snd_pcm_ops_open>:
+     7d0:	push   rbp
+     7d1:	mov    esi,0xf
+     7d6:	mov    rbp,rsp
+     7d9:	push   r12
+     7db:	push   rbx
+     7dc:	sub    rsp,0x10
+     7e0:	movsxd rax,DWORD PTR [rdi+0x3c]
+     7e4:	mov    rbx,QWORD PTR [rdi+0x1a0]
+     7eb:	lea    r12,[rbx+0x168]
+     7f2:	lea    rdx,[rax+rax*4]
+     7f6:	lea    rdx,[rax+rdx*8]
+     7fa:	mov    rax,QWORD PTR [rdi+0x10]
+     7fe:	mov    QWORD PTR [rax+rdx*8+0x130],rdi
+     806:	mov    rax,QWORD PTR [rip+0x0]        # 80d <bstaudio_snd_pcm_ops_open+0x3d>
+			809: R_X86_64_PC32	.rodata+0x1c
+     80d:	mov    rdi,rbx
+     810:	mov    QWORD PTR [rbx+0x168],rax
+     817:	mov    rax,QWORD PTR [rip+0x0]        # 81e <bstaudio_snd_pcm_ops_open+0x4e>
+			81a: R_X86_64_PC32	.rodata+0x24
+     81e:	mov    QWORD PTR [rbx+0x170],rax
+     825:	mov    rax,QWORD PTR [rip+0x0]        # 82c <bstaudio_snd_pcm_ops_open+0x5c>
+			828: R_X86_64_PC32	.rodata+0x2c
+     82c:	mov    QWORD PTR [rbx+0x178],rax
+     833:	mov    rax,QWORD PTR [rip+0x0]        # 83a <bstaudio_snd_pcm_ops_open+0x6a>
+			836: R_X86_64_PC32	.rodata+0x34
+     83a:	mov    QWORD PTR [rbx+0x180],rax
+     841:	mov    rax,QWORD PTR [rip+0x0]        # 848 <bstaudio_snd_pcm_ops_open+0x78>
+			844: R_X86_64_PC32	.rodata+0x3c
+     848:	mov    QWORD PTR [rbx+0x188],rax
+     84f:	mov    rax,QWORD PTR [rip+0x0]        # 856 <bstaudio_snd_pcm_ops_open+0x86>
+			852: R_X86_64_PC32	.rodata+0x44
+     856:	mov    QWORD PTR [rbx+0x190],rax
+     85d:	mov    rax,QWORD PTR [rip+0x0]        # 864 <bstaudio_snd_pcm_ops_open+0x94>
+			860: R_X86_64_PC32	.rodata+0x4c
+     864:	mov    QWORD PTR [rbx+0x198],rax
+     86b:	mov    rax,QWORD PTR [rip+0x0]        # 872 <bstaudio_snd_pcm_ops_open+0xa2>
+			86e: R_X86_64_PC32	.rodata+0x54
+     872:	mov    QWORD PTR [rbx+0x1a0],rax
+     879:	mov    rax,QWORD PTR [rip+0x0]        # 880 <bstaudio_snd_pcm_ops_open+0xb0>
+			87c: R_X86_64_PC32	.rodata+0x5c
+     880:	mov    QWORD PTR [rbx+0x1a8],rax
+     887:	mov    rax,QWORD PTR [rip+0x0]        # 88e <bstaudio_snd_pcm_ops_open+0xbe>
+			88a: R_X86_64_PC32	.rodata+0x64
+     88e:	mov    QWORD PTR [rbx+0x1b0],rax
+     895:	call   89a <bstaudio_snd_pcm_ops_open+0xca>
+			896: R_X86_64_PC32	snd_pcm_hw_constraint_integer-0x4
+     89a:	xor    esi,esi
+     89c:	xor    eax,eax
+     89e:	mov    r9d,0xb
+     8a4:	mov    r8,r12
+     8a7:	mov    rcx,0x0
+			8aa: R_X86_64_32S	.text+0x980
+     8ae:	mov    edx,0xb
+     8b3:	mov    rdi,rbx
+     8b6:	mov    DWORD PTR [rsp],0xffffffff
+     8bd:	call   8c2 <bstaudio_snd_pcm_ops_open+0xf2>
+			8be: R_X86_64_PC32	snd_pcm_hw_rule_add-0x4
+     8c2:	test   eax,eax
+     8c4:	js     929 <bstaudio_snd_pcm_ops_open+0x159>
+     8c6:	xor    esi,esi
+     8c8:	xor    eax,eax
+     8ca:	mov    r9d,0x1
+     8d0:	mov    r8,r12
+     8d3:	mov    rcx,0x0
+			8d6: R_X86_64_32S	.text+0x9c0
+     8da:	mov    edx,0x1
+     8df:	mov    rdi,rbx
+     8e2:	mov    DWORD PTR [rsp],0xffffffff
+     8e9:	call   8ee <bstaudio_snd_pcm_ops_open+0x11e>
+			8ea: R_X86_64_PC32	snd_pcm_hw_rule_add-0x4
+     8ee:	test   eax,eax
+     8f0:	js     929 <bstaudio_snd_pcm_ops_open+0x159>
+     8f2:	xor    esi,esi
+     8f4:	xor    eax,eax
+     8f6:	mov    r9d,0xa
+     8fc:	mov    r8,r12
+     8ff:	mov    rcx,0x0
+			902: R_X86_64_32S	.text+0x940
+     906:	mov    edx,0xa
+     90b:	mov    rdi,rbx
+     90e:	mov    DWORD PTR [rsp],0xffffffff
+     915:	call   91a <bstaudio_snd_pcm_ops_open+0x14a>
+			916: R_X86_64_PC32	snd_pcm_hw_rule_add-0x4
+     91a:	test   eax,eax
+     91c:	js     929 <bstaudio_snd_pcm_ops_open+0x159>
+     91e:	mov    QWORD PTR [rbx+0x158],0x0
+     929:	add    rsp,0x10
+     92d:	pop    rbx
+     92e:	pop    r12
+     930:	pop    rbp
+     931:	ret
+     932:	data16 data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000940 <AUD_Rule_channels>:
+     940:	push   rbp
+     941:	mov    rbp,rsp
+     944:	sub    rsp,0x10
+     948:	mov    rax,QWORD PTR [rsi+0x20]
+     94c:	mov    edx,DWORD PTR [rax+0x1c]
+     94f:	mov    eax,DWORD PTR [rax+0x20]
+     952:	and    BYTE PTR [rbp-0x4],0xf8
+     956:	mov    DWORD PTR [rbp-0x8],eax
+     959:	movsxd rax,DWORD PTR [rsi+0x4]
+     95d:	lea    rsi,[rbp-0xc]
+     961:	mov    DWORD PTR [rbp-0xc],edx
+     964:	lea    rax,[rax+rax*2-0x18]
+     969:	lea    rdi,[rdi+rax*4+0x104]
+     971:	call   976 <AUD_Rule_channels+0x36>
+			972: R_X86_64_PC32	snd_interval_refine-0x4
+     976:	leave
+     977:	ret
+     978:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000980 <AUD_Rule_rate>:
+     980:	push   rbp
+     981:	mov    rbp,rsp
+     984:	sub    rsp,0x10
+     988:	mov    rax,QWORD PTR [rsi+0x20]
+     98c:	mov    edx,DWORD PTR [rax+0x14]
+     98f:	mov    eax,DWORD PTR [rax+0x18]
+     992:	and    BYTE PTR [rbp-0x4],0xf8
+     996:	mov    DWORD PTR [rbp-0x8],eax
+     999:	movsxd rax,DWORD PTR [rsi+0x4]
+     99d:	lea    rsi,[rbp-0xc]
+     9a1:	mov    DWORD PTR [rbp-0xc],edx
+     9a4:	lea    rax,[rax+rax*2-0x18]
+     9a9:	lea    rdi,[rdi+rax*4+0x104]
+     9b1:	call   9b6 <AUD_Rule_rate+0x36>
+			9b2: R_X86_64_PC32	snd_interval_refine-0x4
+     9b6:	leave
+     9b7:	ret
+     9b8:	nop    DWORD PTR [rax+rax*1+0x0]
+
+00000000000009c0 <AUD_Rule_format>:
+     9c0:	movsxd rax,DWORD PTR [rsi+0x4]
+     9c4:	mov    rcx,QWORD PTR [rsi+0x20]
+     9c8:	push   rbp
+     9c9:	mov    rbp,rsp
+     9cc:	shl    rax,0x5
+     9d0:	add    rdi,rax
+     9d3:	mov    rax,QWORD PTR [rcx+0x8]
+     9d7:	lea    rdx,[rdi+0x4]
+     9db:	and    DWORD PTR [rdx],eax
+     9dd:	mov    eax,DWORD PTR [rcx+0xc]
+     9e0:	and    DWORD PTR [rdx+0x4],eax
+     9e3:	xor    eax,eax
+     9e5:	mov    QWORD PTR [rdi+0xc],0x0
+     9ed:	mov    ecx,DWORD PTR [rdi+0x4]
+     9f0:	mov    QWORD PTR [rdi+0x14],0x0
+     9f8:	mov    QWORD PTR [rdi+0x1c],0x0
+     a00:	test   ecx,ecx
+     a02:	jne    a0d <AUD_Rule_format+0x4d>
+     a04:	cmp    DWORD PTR [rdx+0x4],0x1
+     a08:	sbb    eax,eax
+     a0a:	and    eax,0xffffffea
+     a0d:	pop    rbp
+     a0e:	ret
+     a0f:	nop
+
+0000000000000a10 <ss_name>:
+     a10:	mov    edx,DWORD PTR [rdi+0x3c]
+     a13:	push   rbp
+     a14:	mov    rax,0x0
+			a17: R_X86_64_32S	.rodata.str1.1
+     a1b:	mov    rbp,rsp
+     a1e:	test   edx,edx
+     a20:	je     a37 <ss_name+0x27>
+     a22:	cmp    edx,0x1
+     a25:	mov    rax,0x0
+			a28: R_X86_64_32S	.rodata.str1.1+0x10
+     a2c:	mov    rdx,0x0
+			a2f: R_X86_64_32S	.rodata.str1.1+0x1f
+     a33:	cmovne rax,rdx
+     a37:	pop    rbp
+     a38:	ret
+     a39:	nop    DWORD PTR [rax+0x0]
+
+0000000000000a40 <bstaudio_playback_pos_update_alsa>:
+     a40:	mov    rax,QWORD PTR [rip+0x0]        # a47 <bstaudio_playback_pos_update_alsa+0x7>
+			a43: R_X86_64_PC32	g_bstaudio-0x4
+     a47:	push   rbp
+     a48:	mov    rbp,rsp
+     a4b:	mov    edx,DWORD PTR [rax+0x13c]
+     a51:	test   edx,edx
+     a53:	jne    a57 <bstaudio_playback_pos_update_alsa+0x17>
+     a55:	pop    rbp
+     a56:	ret
+     a57:	mov    rdi,QWORD PTR [rax+0x130]
+     a5e:	call   a63 <bstaudio_playback_pos_update_alsa+0x23>
+			a5f: R_X86_64_PC32	snd_pcm_period_elapsed-0x4
+     a63:	pop    rbp
+     a64:	ret
+     a65:	data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000a70 <bstaudio_capture_pos_update_alsa>:
+     a70:	mov    rax,QWORD PTR [rip+0x0]        # a77 <bstaudio_capture_pos_update_alsa+0x7>
+			a73: R_X86_64_PC32	g_bstaudio-0x4
+     a77:	push   rbp
+     a78:	mov    rbp,rsp
+     a7b:	mov    edx,DWORD PTR [rax+0x284]
+     a81:	test   edx,edx
+     a83:	jne    a87 <bstaudio_capture_pos_update_alsa+0x17>
+     a85:	pop    rbp
+     a86:	ret
+     a87:	mov    rdi,QWORD PTR [rax+0x278]
+     a8e:	call   a93 <bstaudio_capture_pos_update_alsa+0x23>
+			a8f: R_X86_64_PC32	snd_pcm_period_elapsed-0x4
+     a93:	pop    rbp
+     a94:	ret
+     a95:	cs nop WORD PTR [rax+rax*1+0x0]
+     a9f:	nop
+
+0000000000000aa0 <bstaudio_pci_shutdown>:
+     aa0:	push   rbp
+     aa1:	mov    rbp,rsp
+     aa4:	pop    rbp
+     aa5:	ret
+     aa6:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000ab0 <bstaudio_isr>:
+     ab0:	push   rbp
+     ab1:	xor    eax,eax
+     ab3:	mov    rbp,rsp
+     ab6:	sub    rsp,0x30
+     aba:	cmp    rsi,QWORD PTR [rip+0x0]        # ac1 <bstaudio_isr+0x11>
+			abd: R_X86_64_PC32	g_driver-0x4
+     ac1:	mov    QWORD PTR [rbp-0x28],rbx
+     ac5:	mov    QWORD PTR [rbp-0x20],r12
+     ac9:	mov    rbx,rsi
+     acc:	mov    QWORD PTR [rbp-0x18],r13
+     ad0:	mov    QWORD PTR [rbp-0x10],r14
+     ad4:	mov    QWORD PTR [rbp-0x8],r15
+     ad8:	je     af0 <bstaudio_isr+0x40>
+     ada:	mov    rbx,QWORD PTR [rbp-0x28]
+     ade:	mov    r12,QWORD PTR [rbp-0x20]
+     ae2:	mov    r13,QWORD PTR [rbp-0x18]
+     ae6:	mov    r14,QWORD PTR [rbp-0x10]
+     aea:	mov    r15,QWORD PTR [rbp-0x8]
+     aee:	leave
+     aef:	ret
+     af0:	mov    rax,QWORD PTR [rsi+0x18]
+     af4:	mov    edx,DWORD PTR [rax]
+     af6:	cmp    edx,0x7
+     af9:	je     b76 <bstaudio_isr+0xc6>
+     afb:	cmp    edx,0xd
+     afe:	jne    be2 <bstaudio_isr+0x132>
+     b04:	lea    r13,[rsi+0x64]
+     b08:	mov    rdi,r13
+     b0b:	call   b10 <bstaudio_isr+0x60>
+			b0c: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     b10:	mov    r15,rax
+     b13:	mov    rax,QWORD PTR [rip+0x0]        # b1a <bstaudio_isr+0x6a>
+			b16: R_X86_64_PC32	g_driver-0x4
+     b1a:	mov    ecx,DWORD PTR [rbx+0x54]
+     b1d:	mov    rax,QWORD PTR [rax+0x40]
+     b21:	mov    r14d,DWORD PTR [rax]
+     b24:	mov    eax,DWORD PTR [rbx+0x50]
+     b27:	mov    edx,eax
+     b29:	mov    r12d,r14d
+     b2c:	sub    r12d,DWORD PTR [rbx+0x5c]
+     b30:	sar    edx,0x1f
+     b33:	idiv   ecx
+     b35:	cmp    r12d,eax
+     b38:	ja     bc9 <bstaudio_isr+0x119>
+     b3e:	imul   r12d,ecx
+     b42:	add    DWORD PTR [rbx+0x60],r12d
+     b46:	mov    rsi,r15
+     b49:	mov    rdi,r13
+     b4c:	mov    DWORD PTR [rbx+0x5c],r14d
+     b50:	call   b55 <bstaudio_isr+0xa5>
+			b51: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     b55:	call   b5a <bstaudio_isr+0xaa>
+			b56: R_X86_64_PC32	bstaudio_capture_pos_update_alsa-0x4
+     b5a:	mov    rax,QWORD PTR [rip+0x0]        # b61 <bstaudio_isr+0xb1>
+			b5d: R_X86_64_PC32	g_driver-0x4
+     b61:	mov    rax,QWORD PTR [rax+0x8]
+     b65:	mov    DWORD PTR [rax+0x8],0x0
+     b6c:	mov    eax,0x1
+     b71:	jmp    ada <bstaudio_isr+0x2a>
+     b76:	lea    r13,[rsi+0x7c]
+     b7a:	mov    rdi,r13
+     b7d:	call   b82 <bstaudio_isr+0xd2>
+			b7e: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     b82:	mov    r15,rax
+     b85:	mov    rax,QWORD PTR [rip+0x0]        # b8c <bstaudio_isr+0xdc>
+			b88: R_X86_64_PC32	g_driver-0x4
+     b8c:	mov    ecx,DWORD PTR [rbx+0x6c]
+     b8f:	mov    rax,QWORD PTR [rax+0x48]
+     b93:	mov    r14d,DWORD PTR [rax]
+     b96:	mov    eax,DWORD PTR [rbx+0x68]
+     b99:	mov    edx,eax
+     b9b:	mov    r12d,r14d
+     b9e:	sub    r12d,DWORD PTR [rbx+0x74]
+     ba2:	sar    edx,0x1f
+     ba5:	idiv   ecx
+     ba7:	cmp    r12d,eax
+     baa:	ja     bfc <bstaudio_isr+0x14c>
+     bac:	imul   ecx,r12d
+     bb0:	add    DWORD PTR [rbx+0x78],ecx
+     bb3:	mov    rsi,r15
+     bb6:	mov    rdi,r13
+     bb9:	mov    DWORD PTR [rbx+0x74],r14d
+     bbd:	call   bc2 <bstaudio_isr+0x112>
+			bbe: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     bc2:	call   bc7 <bstaudio_isr+0x117>
+			bc3: R_X86_64_PC32	bstaudio_playback_pos_update_alsa-0x4
+     bc7:	jmp    b5a <bstaudio_isr+0xaa>
+     bc9:	mov    esi,r12d
+     bcc:	mov    rdi,0x0
+			bcf: R_X86_64_32S	.rodata.str1.8+0x218
+     bd3:	xor    eax,eax
+     bd5:	call   bda <bstaudio_isr+0x12a>
+			bd6: R_X86_64_PC32	printk-0x4
+     bda:	mov    ecx,DWORD PTR [rbx+0x54]
+     bdd:	jmp    b3e <bstaudio_isr+0x8e>
+     be2:	mov    rsi,0x0
+			be5: R_X86_64_32S	.rodata+0x70
+     be9:	mov    rdi,0x0
+			bec: R_X86_64_32S	.rodata.str1.8+0x248
+     bf0:	xor    eax,eax
+     bf2:	call   bf7 <bstaudio_isr+0x147>
+			bf3: R_X86_64_PC32	printk-0x4
+     bf7:	jmp    b5a <bstaudio_isr+0xaa>
+     bfc:	mov    esi,r12d
+     bff:	mov    rdi,0x0
+			c02: R_X86_64_32S	.rodata.str1.8+0x218
+     c06:	xor    eax,eax
+     c08:	call   c0d <bstaudio_isr+0x15d>
+			c09: R_X86_64_PC32	printk-0x4
+     c0d:	mov    ecx,DWORD PTR [rbx+0x6c]
+     c10:	jmp    bac <bstaudio_isr+0xfc>
+     c12:	data16 data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000c20 <bstaudio_capture_stream_prepared>:
+     c20:	push   rbp
+     c21:	mov    rbp,rsp
+     c24:	sub    rsp,0x20
+     c28:	mov    QWORD PTR [rbp-0x10],r13
+     c2c:	mov    r13,QWORD PTR [rip+0x0]        # c33 <bstaudio_capture_stream_prepared+0x13>
+			c2f: R_X86_64_PC32	g_driver-0x4
+     c33:	mov    QWORD PTR [rbp-0x20],rbx
+     c37:	mov    QWORD PTR [rbp-0x18],r12
+     c3b:	mov    r12d,edi
+     c3e:	mov    QWORD PTR [rbp-0x8],r14
+     c42:	mov    r14d,esi
+     c45:	lea    rbx,[r13+0x64]
+     c49:	mov    rdi,rbx
+     c4c:	call   c51 <bstaudio_capture_stream_prepared+0x31>
+			c4d: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     c51:	mov    DWORD PTR [r13+0x50],r12d
+     c55:	mov    DWORD PTR [r13+0x54],r14d
+     c59:	mov    rdi,rbx
+     c5c:	mov    DWORD PTR [r13+0x58],0x0
+     c64:	mov    DWORD PTR [r13+0x5c],0x0
+     c6c:	mov    rsi,rax
+     c6f:	mov    DWORD PTR [r13+0x60],0x0
+     c77:	call   c7c <bstaudio_capture_stream_prepared+0x5c>
+			c78: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     c7c:	mov    rbx,QWORD PTR [rbp-0x20]
+     c80:	mov    r12,QWORD PTR [rbp-0x18]
+     c84:	mov    r13,QWORD PTR [rbp-0x10]
+     c88:	mov    r14,QWORD PTR [rbp-0x8]
+     c8c:	leave
+     c8d:	ret
+     c8e:	xchg   ax,ax
+
+0000000000000c90 <bstaudio_playback_stream_prepared>:
+     c90:	push   rbp
+     c91:	mov    rbp,rsp
+     c94:	sub    rsp,0x20
+     c98:	mov    QWORD PTR [rbp-0x10],r13
+     c9c:	mov    r13,QWORD PTR [rip+0x0]        # ca3 <bstaudio_playback_stream_prepared+0x13>
+			c9f: R_X86_64_PC32	g_driver-0x4
+     ca3:	mov    QWORD PTR [rbp-0x20],rbx
+     ca7:	mov    QWORD PTR [rbp-0x18],r12
+     cab:	mov    r12d,edi
+     cae:	mov    QWORD PTR [rbp-0x8],r14
+     cb2:	mov    r14d,esi
+     cb5:	lea    rbx,[r13+0x7c]
+     cb9:	mov    rdi,rbx
+     cbc:	call   cc1 <bstaudio_playback_stream_prepared+0x31>
+			cbd: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     cc1:	mov    DWORD PTR [r13+0x68],r12d
+     cc5:	mov    DWORD PTR [r13+0x6c],r14d
+     cc9:	mov    rdi,rbx
+     ccc:	mov    DWORD PTR [r13+0x70],0x0
+     cd4:	mov    DWORD PTR [r13+0x74],0x0
+     cdc:	mov    rsi,rax
+     cdf:	mov    DWORD PTR [r13+0x78],0x0
+     ce7:	call   cec <bstaudio_playback_stream_prepared+0x5c>
+			ce8: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     cec:	mov    rbx,QWORD PTR [rbp-0x20]
+     cf0:	mov    r12,QWORD PTR [rbp-0x18]
+     cf4:	mov    r13,QWORD PTR [rbp-0x10]
+     cf8:	mov    r14,QWORD PTR [rbp-0x8]
+     cfc:	leave
+     cfd:	ret
+     cfe:	xchg   ax,ax
+
+0000000000000d00 <bstaudio_get_capture_offset_for_alsa>:
+     d00:	push   rbp
+     d01:	mov    rbp,rsp
+     d04:	sub    rsp,0x20
+     d08:	mov    QWORD PTR [rbp-0x10],r12
+     d0c:	mov    r12,QWORD PTR [rip+0x0]        # d13 <bstaudio_get_capture_offset_for_alsa+0x13>
+			d0f: R_X86_64_PC32	g_driver-0x4
+     d13:	mov    QWORD PTR [rbp-0x18],rbx
+     d17:	mov    QWORD PTR [rbp-0x8],r13
+     d1b:	lea    rbx,[r12+0x64]
+     d20:	mov    rdi,rbx
+     d23:	call   d28 <bstaudio_get_capture_offset_for_alsa+0x28>
+			d24: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     d28:	mov    ecx,DWORD PTR [r12+0x60]
+     d2d:	mov    rsi,rax
+     d30:	test   ecx,ecx
+     d32:	je     d6f <bstaudio_get_capture_offset_for_alsa+0x6f>
+     d34:	mov    edi,DWORD PTR [r12+0x54]
+     d39:	mov    eax,DWORD PTR [r12+0x58]
+     d3e:	xor    edx,edx
+     d40:	add    eax,edi
+     d42:	sub    ecx,edi
+     d44:	div    DWORD PTR [r12+0x50]
+     d49:	mov    DWORD PTR [r12+0x60],ecx
+     d4e:	mov    r13d,edx
+     d51:	mov    DWORD PTR [r12+0x58],edx
+     d56:	mov    rdi,rbx
+     d59:	call   d5e <bstaudio_get_capture_offset_for_alsa+0x5e>
+			d5a: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     d5e:	mov    eax,r13d
+     d61:	mov    rbx,QWORD PTR [rbp-0x18]
+     d65:	mov    r12,QWORD PTR [rbp-0x10]
+     d69:	mov    r13,QWORD PTR [rbp-0x8]
+     d6d:	leave
+     d6e:	ret
+     d6f:	mov    r13d,DWORD PTR [r12+0x58]
+     d74:	jmp    d56 <bstaudio_get_capture_offset_for_alsa+0x56>
+     d76:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000d80 <bstaudio_get_playback_offset_for_alsa>:
+     d80:	push   rbp
+     d81:	mov    rbp,rsp
+     d84:	sub    rsp,0x20
+     d88:	mov    QWORD PTR [rbp-0x10],r12
+     d8c:	mov    r12,QWORD PTR [rip+0x0]        # d93 <bstaudio_get_playback_offset_for_alsa+0x13>
+			d8f: R_X86_64_PC32	g_driver-0x4
+     d93:	mov    QWORD PTR [rbp-0x18],rbx
+     d97:	mov    QWORD PTR [rbp-0x8],r13
+     d9b:	lea    rbx,[r12+0x7c]
+     da0:	mov    rdi,rbx
+     da3:	call   da8 <bstaudio_get_playback_offset_for_alsa+0x28>
+			da4: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     da8:	mov    ecx,DWORD PTR [r12+0x78]
+     dad:	mov    rsi,rax
+     db0:	test   ecx,ecx
+     db2:	je     def <bstaudio_get_playback_offset_for_alsa+0x6f>
+     db4:	mov    edi,DWORD PTR [r12+0x6c]
+     db9:	mov    eax,DWORD PTR [r12+0x70]
+     dbe:	xor    edx,edx
+     dc0:	add    eax,edi
+     dc2:	sub    ecx,edi
+     dc4:	div    DWORD PTR [r12+0x68]
+     dc9:	mov    DWORD PTR [r12+0x78],ecx
+     dce:	mov    r13d,edx
+     dd1:	mov    DWORD PTR [r12+0x70],edx
+     dd6:	mov    rdi,rbx
+     dd9:	call   dde <bstaudio_get_playback_offset_for_alsa+0x5e>
+			dda: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     dde:	mov    eax,r13d
+     de1:	mov    rbx,QWORD PTR [rbp-0x18]
+     de5:	mov    r12,QWORD PTR [rbp-0x10]
+     de9:	mov    r13,QWORD PTR [rbp-0x8]
+     ded:	leave
+     dee:	ret
+     def:	mov    r13d,DWORD PTR [r12+0x70]
+     df4:	jmp    dd6 <bstaudio_get_playback_offset_for_alsa+0x56>
+     df6:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000e00 <bstaudio_alloc_g_to_h_shmem_buffer>:
+     e00:	push   rbp
+     e01:	mov    rbp,rsp
+     e04:	push   rbx
+     e05:	mov    ebx,edi
+     e07:	sub    rsp,0x8
+     e0b:	mov    rdi,QWORD PTR [rip+0x0]        # e12 <bstaudio_alloc_g_to_h_shmem_buffer+0x12>
+			e0e: R_X86_64_PC32	g_driver-0x4
+     e12:	add    rdi,0x38
+     e16:	call   e1b <bstaudio_alloc_g_to_h_shmem_buffer+0x1b>
+			e17: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     e1b:	cmp    ebx,0x20000
+     e21:	mov    rdi,QWORD PTR [rip+0x0]        # e28 <bstaudio_alloc_g_to_h_shmem_buffer+0x28>
+			e24: R_X86_64_PC32	g_driver-0x4
+     e28:	ja     e44 <bstaudio_alloc_g_to_h_shmem_buffer+0x44>
+     e2a:	mov    rbx,QWORD PTR [rdi+0x30]
+     e2e:	mov    rsi,rax
+     e31:	add    rdi,0x38
+     e35:	call   e3a <bstaudio_alloc_g_to_h_shmem_buffer+0x3a>
+			e36: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     e3a:	add    rsp,0x8
+     e3e:	mov    rax,rbx
+     e41:	pop    rbx
+     e42:	pop    rbp
+     e43:	ret
+     e44:	xor    ebx,ebx
+     e46:	jmp    e2e <bstaudio_alloc_g_to_h_shmem_buffer+0x2e>
+     e48:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000e50 <bstaudio_free_g_to_h_shmem_buffer>:
+     e50:	push   rbp
+     e51:	mov    rbp,rsp
+     e54:	pop    rbp
+     e55:	ret
+     e56:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000e60 <bstaudio_alloc_h_to_g_shmem_buffer>:
+     e60:	push   rbp
+     e61:	xor    eax,eax
+     e63:	cmp    edi,0x20000
+     e69:	mov    rbp,rsp
+     e6c:	ja     e79 <bstaudio_alloc_h_to_g_shmem_buffer+0x19>
+     e6e:	mov    rax,QWORD PTR [rip+0x0]        # e75 <bstaudio_alloc_h_to_g_shmem_buffer+0x15>
+			e71: R_X86_64_PC32	g_driver-0x4
+     e75:	mov    rax,QWORD PTR [rax+0x20]
+     e79:	pop    rbp
+     e7a:	ret
+     e7b:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000e80 <bstaudio_free_h_to_g_shmem_buffer>:
+     e80:	push   rbp
+     e81:	mov    rbp,rsp
+     e84:	pop    rbp
+     e85:	ret
+     e86:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000e90 <AUD_CMD_params_0>:
+     e90:	push   rbp
+     e91:	mov    rbp,rsp
+     e94:	push   rbx
+     e95:	mov    ebx,edi
+     e97:	sub    rsp,0x8
+     e9b:	mov    rdi,QWORD PTR [rip+0x0]        # ea2 <AUD_CMD_params_0+0x12>
+			e9e: R_X86_64_PC32	g_driver-0x4
+     ea2:	add    rdi,0x38
+     ea6:	call   eab <AUD_CMD_params_0+0x1b>
+			ea7: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     eab:	mov    rdx,QWORD PTR [rip+0x0]        # eb2 <AUD_CMD_params_0+0x22>
+			eae: R_X86_64_PC32	g_driver-0x4
+     eb2:	mov    rdx,QWORD PTR [rdx+0x28]
+     eb6:	mov    DWORD PTR [rdx],ebx
+     eb8:	mov    DWORD PTR [rdx+0x8],0x0
+     ebf:	mfence
+     ec2:	mov    rdx,QWORD PTR [rip+0x0]        # ec9 <AUD_CMD_params_0+0x39>
+			ec5: R_X86_64_PC32	g_driver-0x4
+     ec9:	mov    rsi,rax
+     ecc:	mov    rdx,QWORD PTR [rdx+0x8]
+     ed0:	mov    DWORD PTR [rdx],0x0
+     ed6:	mov    rdi,QWORD PTR [rip+0x0]        # edd <AUD_CMD_params_0+0x4d>
+			ed9: R_X86_64_PC32	g_driver-0x4
+     edd:	add    rdi,0x38
+     ee1:	call   ee6 <AUD_CMD_params_0+0x56>
+			ee2: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     ee6:	add    rsp,0x8
+     eea:	xor    eax,eax
+     eec:	pop    rbx
+     eed:	pop    rbp
+     eee:	ret
+     eef:	nop
+
+0000000000000ef0 <bstaudio_config_cmd>:
+     ef0:	push   rbp
+     ef1:	mov    rbp,rsp
+     ef4:	sub    rsp,0x40
+     ef8:	mov    QWORD PTR [rbp-0x28],rbx
+     efc:	mov    ebx,edi
+     efe:	mov    rdi,QWORD PTR [rip+0x0]        # f05 <bstaudio_config_cmd+0x15>
+			f01: R_X86_64_PC32	g_driver-0x4
+     f05:	mov    QWORD PTR [rbp-0x20],r12
+     f09:	mov    QWORD PTR [rbp-0x18],r13
+     f0d:	mov    r12d,esi
+     f10:	mov    r13d,edx
+     f13:	mov    QWORD PTR [rbp-0x10],r14
+     f17:	mov    QWORD PTR [rbp-0x8],r15
+     f1b:	add    rdi,0x38
+     f1f:	mov    r14d,ecx
+     f22:	mov    r15d,r8d
+     f25:	mov    DWORD PTR [rbp-0x38],r9d
+     f29:	call   f2e <bstaudio_config_cmd+0x3e>
+			f2a: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     f2e:	mov    rdx,QWORD PTR [rip+0x0]        # f35 <bstaudio_config_cmd+0x45>
+			f31: R_X86_64_PC32	g_driver-0x4
+     f35:	mov    ecx,DWORD PTR [rbp+0x10]
+     f38:	mov    rdx,QWORD PTR [rdx+0x28]
+     f3c:	mov    DWORD PTR [rdx],ebx
+     f3e:	mov    DWORD PTR [rdx+0x8],0x1c
+     f45:	mov    DWORD PTR [rdx+0xc],r12d
+     f49:	mov    DWORD PTR [rdx+0x10],r13d
+     f4d:	mov    DWORD PTR [rdx+0x14],r14d
+     f51:	mov    DWORD PTR [rdx+0x18],r15d
+     f55:	mov    r9d,DWORD PTR [rbp-0x38]
+     f59:	mov    DWORD PTR [rdx+0x20],ecx
+     f5c:	mov    ecx,DWORD PTR [rbp+0x18]
+     f5f:	mov    DWORD PTR [rdx+0x1c],r9d
+     f63:	mov    DWORD PTR [rdx+0x24],ecx
+     f66:	mfence
+     f69:	mov    rdx,QWORD PTR [rip+0x0]        # f70 <bstaudio_config_cmd+0x80>
+			f6c: R_X86_64_PC32	g_driver-0x4
+     f70:	mov    rsi,rax
+     f73:	mov    rdx,QWORD PTR [rdx+0x8]
+     f77:	mov    DWORD PTR [rdx],0x0
+     f7d:	mov    rdi,QWORD PTR [rip+0x0]        # f84 <bstaudio_config_cmd+0x94>
+			f80: R_X86_64_PC32	g_driver-0x4
+     f84:	add    rdi,0x38
+     f88:	call   f8d <bstaudio_config_cmd+0x9d>
+			f89: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+     f8d:	xor    eax,eax
+     f8f:	mov    rbx,QWORD PTR [rbp-0x28]
+     f93:	mov    r12,QWORD PTR [rbp-0x20]
+     f97:	mov    r13,QWORD PTR [rbp-0x18]
+     f9b:	mov    r14,QWORD PTR [rbp-0x10]
+     f9f:	mov    r15,QWORD PTR [rbp-0x8]
+     fa3:	leave
+     fa4:	ret
+     fa5:	data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000fb0 <bstaudio_playback_data_available_cmd>:
+     fb0:	push   rbp
+     fb1:	mov    rbp,rsp
+     fb4:	push   r12
+     fb6:	mov    r12d,esi
+     fb9:	push   rbx
+     fba:	mov    ebx,edi
+     fbc:	mov    rdi,QWORD PTR [rip+0x0]        # fc3 <bstaudio_playback_data_available_cmd+0x13>
+			fbf: R_X86_64_PC32	g_driver-0x4
+     fc3:	add    rdi,0x38
+     fc7:	call   fcc <bstaudio_playback_data_available_cmd+0x1c>
+			fc8: R_X86_64_PC32	_raw_spin_lock_irqsave-0x4
+     fcc:	mov    rdx,QWORD PTR [rip+0x0]        # fd3 <bstaudio_playback_data_available_cmd+0x23>
+			fcf: R_X86_64_PC32	g_driver-0x4
+     fd3:	mov    rdx,QWORD PTR [rdx+0x28]
+     fd7:	mov    DWORD PTR [rdx],0x6
+     fdd:	mov    DWORD PTR [rdx+0x8],0x8
+     fe4:	mov    DWORD PTR [rdx+0xc],r12d
+     fe8:	mov    DWORD PTR [rdx+0x10],ebx
+     feb:	mfence
+     fee:	mov    rdx,QWORD PTR [rip+0x0]        # ff5 <bstaudio_playback_data_available_cmd+0x45>
+			ff1: R_X86_64_PC32	g_driver-0x4
+     ff5:	mov    rsi,rax
+     ff8:	mov    rdx,QWORD PTR [rdx+0x8]
+     ffc:	mov    DWORD PTR [rdx],0x0
+    1002:	mov    rdi,QWORD PTR [rip+0x0]        # 1009 <bstaudio_playback_data_available_cmd+0x59>
+			1005: R_X86_64_PC32	g_driver-0x4
+    1009:	add    rdi,0x38
+    100d:	call   1012 <bstaudio_playback_data_available_cmd+0x62>
+			100e: R_X86_64_PC32	_raw_spin_unlock_irqrestore-0x4
+    1012:	pop    rbx
+    1013:	pop    r12
+    1015:	xor    eax,eax
+    1017:	pop    rbp
+    1018:	ret
+    1019:	nop    DWORD PTR [rax+0x0]
+
+0000000000001020 <bstaudio_capture_init_cmd>:
+    1020:	mov    rax,QWORD PTR [rip+0x0]        # 1027 <bstaudio_capture_init_cmd+0x7>
+			1023: R_X86_64_PC32	g_driver-0x4
+    1027:	push   rbp
+    1028:	mov    edi,0x8
+    102d:	mov    rbp,rsp
+    1030:	mov    DWORD PTR [rax+0x64],0x0
+    1037:	call   103c <bstaudio_capture_init_cmd+0x1c>
+			1038: R_X86_64_PC32	AUD_CMD_params_0-0x4
+    103c:	pop    rbp
+    103d:	ret
+    103e:	xchg   ax,ax
+
+0000000000001040 <bstaudio_capture_fini_cmd>:
+    1040:	push   rbp
+    1041:	mov    edi,0x9
+    1046:	mov    rbp,rsp
+    1049:	call   104e <bstaudio_capture_fini_cmd+0xe>
+			104a: R_X86_64_PC32	AUD_CMD_params_0-0x4
+    104e:	pop    rbp
+    104f:	ret
+
+0000000000001050 <bstaudio_playback_init_cmd>:
+    1050:	mov    rax,QWORD PTR [rip+0x0]        # 1057 <bstaudio_playback_init_cmd+0x7>
+			1053: R_X86_64_PC32	g_driver-0x4
+    1057:	push   rbp
+    1058:	mov    edi,0x1
+    105d:	mov    rbp,rsp
+    1060:	mov    DWORD PTR [rax+0x7c],0x0
+    1067:	call   106c <bstaudio_playback_init_cmd+0x1c>
+			1068: R_X86_64_PC32	AUD_CMD_params_0-0x4
+    106c:	pop    rbp
+    106d:	ret
+    106e:	xchg   ax,ax
+
+0000000000001070 <bstaudio_pci_probe>:
+    1070:	push   rbp
+    1071:	mov    edx,0x80
+    1076:	mov    esi,0x6080c0
+    107b:	mov    rbp,rsp
+    107e:	sub    rsp,0x20
+    1082:	mov    QWORD PTR [rbp-0x18],rbx
+    1086:	mov    rbx,rdi
+    1089:	mov    rdi,QWORD PTR [rip+0x0]        # 1090 <bstaudio_pci_probe+0x20>
+			108c: R_X86_64_PC32	kmalloc_caches+0x34
+    1090:	mov    QWORD PTR [rbp-0x10],r12
+    1094:	mov    QWORD PTR [rbp-0x8],r13
+    1098:	mov    r13d,0xfffffff4
+    109e:	call   10a3 <bstaudio_pci_probe+0x33>
+			109f: R_X86_64_PC32	kmem_cache_alloc_trace-0x4
+    10a3:	test   rax,rax
+    10a6:	mov    r12,rax
+    10a9:	je     10f7 <bstaudio_pci_probe+0x87>
+    10ab:	mov    QWORD PTR [rbx+0x160],rax
+    10b2:	mov    rdi,rbx
+    10b5:	mov    QWORD PTR [rax],rbx
+    10b8:	call   10bd <bstaudio_pci_probe+0x4d>
+			10b9: R_X86_64_PC32	pci_enable_device-0x4
+    10bd:	test   eax,eax
+    10bf:	mov    r13d,eax
+    10c2:	js     12f3 <bstaudio_pci_probe+0x283>
+    10c8:	cmp    QWORD PTR [rbx+0x448],0x0
+    10d0:	je     1108 <bstaudio_pci_probe+0x98>
+    10d2:	cmp    QWORD PTR [rbx+0x4a8],0x0
+    10da:	jne    1125 <bstaudio_pci_probe+0xb5>
+    10dc:	lea    rdi,[rbx+0xa8]
+    10e3:	mov    rsi,0x0
+			10e6: R_X86_64_32S	.rodata.str1.1+0xe0
+    10ea:	xor    eax,eax
+    10ec:	mov    r13d,0xfffffffa
+    10f2:	call   10f7 <bstaudio_pci_probe+0x87>
+			10f3: R_X86_64_PC32	_dev_err-0x4
+    10f7:	mov    eax,r13d
+    10fa:	mov    rbx,QWORD PTR [rbp-0x18]
+    10fe:	mov    r12,QWORD PTR [rbp-0x10]
+    1102:	mov    r13,QWORD PTR [rbp-0x8]
+    1106:	leave
+    1107:	ret
+    1108:	lea    rdi,[rbx+0xa8]
+    110f:	mov    rsi,0x0
+			1112: R_X86_64_32S	.rodata.str1.1+0xcd
+    1116:	xor    eax,eax
+    1118:	mov    r13d,0xfffffffa
+    111e:	call   1123 <bstaudio_pci_probe+0xb3>
+			111f: R_X86_64_PC32	_dev_err-0x4
+    1123:	jmp    10f7 <bstaudio_pci_probe+0x87>
+    1125:	mov    rsi,0x0
+			1128: R_X86_64_32S	.rodata.str1.1+0xf3
+    112c:	mov    rdi,rbx
+    112f:	call   1134 <bstaudio_pci_probe+0xc4>
+			1130: R_X86_64_PC32	pci_request_regions-0x4
+    1134:	test   eax,eax
+    1136:	mov    r13d,eax
+    1139:	js     129d <bstaudio_pci_probe+0x22d>
+    113f:	mov    rdi,QWORD PTR [rbx+0x448]
+    1146:	mov    rax,QWORD PTR [rbx+0x450]
+    114d:	test   rdi,rdi
+    1150:	je     1278 <bstaudio_pci_probe+0x208>
+    1156:	sub    rax,rdi
+    1159:	lea    rsi,[rax+0x1]
+    115d:	call   1162 <bstaudio_pci_probe+0xf2>
+			115e: R_X86_64_PC32	ioremap_nocache-0x4
+    1162:	test   rax,rax
+    1165:	mov    QWORD PTR [r12+0x8],rax
+    116a:	je     12d5 <bstaudio_pci_probe+0x265>
+    1170:	mov    rdi,QWORD PTR [rbx+0x4a8]
+    1177:	mov    rax,QWORD PTR [rbx+0x4b0]
+    117e:	test   rdi,rdi
+    1181:	jne    118a <bstaudio_pci_probe+0x11a>
+    1183:	xor    esi,esi
+    1185:	test   rax,rax
+    1188:	je     1191 <bstaudio_pci_probe+0x121>
+    118a:	sub    rax,rdi
+    118d:	lea    rsi,[rax+0x1]
+    1191:	call   1196 <bstaudio_pci_probe+0x126>
+			1192: R_X86_64_PC32	ioremap_nocache-0x4
+    1196:	test   rax,rax
+    1199:	mov    QWORD PTR [r12+0x10],rax
+    119e:	je     12b7 <bstaudio_pci_probe+0x247>
+    11a4:	lea    rdx,[rax+0x400]
+    11ab:	mov    edi,DWORD PTR [rbx+0x444]
+    11b1:	mov    QWORD PTR [r12+0x18],rax
+    11b6:	mov    r9,r12
+    11b9:	mov    r8,0x0
+			11bc: R_X86_64_32S	.rodata.str1.1+0xf3
+    11c0:	mov    ecx,0x80
+    11c5:	mov    QWORD PTR [r12+0x28],rdx
+    11ca:	lea    rdx,[rax+0x800]
+    11d1:	mov    rsi,0x0
+			11d4: R_X86_64_32S	.text+0xab0
+    11d8:	mov    DWORD PTR [r12+0x38],0x0
+    11e1:	mov    QWORD PTR [r12+0x40],rdx
+    11e6:	lea    rdx,[rax+0xc00]
+    11ed:	mov    QWORD PTR [r12+0x48],rdx
+    11f2:	lea    rdx,[rax+0x1000]
+    11f9:	add    rax,0x21000
+    11ff:	mov    QWORD PTR [r12+0x30],rax
+    1204:	mov    QWORD PTR [r12+0x20],rdx
+    1209:	xor    edx,edx
+    120b:	call   1210 <bstaudio_pci_probe+0x1a0>
+			120c: R_X86_64_PC32	request_threaded_irq-0x4
+    1210:	test   eax,eax
+    1212:	mov    r13d,eax
+    1215:	js     1288 <bstaudio_pci_probe+0x218>
+    1217:	mov    esi,DWORD PTR [rbx+0x444]
+    121d:	mov    rdi,0x0
+			1220: R_X86_64_32S	.rodata.str1.1+0x14d
+    1224:	xor    eax,eax
+    1226:	call   122b <bstaudio_pci_probe+0x1bb>
+			1227: R_X86_64_PC32	printk-0x4
+    122b:	mov    QWORD PTR [rip+0x0],r12        # 1232 <bstaudio_pci_probe+0x1c2>
+			122e: R_X86_64_PC32	g_driver-0x4
+    1232:	call   1237 <bstaudio_pci_probe+0x1c7>
+			1233: R_X86_64_PC32	bstaudio_playback_init_cmd-0x4
+    1237:	test   eax,eax
+    1239:	js     131d <bstaudio_pci_probe+0x2ad>
+    123f:	call   1244 <bstaudio_pci_probe+0x1d4>
+			1240: R_X86_64_PC32	bstaudio_capture_init_cmd-0x4
+    1244:	test   eax,eax
+    1246:	js     1308 <bstaudio_pci_probe+0x298>
+    124c:	lea    rdi,[rbx+0xa8]
+    1253:	call   1258 <bstaudio_pci_probe+0x1e8>
+			1254: R_X86_64_PC32	bstaudio_init_alsa-0x4
+    1258:	test   eax,eax
+    125a:	mov    r13d,eax
+    125d:	je     10f7 <bstaudio_pci_probe+0x87>
+    1263:	mov    esi,eax
+    1265:	mov    rdi,0x0
+			1268: R_X86_64_32S	.rodata.str1.8+0x328
+    126c:	xor    eax,eax
+    126e:	call   1273 <bstaudio_pci_probe+0x203>
+			126f: R_X86_64_PC32	printk-0x4
+    1273:	jmp    10f7 <bstaudio_pci_probe+0x87>
+    1278:	xor    esi,esi
+    127a:	test   rax,rax
+    127d:	jne    1156 <bstaudio_pci_probe+0xe6>
+    1283:	jmp    115d <bstaudio_pci_probe+0xed>
+    1288:	mov    esi,eax
+    128a:	mov    rdi,0x0
+			128d: R_X86_64_32S	.rodata.str1.8+0x2a0
+    1291:	xor    eax,eax
+    1293:	call   1298 <bstaudio_pci_probe+0x228>
+			1294: R_X86_64_PC32	printk-0x4
+    1298:	jmp    10f7 <bstaudio_pci_probe+0x87>
+    129d:	lea    rdi,[rbx+0xa8]
+    12a4:	mov    rsi,0x0
+			12a7: R_X86_64_32S	.rodata.str1.1+0xfc
+    12ab:	xor    eax,eax
+    12ad:	call   12b2 <bstaudio_pci_probe+0x242>
+			12ae: R_X86_64_PC32	_dev_err-0x4
+    12b2:	jmp    10f7 <bstaudio_pci_probe+0x87>
+    12b7:	lea    rdi,[rbx+0xa8]
+    12be:	mov    rsi,0x0
+			12c1: R_X86_64_32S	.rodata.str1.1+0x133
+    12c5:	mov    r13d,0xfffffff0
+    12cb:	call   12d0 <bstaudio_pci_probe+0x260>
+			12cc: R_X86_64_PC32	_dev_err-0x4
+    12d0:	jmp    10f7 <bstaudio_pci_probe+0x87>
+    12d5:	lea    rdi,[rbx+0xa8]
+    12dc:	mov    rsi,0x0
+			12df: R_X86_64_32S	.rodata.str1.1+0x116
+    12e3:	mov    r13d,0xfffffff0
+    12e9:	call   12ee <bstaudio_pci_probe+0x27e>
+			12ea: R_X86_64_PC32	_dev_err-0x4
+    12ee:	jmp    10f7 <bstaudio_pci_probe+0x87>
+    12f3:	mov    esi,eax
+    12f5:	mov    rdi,0x0
+			12f8: R_X86_64_32S	.rodata.str1.8+0x270
+    12fc:	xor    eax,eax
+    12fe:	call   1303 <bstaudio_pci_probe+0x293>
+			12ff: R_X86_64_PC32	printk-0x4
+    1303:	jmp    10f7 <bstaudio_pci_probe+0x87>
+    1308:	mov    esi,eax
+    130a:	mov    rdi,0x0
+			130d: R_X86_64_32S	.rodata.str1.8+0x2f8
+    1311:	xor    eax,eax
+    1313:	call   1318 <bstaudio_pci_probe+0x2a8>
+			1314: R_X86_64_PC32	printk-0x4
+    1318:	jmp    124c <bstaudio_pci_probe+0x1dc>
+    131d:	mov    esi,eax
+    131f:	mov    rdi,0x0
+			1322: R_X86_64_32S	.rodata.str1.8+0x2c8
+    1326:	xor    eax,eax
+    1328:	call   132d <bstaudio_pci_probe+0x2bd>
+			1329: R_X86_64_PC32	printk-0x4
+    132d:	jmp    123f <bstaudio_pci_probe+0x1cf>
+    1332:	data16 data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000001340 <bstaudio_playback_fini_cmd>:
+    1340:	push   rbp
+    1341:	mov    edi,0x2
+    1346:	mov    rbp,rsp
+    1349:	call   134e <bstaudio_playback_fini_cmd+0xe>
+			134a: R_X86_64_PC32	AUD_CMD_params_0-0x4
+    134e:	pop    rbp
+    134f:	ret
+
+Disassembly of section .init.text:
+
+0000000000000000 <bstaudio_init_alsa>:
+   0:	push   rbp
+   1:	mov    rcx,0x0
+			4: R_X86_64_32S	__this_module
+   8:	or     esi,0xffffffff
+   b:	mov    r8d,0x2a8
+  11:	mov    rdx,0x0
+			14: R_X86_64_32S	.rodata.str1.1+0x2e
+  18:	mov    rbp,rsp
+  1b:	push   r15
+  1d:	lea    r9,[rbp-0x40]
+  21:	push   r14
+  23:	push   r13
+  25:	push   r12
+  27:	mov    r12,rdi
+  2a:	push   rbx
+  2b:	sub    rsp,0x48
+  2f:	mov    QWORD PTR [rbp-0x40],0x0
+  37:	call   3c <bstaudio_init_alsa+0x3c>
+			38: R_X86_64_PC32	snd_card_new-0x4
+  3c:	test   eax,eax
+  3e:	mov    ecx,eax
+  40:	jns    5d <bstaudio_init_alsa+0x5d>
+  42:	mov    esi,eax
+  44:	mov    rdi,0x0
+			47: R_X86_64_32S	.rodata.str1.8+0xa0
+  4b:	xor    eax,eax
+  4d:	mov    DWORD PTR [rbp-0x68],ecx
+  50:	call   55 <bstaudio_init_alsa+0x55>
+			51: R_X86_64_PC32	printk-0x4
+  55:	mov    ecx,DWORD PTR [rbp-0x68]
+  58:	jmp    2e9 <bstaudio_init_alsa+0x2e9>
+  5d:	mov    rax,QWORD PTR [rbp-0x40]
+  61:	mov    rcx,0x0
+			64: R_X86_64_32S	bstaudio_device_ops
+  68:	mov    esi,0x4
+  6d:	mov    rbx,QWORD PTR [rax+0x190]
+  74:	mov    QWORD PTR [rbx],r12
+  77:	mov    rdi,QWORD PTR [rbp-0x40]
+  7b:	mov    rdx,rbx
+  7e:	mov    QWORD PTR [rbx+0x8],rdi
+  82:	call   87 <bstaudio_init_alsa+0x87>
+			83: R_X86_64_PC32	snd_device_new-0x4
+  87:	test   eax,eax
+  89:	mov    ecx,eax
+  8b:	jns    a8 <bstaudio_init_alsa+0xa8>
+  8d:	mov    esi,eax
+  8f:	mov    rdi,0x0
+			92: R_X86_64_32S	.rodata.str1.8+0xd8
+  96:	xor    eax,eax
+  98:	mov    DWORD PTR [rbp-0x68],ecx
+  9b:	call   a0 <bstaudio_init_alsa+0xa0>
+			9c: R_X86_64_PC32	printk-0x4
+  a0:	mov    ecx,DWORD PTR [rbp-0x68]
+  a3:	jmp    2da <bstaudio_init_alsa+0x2da>
+  a8:	mov    rdi,QWORD PTR [rbx+0x8]
+  ac:	lea    r9,[rbp-0x38]
+  b0:	xor    edx,edx
+  b2:	mov    r8d,0x1
+  b8:	mov    ecx,0x1
+  bd:	mov    rsi,0x0
+			c0: R_X86_64_32S	.rodata.str1.1+0x42
+  c4:	mov    QWORD PTR [rbp-0x38],0x0
+  cc:	call   d1 <bstaudio_init_alsa+0xd1>
+			cd: R_X86_64_PC32	snd_pcm_new-0x4
+  d1:	test   eax,eax
+  d3:	jns    e9 <bstaudio_init_alsa+0xe9>
+  d5:	mov    esi,eax
+  d7:	mov    rdi,0x0
+			da: R_X86_64_32S	.rodata.str1.8+0x110
+  de:	xor    eax,eax
+  e0:	call   e5 <bstaudio_init_alsa+0xe5>
+			e1: R_X86_64_PC32	printk-0x4
+  e5:	xor    eax,eax
+  e7:	jmp    13e <bstaudio_init_alsa+0x13e>
+  e9:	mov    rdi,QWORD PTR [rbp-0x38]
+  ed:	mov    rdx,0x0
+			f0: R_X86_64_32S	.data
+  f4:	xor    esi,esi
+  f6:	call   fb <bstaudio_init_alsa+0xfb>
+			f7: R_X86_64_PC32	snd_pcm_set_ops-0x4
+  fb:	mov    rdi,QWORD PTR [rbp-0x38]
+  ff:	mov    rdx,0x0
+			102: R_X86_64_32S	.data+0xa0
+ 106:	mov    esi,0x1
+ 10b:	call   110 <bstaudio_init_alsa+0x110>
+			10c: R_X86_64_PC32	snd_pcm_set_ops-0x4
+ 110:	mov    rax,QWORD PTR [rbp-0x38]
+ 114:	movabs r9,0x6f69647561747362
+ 11e:	movabs r10,0x6d616572747320
+ 128:	mov    QWORD PTR [rax+0x8b0],rbx
+ 12f:	mov    DWORD PTR [rax+0x1c],0x0
+ 136:	mov    QWORD PTR [rax+0x64],r9
+ 13a:	mov    QWORD PTR [rax+0x6c],r10
+ 13e:	mov    r12,QWORD PTR [rbx+0x8]
+ 142:	mov    QWORD PTR [rbx+0x10],rax
+ 146:	mov    rsi,0x0
+			149: R_X86_64_32S	.rodata.str1.1+0x52
+ 14d:	mov    ecx,0xf
+ 152:	xor    r14d,r14d
+ 155:	mov    r13d,0x10
+ 15b:	lea    rax,[r12+0xb4]
+ 163:	mov    rdi,rax
+ 166:	rep movs BYTE PTR es:[rdi],BYTE PTR ds:[rsi]
+ 168:	imul   rax,r14,0x148
+ 16f:	xor    r15d,r15d
+ 172:	lea    rax,[rbx+rax*1+0x10]
+ 177:	lea    rcx,[rax+0x5c]
+ 17b:	and    BYTE PTR [rax+0x8],0xfe
+ 17f:	lea    rdx,[rax+0x8]
+ 183:	mov    QWORD PTR [rbp-0x48],rcx
+ 187:	lea    rcx,[rax+0x9c]
+ 18e:	mov    DWORD PTR [rdx+0x4],0x186a0
+ 195:	mov    DWORD PTR [rdx+0x8],0x2
+ 19c:	mov    QWORD PTR [rbp-0x50],rcx
+ 1a0:	lea    rcx,[rax+0xdc]
+ 1a7:	add    rax,0x1c
+ 1ab:	mov    DWORD PTR [rdx+0xc],0xbb80
+ 1b2:	mov    DWORD PTR [rdx+0x10],0x2
+ 1b9:	mov    QWORD PTR [rbp-0x58],rcx
+ 1bd:	mov    QWORD PTR [rbp-0x60],rax
+ 1c1:	jmp    26b <bstaudio_init_alsa+0x26b>
+ 1c6:	imul   rdi,r15,0x50
+ 1ca:	mov    rsi,rdx
+ 1cd:	mov    QWORD PTR [rbp-0x70],rdx
+ 1d1:	mov    DWORD PTR [rbp-0x68],ecx
+ 1d4:	add    rdi,0x0
+			1d7: R_X86_64_32S	.data+0x140
+ 1db:	call   1e0 <bstaudio_init_alsa+0x1e0>
+			1dc: R_X86_64_PC32	snd_ctl_new1-0x4
+ 1e0:	test   rax,rax
+ 1e3:	mov    rdx,QWORD PTR [rbp-0x70]
+ 1e7:	mov    ecx,DWORD PTR [rbp-0x68]
+ 1ea:	je     286 <bstaudio_init_alsa+0x286>
+ 1f0:	cmp    ecx,0x3
+ 1f3:	mov    DWORD PTR [rax+0x18],0x0
+ 1fa:	mov    DWORD PTR [rax+0x1c],r14d
+ 1fe:	je     224 <bstaudio_init_alsa+0x224>
+ 200:	jg     209 <bstaudio_init_alsa+0x209>
+ 202:	cmp    ecx,0x2
+ 205:	jne    24f <bstaudio_init_alsa+0x24f>
+ 207:	jmp    215 <bstaudio_init_alsa+0x215>
+ 209:	cmp    ecx,0x4
+ 20c:	je     233 <bstaudio_init_alsa+0x233>
+ 20e:	cmp    ecx,0x5
+ 211:	jne    24f <bstaudio_init_alsa+0x24f>
+ 213:	jmp    242 <bstaudio_init_alsa+0x242>
+ 215:	lea    rsi,[rax+0x10]
+ 219:	mov    rdi,QWORD PTR [rbp-0x60]
+ 21d:	mov    rcx,r13
+ 220:	rep movs DWORD PTR es:[rdi],DWORD PTR ds:[rsi]
+ 222:	jmp    24f <bstaudio_init_alsa+0x24f>
+ 224:	lea    rsi,[rax+0x10]
+ 228:	mov    rdi,QWORD PTR [rbp-0x48]
+ 22c:	mov    rcx,r13
+ 22f:	rep movs DWORD PTR es:[rdi],DWORD PTR ds:[rsi]
+ 231:	jmp    24f <bstaudio_init_alsa+0x24f>
+ 233:	lea    rsi,[rax+0x10]
+ 237:	mov    rdi,QWORD PTR [rbp-0x50]
+ 23b:	mov    rcx,r13
+ 23e:	rep movs DWORD PTR es:[rdi],DWORD PTR ds:[rsi]
+ 240:	jmp    24f <bstaudio_init_alsa+0x24f>
+ 242:	lea    rsi,[rax+0x10]
+ 246:	mov    rdi,QWORD PTR [rbp-0x58]
+ 24a:	mov    rcx,r13
+ 24d:	rep movs DWORD PTR es:[rdi],DWORD PTR ds:[rsi]
+ 24f:	mov    rsi,rax
+ 252:	mov    rdi,r12
+ 255:	mov    QWORD PTR [rbp-0x70],rdx
+ 259:	inc    r15
+ 25c:	call   261 <bstaudio_init_alsa+0x261>
+			25d: R_X86_64_PC32	snd_ctl_add-0x4
+ 261:	test   eax,eax
+ 263:	mov    ecx,eax
+ 265:	mov    rdx,QWORD PTR [rbp-0x70]
+ 269:	js     28b <bstaudio_init_alsa+0x28b>
+ 26b:	cmp    r15,0x7
+ 26f:	mov    ecx,r15d
+ 272:	jne    1c6 <bstaudio_init_alsa+0x1c6>
+ 278:	inc    r14
+ 27b:	cmp    r14,0x2
+ 27f:	je     2fa <bstaudio_init_alsa+0x2fa>
+ 281:	jmp    168 <bstaudio_init_alsa+0x168>
+ 286:	mov    ecx,0xfffffff4
+ 28b:	mov    esi,ecx
+ 28d:	mov    rdi,0x0
+			290: R_X86_64_32S	.rodata.str1.8+0x148
+ 294:	xor    eax,eax
+ 296:	mov    DWORD PTR [rbp-0x68],ecx
+ 299:	call   29e <bstaudio_init_alsa+0x29e>
+			29a: R_X86_64_PC32	printk-0x4
+ 29e:	mov    ecx,DWORD PTR [rbp-0x68]
+ 2a1:	jmp    2da <bstaudio_init_alsa+0x2da>
+ 2a3:	mov    esi,ecx
+ 2a5:	mov    rdi,0x0
+			2a8: R_X86_64_32S	.rodata.str1.8+0x188
+ 2ac:	xor    eax,eax
+ 2ae:	mov    DWORD PTR [rbp-0x68],ecx
+ 2b1:	call   2b6 <bstaudio_init_alsa+0x2b6>
+			2b2: R_X86_64_PC32	printk-0x4
+ 2b6:	mov    ecx,DWORD PTR [rbp-0x68]
+ 2b9:	jmp    2da <bstaudio_init_alsa+0x2da>
+ 2bb:	xor    eax,eax
+ 2bd:	mov    rdi,0x0
+			2c0: R_X86_64_32S	.rodata.str1.8+0x1c0
+ 2c4:	mov    DWORD PTR [rbp-0x68],ecx
+ 2c7:	mov    QWORD PTR [rip+0x0],rbx        # 2ce <bstaudio_init_alsa+0x2ce>
+			2ca: R_X86_64_PC32	g_bstaudio-0x4
+ 2ce:	call   2d3 <bstaudio_init_alsa+0x2d3>
+			2cf: R_X86_64_PC32	printk-0x4
+ 2d3:	mov    ecx,DWORD PTR [rbp-0x68]
+ 2d6:	test   ecx,ecx
+ 2d8:	je     2e9 <bstaudio_init_alsa+0x2e9>
+ 2da:	mov    rdi,QWORD PTR [rbp-0x40]
+ 2de:	mov    DWORD PTR [rbp-0x68],ecx
+ 2e1:	call   2e6 <bstaudio_init_alsa+0x2e6>
+			2e2: R_X86_64_PC32	snd_card_free-0x4
+ 2e6:	mov    ecx,DWORD PTR [rbp-0x68]
+ 2e9:	add    rsp,0x48
+ 2ed:	mov    eax,ecx
+ 2ef:	pop    rbx
+ 2f0:	pop    r12
+ 2f2:	pop    r13
+ 2f4:	pop    r14
+ 2f6:	pop    r15
+ 2f8:	pop    rbp
+ 2f9:	ret
+ 2fa:	mov    rax,QWORD PTR [rbp-0x40]
+ 2fe:	movabs rsi,0x6f69647561747362
+ 308:	movabs rdi,0x72657669726420
+ 312:	movabs r8,0x6f69647561747362
+ 31c:	mov    ecx,0x25
+ 321:	mov    QWORD PTR [rax+0x14],rsi
+ 325:	mov    QWORD PTR [rax+0x1c],rdi
+ 329:	mov    rsi,0x0
+			32c: R_X86_64_32S	.rodata.str1.8+0x1f0
+ 330:	mov    QWORD PTR [rax+0x24],r8
+ 334:	mov    BYTE PTR [rax+0x2c],0x0
+ 338:	add    rax,0x44
+ 33c:	mov    rdi,rax
+ 33f:	rep movs BYTE PTR es:[rdi],BYTE PTR ds:[rsi]
+ 341:	mov    rdi,QWORD PTR [rbp-0x40]
+ 345:	call   34a <bstaudio_init_alsa+0x34a>
+			346: R_X86_64_PC32	snd_card_register-0x4
+ 34a:	test   eax,eax
+ 34c:	mov    ecx,eax
+ 34e:	jns    2bb <bstaudio_init_alsa+0x2bb>
+ 354:	jmp    2a3 <bstaudio_init_alsa+0x2a3>
+
+0000000000000359 <init_module>:
+ 359:	push   rbp
+ 35a:	mov    rdx,0x0
+			35d: R_X86_64_32S	.rodata.str1.1+0xf3
+ 361:	mov    rsi,0x0
+			364: R_X86_64_32S	__this_module
+ 368:	mov    rdi,0x0
+			36b: R_X86_64_32S	.data+0x3c0
+ 36f:	mov    rbp,rsp
+ 372:	call   377 <init_module+0x1e>
+			373: R_X86_64_PC32	__pci_register_driver-0x4
+ 377:	pop    rbp
+ 378:	ret
+
+Disassembly of section .exit.text:
+
+0000000000000000 <bstaudio_exit_alsa>:
+   0:	mov    rax,QWORD PTR [rip+0x0]        # 7 <bstaudio_exit_alsa+0x7>
+			3: R_X86_64_PC32	g_bstaudio-0x4
+   7:	push   rbp
+   8:	mov    rbp,rsp
+   b:	mov    rdi,QWORD PTR [rax+0x8]
+   f:	call   14 <bstaudio_exit_alsa+0x14>
+			10: R_X86_64_PC32	snd_card_free-0x4
+  14:	mov    rax,QWORD PTR [rip+0x0]        # 1b <bstaudio_exit_alsa+0x1b>
+			17: R_X86_64_PC32	g_bstaudio-0x4
+  1b:	mov    QWORD PTR [rax+0x8],0x0
+  23:	pop    rbp
+  24:	ret
+
+0000000000000025 <cleanup_module>:
+  25:	push   rbp
+  26:	mov    rbp,rsp
+  29:	call   2e <cleanup_module+0x9>
+			2a: R_X86_64_PC32	bstaudio_exit_alsa-0x4
+  2e:	mov    rdi,0x0
+			31: R_X86_64_32S	.data+0x3c0
+  35:	call   3a <cleanup_module+0x15>
+			36: R_X86_64_PC32	pci_unregister_driver-0x4
+  3a:	pop    rbp
+  3b:	ret

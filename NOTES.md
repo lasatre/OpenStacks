@@ -351,12 +351,34 @@ instances.conf pointed at the old machine; `-vnc 127.0.0.1::PORT` was never vali
 build had no VNC), it is now `127.0.0.1:(PORT-5900)`; Root.vhd is attached with snapshot=on
 so the pristine image is never modified (user data lives on Data_ost1.qcow2).
 
+## 10g. Phase 69: audio playback (bstaudio)
+
+Decode (Sonnet subagent; dev/re_scratch/{dis,ro,reladata}.txt). It corrects the old stub:
+events at BAR1+0x000 (7 = playback period, 13 = capture), command mailbox at BAR1+0x400
+{op, -, len, payload @+0x0c} + doorbell BAR0+0x00 (nothing read back), IRQ ack BAR0+0x08,
+counters (free-running PERIOD counts) capture +0x800 / playback +0xc00, rings capture +0x1000 /
+playback +0x21000 (<= 0x20000 each), BAR1 = 0x80000. Ops: 1/8 init, 3/0xa config {rate,bits,
+channels,buffer_bytes,period_bytes,bytes_per_sec,frame_bytes}, 4/0xb start, 5/0xc stop,
+6 data-available {count, offset}. One period per event (the guest advances one period per
+pointer call); serialise on the ack; reset the counter on config.
+Implementation (bst_audio.c rewrite; stub kept as re_scratch/bst_audio.c.stub_pre_p69):
+the QEMU audio voice (audio_be_open_out) pull callback consumes the playback ring period by
+period and posts type-7 events; without an audiodev (and for capture = silence) a real-time
+period timer paces. After config the event type stays parked, so spurious shared-IRQ ISR
+runs see delta 0 (the pre-config "bstaudio_isr Unknown cmd = 0" noise remains: the IRQ line
+is shared with virtio-net).
+boot.py --audio dsound (default, host speakers) | wav (runs/<run>/audio.wav) | none.
+Verified p69A (wav): a UI click recorded twice (peak 1474 at 0.0 s and 2.7 s); AudioFlinger
+standby/resume works (op 5 / op 4). adbd blocks `adb push` (sync protocol fault), and the
+shell user cannot open /dev/snd, so test via Android sounds (tap a clickable view).
+Front-end: qemu_engine adds -audiodev dsound,id=snd0 + bstaudio audiodev=snd0.
+
 ## 11. Next
 
-- Make the good path the default: PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0, pristine initramfs.
-- Try the pristine Root.vhd (no libEGL patches). The p50 markers should be unnecessary now.
+- DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).
 - DONE: live display (VNC console), touch (bstinput), keyboard (PS/2), front-end launch.
-- bstaudio (stub), big-slot (BAR2) clients, and Linux portability (gfxstream).
+- DONE: audio playback. Open: capture source (mic), the shared-IRQ noise before config,
+  big-slot (BAR2) clients, Linux portability (gfxstream), front-end GUI smoke test.
 
 ## Pitfalls (new)
 

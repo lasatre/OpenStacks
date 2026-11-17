@@ -42,6 +42,8 @@ def main():
     ap.add_argument("--initrd", default="initramfs_full_p49bak.bin")  # pristine .ko
     ap.add_argument("--vnc", type=int, default=None,
                     help="VNC display N (127.0.0.1:590N) showing the renderer console")
+    ap.add_argument("--audio", default="dsound", choices=["dsound", "wav", "none"],
+                    help="bstaudio backend: host speakers, runs/<name>/audio.wav, or silent")
     ap.add_argument("--persist", action="store_true")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")
@@ -81,7 +83,10 @@ def main():
         "-nic", "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:25556-10.0.2.15:5555",
         "-device", "bstvmsg,id=bstv0",
         "-device", "bstpgaipc,id=bstpgaipc0,gr=on",
-        "-device", "bstaudio,id=bstaudio0",
+    ] + ({"dsound": ["-audiodev", "dsound,id=snd0"],
+          "wav": ["-audiodev", "wav,id=snd0,path=" + os.path.join(run, "audio.wav")],
+          "none": []}[a.audio]) + [
+        "-device", "bstaudio,id=bstaudio0" + ("" if a.audio == "none" else ",audiodev=snd0"),
         "-device", "hvmem,id=hvmem0,ram_size_mib=512",
         "-device", "vbox-vmmdev,id=vmmdev0",
         "-no-reboot", "-no-shutdown", "-display", "none",

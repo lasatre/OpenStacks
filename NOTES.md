@@ -8,11 +8,13 @@ Workspace: `dev/` (git). `dev/src/hw/misc` is the ONLY canonical device source.
 Build: `dev\build.cmd`. Boot: `python dev\boot.py <run> [--root ..] [--env K=V]`.
 Grade: `python dev\tools\grade.py <run> --write`. Monitor: `dev\tools\mon.py`.
 
-## Current best configuration (Phase 65: Android boots to the BlueStacks home screen)
+## Current best configuration (Phase 66: pristine Root.vhd boots to the BlueStacks home screen)
 
-    python dev\boot.py <name> --root Root_p50.vhd --data Data_fresh.qcow2 ^
-        --initrd initramfs_full_p49bak.bin ^
-        --env PGA_SLOTSHIFT=1 --env GR_PURE=1 --env GR_HPP=0
+    python dev\boot.py <name> --root Root.vhd
+
+All other boot.py defaults are the working path: Data_fresh.qcow2,
+initramfs_full_p49bak.bin (pristine .ko), PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0.
+Rebuild (dev\build.cmd) for the RGBA->BGRA capture fix.
 
 -> sys.boot_completed=1 (~3 min), adb works (refs\HD-Adb.exe connect 127.0.0.1:25556),
 focus = com.uncube.launcher3/HomeActivity; 24 GL clients (surfaceflinger, systemui,

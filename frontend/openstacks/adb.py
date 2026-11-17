@@ -332,6 +332,58 @@ class Adb:
             apk = apk[0]
         return self._run("install", "-r", str(apk), timeout=timeout).strip()
 
+    # -- files -----------------------------------------------------------------
+    def push(self, local, remote: str, timeout: float = 3600.0) -> str:
+        """adb push <local file or folder> <remote>; folders are copied recursively."""
+        self.ensure_connected()
+        return self._run("push", str(local), remote, timeout=timeout).strip()
+
+    def pull(self, remote: str, local, timeout: float = 3600.0) -> str:
+        """adb pull <remote file or folder> <local>."""
+        self.ensure_connected()
+        return self._run("pull", "-a", remote, str(local), timeout=timeout).strip()
+
+    def listdir(self, path: str, timeout: float = 30.0) -> list[dict]:
+        """Entries of a guest directory: dicts name, dir (bool), size, mtime (epoch s).
+        Uses toybox stat (Android 7+); '.' and '..' are skipped."""
+        q = shlex.quote(path)
+        try:
+            out = self.shell("sh", "-c",
+                             f"cd {q} && for f in * .*; do [ -e \"$f\" ] || [ -L \"$f\" ] || "
+                             f"continue; stat -L -c '%F|%s|%Y|%n' -- \"$f\" 2>/dev/null || "
+                             f"echo \"?|0|0|$f\"; done", timeout=timeout)
+        except AdbError as e:
+            msg = str(e)
+            if "cd:" in msg:                    # missing folder / no permission
+                raise AdbError(msg[msg.rfind("cd:") + 3:].strip()) from None
+            raise
+        if "No such file" in out or "Not a directory" in out or "denied" in out:
+            raise AdbError(out.strip().splitlines()[-1])
+        entries = []
+        for line in out.splitlines():
+            parts = line.rstrip("\r").split("|", 3)
+            if len(parts) != 4 or parts[3] in (".", ".."):
+                continue
+            kind, size, mtime, name = parts
+            entries.append(dict(name=name, dir=kind == "directory",
+                                size=int(size) if size.isdigit() else 0,
+                                mtime=int(mtime) if mtime.isdigit() else 0))
+        return entries
+
+    def mkdir(self, path: str) -> None:
+        self.shell("mkdir", "-p", path)
+
+    def remove(self, path: str) -> None:
+        self.shell("rm", "-rf", path)
+
+    def media_scan(self, path: str) -> None:
+        """Tell MediaStore about a pushed file so Gallery/Files apps see it."""
+        try:
+            self.shell("am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                       "-d", "file://" + path, timeout=15)
+        except AdbError:
+            pass
+
     def screencap(self, host_path: str, timeout: float = 60.0) -> str:
         """Screencap to guest then pull into host_path (PNG bytes, adb converts)."""
         self.ensure_connected()

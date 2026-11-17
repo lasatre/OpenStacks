@@ -16,6 +16,9 @@ NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
   window to 16:9 or 9:16, remember size per instance).
 - **Thumbnails in the manager** use `adb screencap`; could use the renderer instead.
 
+- **Live shared folder** - files window + drag & drop over adb exist [10s]; a mounted host
+  folder would need the VBoxSharedFolders HGCM service in vmmdev (vboxsf.ko already loads).
+
 ## Performance
 - **Full host CPU model** - we now expose SSE4 + AVX/AVX2/FMA/BMI/F16C/MOVBE on a qemu64
   base; `-cpu host` (AVX-512 etc.) is untested since the CPUID 0xD fix [10p].

@@ -440,6 +440,43 @@ class PlayerPane(QWidget):
         th.start()
         self._adb_threads.append(th)
 
+    def files(self) -> None:
+        """File transfer window for this instance (one per pane, re-raised if open)."""
+        from .files import FileTransferDialog
+        dlg = getattr(self, "_files_dlg", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.raise_()
+            dlg.activateWindow()
+            return
+        self._files_dlg = FileTransferDialog(self.adb, self.inst.name, self.window())
+        self._files_dlg.setAttribute(Qt.WA_DeleteOnClose)
+        self._files_dlg.destroyed.connect(lambda *_: setattr(self, "_files_dlg", None))
+        self._files_dlg.show()
+
+    def drop_files(self, paths: list[str]) -> None:
+        """Files dropped on the player: APKs are installed (several together = base +
+        splits), everything else goes to the guest's Download folder."""
+        apks = [p for p in paths if p.lower().endswith(".apk") and Path(p).is_file()]
+        rest = [p for p in paths if p not in apks and Path(p).exists()]
+        if apks:
+            self.install_apk(apks)
+        if not rest:
+            return
+        dest = "/sdcard/Download"
+        self.flash(f"copying {len(rest)} item(s) to {dest}...")
+
+        def job():
+            for p in rest:
+                self.adb.push(p, dest + "/")
+                if Path(p).is_file():
+                    self.adb.media_scan(f"{dest}/{Path(p).name}")
+            return f"copied {len(rest)} item(s) to {dest}"
+        th = _CallThread(job, self)
+        th.done.connect(lambda s: self.flash(s))
+        th.failed.connect(lambda e: self.flash(f"copy failed: {e}"))
+        th.start()
+        self._adb_threads.append(th)
+
     def flash(self, text: str) -> None:
         self.statusChanged.emit(text)
         QTimer.singleShot(4000, self._emit_status)   # fade back to standard text
@@ -477,7 +514,23 @@ class PlayerWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._on_current_tab)
         self._bg_threads: list[_CallThread] = []
         self._build_sidebar()
+        self.setAcceptDrops(True)       # files dropped anywhere on the player -> the VM
         self.statusBar().showMessage("OpenStacks player ready - launch an instance from the manager.")
+
+    # -- drag & drop: Explorer -> current instance -------------------------------------
+    def dragEnterEvent(self, ev) -> None:
+        if ev.mimeData().hasUrls() and self.current_pane() is not None:
+            ev.acceptProposedAction()
+
+    def dragMoveEvent(self, ev) -> None:
+        self.dragEnterEvent(ev)
+
+    def dropEvent(self, ev) -> None:
+        pane = self.current_pane()
+        paths = [u.toLocalFile() for u in ev.mimeData().urls() if u.isLocalFile()]
+        if pane is not None and paths:
+            ev.acceptProposedAction()
+            pane.drop_files(paths)
 
     # -- sidebar ---------------------------------------------------------------------
     # tools (top of the rail) and Android navigation (anchored to the bottom),
@@ -487,6 +540,8 @@ class PlayerWindow(QMainWindow):
         ("rotate", "rotate", "Rotate screen", "Ctrl+Shift+R"),
         ("screenshot", "screenshot", "Take a screenshot", "Ctrl+S"),
         ("install_apk", "install_apk", "Install APK", "Ctrl+I"),
+        ("files", "files", "Files: move files in and out of the VM "
+         "(or drop files on the window)", "Ctrl+Shift+F"),
         ("pop_screen", "pop_screen", "Pop the screen out into its own window / bring it back",
          "Ctrl+Shift+P"),
         ("keymap", "keymap", "Game controls / key mapping (coming soon)", ""),

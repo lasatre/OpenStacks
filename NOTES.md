@@ -696,6 +696,22 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
   xloadflags lack XLF_KERNEL_64 (`images.pgaipc_opts`). BAR2 is then UC in the PCI hole, so
   the HPP big-slot path is slower there. Boots to Lawnchair 1.2.
 
+## 10s. Phase 82: file transfer (replaces BlueStacks' file manager)
+
+- Player rail "Files" button (Ctrl+Shift+F) opens `frontend/openstacks/files.py`: a guest
+  file browser over adb (listing via toybox `stat -L -c '%F|%s|%Y|%n'`). You can drag files in
+  from Explorer and drag entries out (they're pulled to a temp folder first). Double-clicking
+  a file downloads it to ~/Downloads and opens it. There are upload/download/new
+  folder/delete buttons, Ctrl+V pastes files copied in Explorer, and a quick-places menu.
+  adb work runs in order on one worker thread.
+- Dropping files anywhere on the player window installs APKs (several dropped together are
+  installed as base + splits) and copies everything else to /sdcard/Download, followed by a
+  MediaStore scan broadcast.
+- adb.py: push / pull / listdir / mkdir / remove / media_scan. Verified on Pie64: a nested
+  folder with spaces round-trips byte-identical.
+- Not done: a true shared folder (the image ships vboxsf.ko and our vmmdev already answers
+  SHFL_FN_QUERY_FEATURES; a full VBoxSharedFolders HGCM service would allow a live mount).
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

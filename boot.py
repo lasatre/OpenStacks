@@ -82,7 +82,7 @@ def main():
     if os.path.exists(run):
         sys.exit("run folder exists: %s (pick a new name)" % run)
     exe = EXES[a.exe]
-    for p in (exe, os.path.join(images, a.root), os.path.join(images, a.data)):
+    for p in (exe, os.path.join(images, a.root)) + (() if a.data == "none" else (os.path.join(images, a.data),)):
         if not os.path.exists(p):
             sys.exit("missing: %s" % p)
     os.makedirs(run)
@@ -114,7 +114,7 @@ def main():
     snap = "" if a.persist else ",snapshot=on"
     vmsg = "bstvmsg,id=bstv0"
     sys.path.insert(0, os.path.join(DEV, "frontend"))
-    from openstacks.images import kernel_version
+    from openstacks.images import kernel_version, disk_args, pgaipc_opts
     if kernel_version(os.path.join(images, "kernel.bin"))[0] >= 5:
         vmsg += ",touch-mt=on"          # Phase-80: kernel 5.x bstinput (type-5 touch)
     if a.props == "host":
@@ -133,11 +133,11 @@ def main():
         "-kernel", os.path.join(images, "kernel.bin"),
         "-initrd", os.path.join(images, a.initrd),
         "-append", APPEND + ("" if a.console_verbose else QUIET) + (" " + a.append if a.append else ""),
-        "-drive", "file=%s,format=vpc,if=ide,index=0%s" % (img(a.root), snap),
-        "-drive", "file=%s,format=%s,if=ide,index=1%s" % (img(a.data), fmt(a.data), snap),
+    ] + disk_args(os.path.join(images, a.root),
+                  None if a.data == "none" else os.path.join(images, a.data), fmt(a.data), not a.persist, not a.persist, fmt(a.root)) + [
         "-nic", "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:25556-10.0.2.15:5555",
         "-device", vmsg,
-        "-device", "bstpgaipc,id=bstpgaipc0,gr=on,addr=0x05",
+        "-device", "bstpgaipc,id=bstpgaipc0,gr=on,addr=0x05" + pgaipc_opts(os.path.join(images, "kernel.bin")),
     ] + ({"dsound": ["-audiodev", "dsound,id=snd0"],
           "wav": ["-audiodev", "wav,id=snd0,path=" + os.path.join(run, "audio.wav")],
           "none": []}[a.audio]) + [

@@ -32,6 +32,8 @@ def main() -> int:
     ap.add_argument("--build", default="", help="BlueStacks client build to download from "
                     f"({', '.join(images.CLIENT_BUILDS)}; default: {images.DEFAULT_BUILD}, "
                     "newer only for images it lacks)")
+    ap.add_argument("--repatch", metavar="IMAGE", help="re-apply patches/ to an installed "
+                    "image (or 'all'), from its pristine ramdisk")
     ap.add_argument("--image", default="Pie64", help="image name for install mode")
     ap.add_argument("--engine", default=str(ENGINE), help="BlueStacks Engine dir (install mode)")
     ap.add_argument("--out", default=str(images.ASSETS_ROOT))
@@ -43,6 +45,12 @@ def main() -> int:
         for info in images.catalog(a.build):
             mark = "installed" if info.name in have else f"download {info.size / 2**20:,.0f} MiB"
             print(f"  {info.name:<10} Android {info.android:<11} {mark:<20} (build {info.build})")
+        return 0
+
+    if a.repatch:
+        names = images.installed_images(out_root) if a.repatch == "all" else [a.repatch]
+        for n in names:
+            print(f"{n}: patches applied: {', '.join(images.repatch(n, out_root)) or 'none'}")
         return 0
 
     if a.download:

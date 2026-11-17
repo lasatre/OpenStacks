@@ -202,13 +202,14 @@ class QemuEngine:
         argv += ["-kernel", str(kernel), "-initrd", str(initrd)]
         argv += ["-append", self.build_append(inst)]
 
-        # IDE disks exactly like the proven boot shell (never ahci on pc!)
+        # IDE disks like the proven boot shell (Nougat: see images.disk_args).
+        # snapshot=on: the root image stays pristine (guest writes go to a temporary
+        # overlay); user data lives on the data disk.
         if root.exists():
-            # snapshot=on: the root image stays pristine (guest writes go to a
-            # temporary overlay); user data lives on the data disk.
-            argv += ["-drive", f"file={root},format=vpc,if=ide,index=0,snapshot=on"]
-        if data is not None and data.exists():
-            argv += ["-drive", f"file={data},format={disk_format(data)},if=ide,index=1"]
+            from .images import disk_args
+            has_data = data is not None and data.exists()
+            argv += disk_args(str(root), str(data) if has_data else None,
+                              disk_format(data) if has_data else "vhdx")
 
         argv += ["-nic", f"user,model=virtio-net-pci,"
                          f"hostfwd=tcp:127.0.0.1:{inst.adb_port}-10.0.2.15:5555"]
@@ -231,7 +232,8 @@ class QemuEngine:
             # shares bstpgaipc's line (slot 5 -> IRQ 10): its ISR printk()s on every
             # foreign IRQ, flooding dmesg and the serial console.
             if dev == "bstpgaipc":
-                opts += ",addr=0x05"
+                from .images import pgaipc_opts
+                opts += ",addr=0x05" + pgaipc_opts(kernel)
             if dev == "bstaudio":
                 opts += ",addr=0x0c"
             if dev == "hvmem":

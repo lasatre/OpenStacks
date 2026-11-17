@@ -125,6 +125,7 @@ struct BstPgaipcState {
 
     /* Phase-2 render bridge */
     bool gr;
+    bool bar2_64;       /* BAR2 64-bit prefetchable (above 4G); off for non-PAE guests */
     QEMUBH *gr_bh[GR_MAX_CID_BR];
     unsigned gr_complets;
     struct GrBhCtx { BstPgaipcState *dev; uint32_t cid; } grctx[GR_MAX_CID_BR];
@@ -538,10 +539,13 @@ static void bst_pgaipc_realize(PCIDevice *pdev, Error **errp)
      * HPP ring copy (~120 MB/s for a Unity game) was an uncached write,
      * pinning the game's main thread in memcpy. Above 4 GiB the default
      * MTRR type (WB) applies. Resource index 2 is unchanged for the .ko
-     * (a 64-bit BAR at 2 also occupies register 3, which it never reads). */
-    pci_register_bar(pdev, 2, PCI_BASE_ADDRESS_SPACE_MEMORY |
-                     PCI_BASE_ADDRESS_MEM_TYPE_64 | PCI_BASE_ADDRESS_MEM_PREFETCH,
-                     &s->bar2);
+     * (a 64-bit BAR at 2 also occupies register 3, which it never reads).
+     * bar2-64=off: a non-PAE 32-bit guest (Nougat32) can't assign a BAR above
+     * 4 GiB at all ("BAR 2 not assigned" -> no renderer), so it gets a plain
+     * 32-bit BAR in the PCI hole (uncached, slower big-slot path, but works). */
+    pci_register_bar(pdev, 2, s->bar2_64 ? (PCI_BASE_ADDRESS_SPACE_MEMORY |
+                     PCI_BASE_ADDRESS_MEM_TYPE_64 | PCI_BASE_ADDRESS_MEM_PREFETCH)
+                     : PCI_BASE_ADDRESS_SPACE_MEMORY, &s->bar2);
 
     s->shm = memory_region_get_ram_ptr(&s->bar1);
     s->mem = memory_region_get_ram_ptr(&s->bar2);
@@ -611,6 +615,7 @@ static const GraphicHwOps pga_con_ops = {
 
 static const Property bst_pgaipc_props[] = {
     DEFINE_PROP_BOOL("gr", BstPgaipcState, gr, false),
+    DEFINE_PROP_BOOL("bar2-64", BstPgaipcState, bar2_64, true),
 };
 
 static void bst_pgaipc_class_init(ObjectClass *klass, const void *data)

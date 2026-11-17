@@ -653,6 +653,49 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
   click on Store -> com.bluestacks.gamecenter AppCenterActivity. Pie64/Rvc64 are 4.19 (type 2).
 - boot.py --images now resolves relative paths (QEMU runs in the run dir).
 
+## 10r. Phase 81: image patching - debloat + Lawnchair
+
+- `patches/_lib.py`: pure-Python gzip'd cpio (newc) ramdisk editor (`Ramdisk.load/read/write/
+  save`, round trip verified) + `fetch(url, dest, sha256)` (pinned-hash download cache in
+  deps/lawnchair).
+- `patches/all/10_debloat_lawnchair.py`: adds /boot/ost/ost_boot.sh + /boot/ost/launcher.apk to
+  the boot ramdisk and sources the script from stage2.sh just before `log_echo "Starting
+  Android"`. Every boot it deletes the stripped packages from /data/downloads,
+  /data/priv-downloads and any /data/app updates, then places Lawnchair in
+  /data/downloads/<pkg>/ (BlueStacks' PMS installs from there). Root.vhd untouched; existing
+  /data gets cleaned on the next boot too.
+- Stripped: uncube launcher3, bsxlauncher, gamecenter, home, nowgg, piggy, quest, filemanager,
+  gg.now accounts/ads/billing, now.gg + bluestacks billing, admob config. Kept: GMS/Play,
+  Chrome, location provider, config.db, system-image BlueStacks services.
+- Lawnchair per image: Pie64 = 12.1.0 alpha 4 (14 and 15 crash on Android 9 with
+  Resources$NotFoundException); Rvc64/Tiramisu64 = 15.0.0 beta 3; Nougat = 1.2.0.1884
+  (ch.deletescape.lawnchair). Override: env OST_LAWNCHAIR=modern|14|12|legacy.
+- images.py: `cut_boot_files` runs before the patches (they see kernel.bin/initramfs.bin);
+  `initramfs.orig.bin` keeps the pristine ramdisk; `repatch(image)` /
+  `prepare_assets.py --repatch IMAGE|all` re-applies patches without a download (kill QEMU
+  first: a running VM holds initramfs.bin open).
+- Verified: Pie64, Rvc64, Tiramisu64 boot straight to Lawnchair, no crashes, stripped dirs gone.
+- Nougat64 (Android 7.1.2, kernel 4.9.95) now boots too:
+  - The kernel cmdline is compiled in and overrides ours (`-append` is ignored; only
+    earlyprintk reaches serial).
+  - No ata_piix. BlueStacks puts Root/Data on AHCI, but QEMU's ich9-ahci under WHPX hands the
+    guest garbage on DMA reads (sector 0 came back without 55aa). With the VMware CPUID leaf
+    (hyperv=off) it also soft-locks in the AHCI error handler (LAPIC timer storm).
+  - Fix (`patches/all/05_nougat_ide.py`): the ramdisk binds the built-in ata_generic to the
+    PIIX3 IDE controller via `new_id "8086 7010 ffffffff ffffffff 0 0 2"` (driver_data 2 =
+    ATA_GEN_FORCE_DMA). Without it the controller runs in PIO mode, which is so slow under
+    WHPX that the first-boot copy of the prebundled data stalls for minutes. With it the disks
+    run at UDMA/100. Disks stay on IDE (`images.disk_args`, shared by boot.py and the
+    front-end).
+  - Lawnchair 1.2 is portrait-only at 1600x900/240dpi (below the 720dp tablet cutoff;
+    pref_enableScreenRotation doesn't change it). The guest reports rotation 1 via hcal 7, so
+    the player shows it as a portrait screen. ADB is "offline" until boot completes, then fine.
+- Nougat32 (x86, kernel 4.9.31, non-PAE): same IDE patch, plus bstpgaipc `bar2-64=off`.
+  A non-PAE kernel can't assign the 64-bit BAR2 above 4G ("BAR 2 not assigned", then a flood
+  of "Unexpected cid -1" and no display). The launchers add the option when the bzImage
+  xloadflags lack XLF_KERNEL_64 (`images.pgaipc_opts`). BAR2 is then UC in the PCI hole, so
+  the HPP big-slot path is slower there. Boots to Lawnchair 1.2.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

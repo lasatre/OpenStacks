@@ -49,8 +49,11 @@ NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
   installed 5.21.550 one we load; newer image re-releases are therefore opt-in (--build) [10q].
 - **Android 11 / 13 beyond boot** - Rvc64 and Tiramisu64 boot to the home screen; games, HPP,
   rotation, audio etc. untested there; Nougat untested [10q].
-- **Cleaned-up images** - patch scripts in `patches/<Image>/` (hook already runs between unpack
-  and asset build, see patches/README.md): strip ads/bloat, swap the launcher.
+- **More image cleanup** - debloat + Lawnchair done [10r]. Open: Lawnchair as default HOME is
+  implicit (only launcher); Lawnchair 15 on Pie64 (needs a newer build that fixes Android 9);
+  a Root.vhd-level patch path (system apps such as com.bluestacks.settings) if ever needed.
+  Nougat: Lawnchair 1.2 is portrait-only; a landscape-capable launcher for Android 7 would
+  look better [10r].
 - **Linux host (plan: option A, open-source gfxstream renderer)**. Everything except the renderer
   is porting work; the renderer swap is the project (estimate: ~2 weeks focused).
   1. Pluggable renderer backend in gr_render: the DLL only sees the HstSocketHost vtable

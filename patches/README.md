@@ -10,4 +10,15 @@ its assets are built (`tools/prepare_assets.py --download`, or "New instance" in
   `Android.bstk.in`). Files starting with `_` are skipped (helpers).
 - The applied patch names are recorded in `assets/<Image>/manifest.json`.
 
-No patches exist yet (the de-bloat / launcher step is planned, see BACKLOG.md).
+- Most patches edit the boot ramdisk (`initramfs.bin`, cut from fastboot.vdi before the
+  patches run); `_lib.Ramdisk` edits its cpio in place, `_lib.fetch` downloads pinned files.
+  `initramfs.orig.bin` keeps the pristine ramdisk, so
+  `python tools/prepare_assets.py --repatch <Image>|all` re-applies the patches without a
+  download (stop QEMU first).
+
+Current patches:
+
+- `all/05_nougat_ide.py` - Nougat only: bind ata_generic to the PIIX IDE controller (the
+  4.9 kernel has no ata_piix).
+- `all/10_debloat_lawnchair.py` - remove BlueStacks' launcher, store, rewards, now.gg
+  accounts/ads/billing; install Lawnchair as the only launcher (version per image).

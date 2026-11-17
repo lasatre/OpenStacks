@@ -295,6 +295,35 @@ def split_boot_disk(raw: bytes) -> tuple[bytes, bytes]:
     return bz[:klen], initrd
 
 
+def disk_args(root: str, data: Optional[str], data_fmt: str = "vhdx",
+              root_snap: bool = True, data_snap: bool = False, root_fmt: str = "vpc") -> list[str]:
+    """QEMU args for Root.vhd (sda) + the data disk (sdb), on the PIIX IDE controller.
+    Nougat's 4.9 kernel has no ata_piix (BlueStacks uses AHCI there; QEMU's AHCI DMA
+    returns garbage under WHPX), so its ramdisk is patched to bind ata_generic to the
+    PIIX IDE controller instead (patches/all/05_nougat_ide.py)."""
+    esc = lambda p: str(p).replace(",", ",,")
+    s = lambda on: ",snapshot=on" if on else ""
+    disks = [(root, root_fmt, root_snap)] + ([(data, data_fmt, data_snap)] if data else [])
+    return [a for i, (f, fm, sn) in enumerate(disks) for a in
+            ("-drive", f"file={esc(f)},format={fm},if=ide,index={i}{s(sn)}")]
+
+
+def kernel_is_64bit(kernel: Path) -> bool:
+    """bzImage xloadflags (0x236) bit 0 = XLF_KERNEL_64. Nougat32's kernel is 32-bit
+    non-PAE: it can't use bstpgaipc's BAR2 above 4G (pgaipc_opts)."""
+    try:
+        with open(kernel, "rb") as f:
+            hdr = f.read(0x240)
+        return bool(struct.unpack_from("<H", hdr, 0x236)[0] & 1)
+    except (OSError, struct.error):
+        return True
+
+
+def pgaipc_opts(kernel: Path) -> str:
+    """Extra bstpgaipc options for this guest kernel."""
+    return "" if kernel_is_64bit(kernel) else ",bar2-64=off"
+
+
 def kernel_version(kernel: Path) -> tuple[int, int]:
     """(major, minor) from a bzImage's setup header (kernel_version string pointer at
     0x20E, relative to 0x200). (0, 0) if unreadable. Kernel 5.x images (Tiramisu64) use
@@ -337,10 +366,17 @@ def build_assets(src: Path, image: str, out_root: Path = ASSETS_ROOT, move: bool
     out.mkdir(parents=True, exist_ok=True)
     if progress:
         progress("assets", 0, 3)
-    raw = read_vdi(src / "fastboot.vdi", 32 << 20)
-    kernel, initrd = split_boot_disk(raw)
-    (out / "kernel.bin").write_bytes(kernel)
-    (out / "initramfs.bin").write_bytes(initrd)
+    if (src / "initramfs.bin").exists() and (src / "kernel.bin").exists():
+        # already cut (and possibly patched) by install_image
+        for name in ("kernel.bin", "initramfs.bin", "initramfs.orig.bin"):
+            if (src / name).exists():
+                shutil.copy2(src / name, out / name)
+    else:
+        raw = read_vdi(src / "fastboot.vdi", 32 << 20)
+        kernel, initrd = split_boot_disk(raw)
+        (out / "kernel.bin").write_bytes(kernel)
+        (out / "initramfs.bin").write_bytes(initrd)
+        (out / "initramfs.orig.bin").write_bytes(initrd)
     if progress:
         progress("assets", 1, 3)
     _place(src / "Root.vhd", out / "Root.vhd", move)
@@ -380,6 +416,7 @@ def install_image(name: str, progress: Optional[ProgressFn] = None,
     exe = download(info, progress=progress, cancel=cancel)
     staging = CACHE_DIR / f"{name}.staging"
     extract(exe, staging, progress=progress, cancel=cancel)
+    cut_boot_files(staging)
     patches = apply_patches(staging, name, progress=progress)
     src = {"from": "download", "url": info.url, "client_build": info.build,
            "md5": info.md5, "patches": patches}
@@ -389,6 +426,47 @@ def install_image(name: str, progress: Optional[ProgressFn] = None,
     if not keep_download:
         exe.unlink(missing_ok=True)
     return out
+
+
+def cut_boot_files(d: Path) -> None:
+    """kernel.bin + initramfs.bin (+ an untouched initramfs.orig.bin) from d/fastboot.vdi,
+    so patches can edit the boot ramdisk before the assets are built."""
+    kernel, initrd = split_boot_disk(read_vdi(d / "fastboot.vdi", 32 << 20))
+    (d / "kernel.bin").write_bytes(kernel)
+    (d / "initramfs.bin").write_bytes(initrd)
+    (d / "initramfs.orig.bin").write_bytes(initrd)
+
+
+def repatch(image: str, out_root: Path = ASSETS_ROOT,
+            progress: Optional[ProgressFn] = None) -> list[str]:
+    """Re-run the patches on an installed image from its pristine ramdisk (no download).
+    Patches that edit Root.vhd are not re-applied here (only ramdisk-level patches)."""
+    out = out_root / image
+    orig = out / "initramfs.orig.bin"
+    if not orig.exists():
+        # assets made before patching existed: the current ramdisk is the original
+        data = (out / "initramfs.bin").read_bytes()
+        if b"/boot/ost/ost_boot.sh" in __import__("gzip").decompress(data):
+            raise RuntimeError(f"{image}: no initramfs.orig.bin and the ramdisk is already "
+                               "patched; re-run prepare_assets for this image")
+        orig.write_bytes(data)
+    work = CACHE_DIR / f"{image}.repatch"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    for name in ("kernel.bin", f"oem_{image}.cfg", "Android.bstk.in"):
+        if (out / name).exists():
+            shutil.copy2(out / name, work / name)
+    shutil.copy2(orig, work / "initramfs.bin")
+    patches = apply_patches(work, image, progress=progress)
+    shutil.copy2(work / "initramfs.bin", out / "initramfs.bin")
+    shutil.rmtree(work, ignore_errors=True)
+    man_path = out / "manifest.json"
+    man = json.loads(man_path.read_text(encoding="utf-8")) if man_path.exists() else {}
+    man.setdefault("source", {})["patches"] = patches
+    man["patched"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    man.setdefault("files", {})["initramfs.bin"] = _sha256(out / "initramfs.bin")
+    man_path.write_text(json.dumps(man, indent=2), encoding="utf-8")
+    return patches
 
 
 def _cli_progress(stage: str, done: int, total: int) -> None:

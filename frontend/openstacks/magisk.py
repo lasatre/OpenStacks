@@ -7,15 +7,15 @@ caller restarts the instance. After that boot, finish() pre-grants root to `adb 
 (uid 2000) so tools keep working, and the instance's BlueStacks su is turned off (props) so
 apps ask Magisk instead of getting silent root.
 
-Kitsune's GitHub releases are gone, so the APK is supplied by the user once and cached in
-deps/magisk/. Qt-free.
+The APK comes from AndnixSH's KitsuneMagisk mirror (the original 1q23lyc45 repo has no
+releases any more), pinned by SHA-256 and cached in deps/magisk/. Qt-free.
 """
 from __future__ import annotations
 
-import io
+import hashlib
 import posixpath
-import shutil
 import tempfile
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Callable, Optional
@@ -35,33 +35,48 @@ Log = Callable[[str], None]
 
 
 # -- the APK -----------------------------------------------------------------------------
-def check_apk(path: Path) -> str:
-    """'' if path is a usable Magisk APK (x86/x86_64 binaries + scripts), else why not."""
-    try:
-        with zipfile.ZipFile(path) as z:
-            names = set(z.namelist())
-    except (OSError, zipfile.BadZipFile) as e:
-        return f"not an APK ({e})"
-    need = ["lib/x86/libmagisk32.so", "lib/x86/libmagiskinit.so", "lib/x86/libmagiskpolicy.so",
-            "lib/x86_64/libmagisk64.so", "assets/util_functions.sh", "assets/stub.apk"]
-    missing = [n for n in need if n not in names]
-    return f"missing {', '.join(missing)}" if missing else ""
+# Kitsune Magisk v27.2-kitsune-4 (release build), AndnixSH mirror, tag "backup". The hash
+# is GitHub's asset digest; tested on all five images (NOTES.md 10t).
+APK_URL = ("https://github.com/AndnixSH/KitsuneMagisk/releases/download/backup/"
+           "Kitsune.Magisk.release.v27.2-kitsune-4.apk")
+APK_SHA256 = "818cfa02783ddae573cc953450fbc39ec3e5164b66e517c657ba11cf90963a89"
+APK_VERSION = "v27.2-kitsune-4"
+
+
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def cached_apk() -> Optional[Path]:
-    apks = sorted(CACHE.glob("*.apk"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return next((p for p in apks if not check_apk(p)), None)
+    """The pinned APK if it is already in deps/magisk (any file name)."""
+    for p in sorted(CACHE.glob("*.apk")):
+        if _sha256(p) == APK_SHA256:
+            return p
+    return None
 
 
-def import_apk(src: Path) -> Path:
-    why = check_apk(Path(src))
-    if why:
-        raise ValueError(f"{Path(src).name}: {why}")
+def ensure_apk(log: Log = print) -> Path:
+    """The pinned Kitsune APK: from the cache, else downloaded (and verified)."""
+    p = cached_apk()
+    if p is not None:
+        return p
+    dest = CACHE / Path(APK_URL).name
+    log(f"downloading {dest.name}")
     CACHE.mkdir(parents=True, exist_ok=True)
-    dst = CACHE / Path(src).name
-    if Path(src).resolve() != dst.resolve():
-        shutil.copy2(src, dst)
-    return dst
+    req = urllib.request.Request(APK_URL, headers={"User-Agent": "OpenStacks"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        data = r.read()
+    got = hashlib.sha256(data).hexdigest()
+    if got != APK_SHA256:
+        raise ValueError(f"{dest.name}: sha256 {got} != pinned {APK_SHA256}")
+    tmp = dest.with_suffix(".part")
+    tmp.write_bytes(data)
+    tmp.replace(dest)
+    return dest
 
 
 def _bin_files(apk: Path, is64: bool) -> dict[str, bytes]:

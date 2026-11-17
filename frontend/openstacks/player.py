@@ -497,32 +497,19 @@ class PlayerPane(QWidget):
             self._run_root(lambda log: magisk.uninstall(self.adb, log), rooted=False)
             return
 
-        apk = magisk.cached_apk()
-        if apk is None:
-            QMessageBox.information(
-                self, "Magisk APK needed",
-                "Pick a Kitsune Magisk APK (e.g. Magisk-27.2-kitsune-4.apk). Kitsune has no "
-                "public releases any more, so it is not downloaded automatically. It is "
-                "copied to deps/magisk/ and reused for other instances.")
-            path, _ = QFileDialog.getOpenFileName(
-                self, "Kitsune Magisk APK", str(Path.home() / "Desktop"),
-                "APK files (*.apk)")
-            if not path:
-                return
-            try:
-                apk = magisk.import_apk(Path(path))
-            except ValueError as e:
-                QMessageBox.warning(self, "Not a usable Magisk APK", str(e))
-                return
+        have = magisk.cached_apk() is not None
         if QMessageBox.question(
                 self, "Root with Magisk",
-                f"Root {name} with {apk.name}?\n\n"
+                f"Root {name} with Kitsune Magisk {magisk.APK_VERSION}?\n\n"
+                + ("" if have else "The APK is downloaded once from github.com/AndnixSH/"
+                   "KitsuneMagisk (checked against a pinned SHA-256).\n\n") +
                 "Magisk is started from OpenStacks' boot ramdisk (the shared system image "
                 "is not modified) and the Magisk app is installed; apps then ask for root "
                 "through Magisk. adb shell keeps root. The instance restarts once.\n\n"
                 "Remove it again with the same button.") != QMessageBox.Yes:
             return
-        self._run_root(lambda log: magisk.install(self.adb, apk, log), rooted=True)
+        self._run_root(lambda log: magisk.install(self.adb, magisk.ensure_apk(log), log),
+                       rooted=True)
 
     def _run_root(self, job, rooted: bool) -> None:
         self._root_busy = True

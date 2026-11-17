@@ -55,7 +55,7 @@
 OBJECT_DECLARE_SIMPLE_TYPE(BstVmsgState, BST_VMSG)
 
 #define BST_VMSG_BAR0_SIZE      0x1000
-#define BST_VMSG_BAR1_SIZE      0x100000
+#define BST_VMSG_BAR1_SIZE      0x800000  /* p72: 8 slots x 0x81000 */
 
 #define VMSG_SHM_MAX            0x00
 #define VMSG_SHM_CID            0x04
@@ -67,9 +67,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(BstVmsgState, BST_VMSG)
 #define VMSG_SHM_IRQ_PENDING    0x1c
 
 #define VMSG_MAX_CONNECTIONS    8
-#define VMSG_IN_SIZE            0x1000u
-#define VMSG_OUT_SIZE           0x10000u
-#define VMSG_IN_ALIGN           0x1000u
+#define VMSG_IN_SIZE            0x40000u  /* p72: was 4K; installed-apps sync (hcallSyncInstalledAppsRpc) needs more, xdbgBreak otherwise */
+#define VMSG_OUT_SIZE           0x40000u
+#define VMSG_IN_ALIGN           VMSG_IN_SIZE
 /* Every slot offset (guest_off/host_off/poll_off) MUST be page-aligned:
  * the guest kernel's remap_pfn_range() uses (bar1_phys + guest_off) >> 12,
  * which truncates non-aligned offsets and shifts the guest's window.

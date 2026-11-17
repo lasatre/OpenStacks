@@ -432,6 +432,18 @@ Front-end: qemu_engine adds -audiodev dsound,id=snd0 + bstaudio audiodev=snd0.
 - boot.py's monitor moved to 4456 (the front-end's Pie64 uses 4446; a just-killed dev boot
   made the front-end launch fail with "address in use").
 
+## 10j. Phase 72: bstvmsg buffers 4K -> 256K (Rvc64_2 boot loop)
+
+- Rvc64_2 (the user's original data disk, ~20 third-party apps) looped: system_server
+  SIGTRAP in libhostcall_jni.so VmsgGuestClient::getHostBoundBuffer -> xdbgBreak, called from
+  hcallSyncInstalledAppsRpc. getHostBoundBuffer(n) asserts n <= client+4 (the slot's in
+  size, shm header +0x10). The installed-apps sync (method 6) is 6784 bytes; our in window
+  was 4K. Now in = out = 0x40000, BAR1 8 MiB (8 slots x 0x81000). Boot stable, no crashes.
+- Unity games (all arm64, ARM translation): the app's GL client attaches as a BIG slot
+  (cid=127, BAR2) with handshake "... 0 0 1" (HPP requested); gr_render answers
+  hpp=REQUESTED(unsupported), the client disconnects and the app aborts with
+  "FORTIFY: pthread_mutex_lock called on a destroyed mutex". Needs the HPP / big-slot path.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

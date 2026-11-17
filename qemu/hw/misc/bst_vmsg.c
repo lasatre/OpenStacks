@@ -124,6 +124,7 @@ typedef struct BstVmsgState {
     /* host props served to the guest's bstconf (GetProps) */
     char *props;            /* extra 'k=v;k=v' (later lines win) */
     char *propsfile;        /* extra props file, one k=v per line */
+    bool touch_mt;          /* Phase-80: bstinput type-5 multi-touch (kernel 5.x images) */
     GString *props_text;
     unsigned reqlog;
     bool gcal_parked_logged;
@@ -358,6 +359,22 @@ static void bst_vmsg_input_sync(DeviceState *dev)
         return;
     }
     s->tdirty = false;
+    if (s->touch_mt) {
+        /* Phase-80: kernel 5.15 bstinput (Tiramisu64) inpMtTouchDispatch:
+         * type 5, [u32 count] + count x {u32 slot, u32 state, u32 x, u32 y};
+         * state 2 = finger up (ABS_MT_TRACKING_ID -1), else down/move at x,y
+         * (0..32767), then BTN_TOUCH + SYN. Type 2 is "unknown" there.  */
+        memset(m, 0, 24);
+        stl_le_p(m + 0, 5);
+        stl_le_p(m + 4, 1);
+        stl_le_p(m + 8, 0);                          /* slot 0 */
+        stl_le_p(m + 12, s->tdown ? 1 : 2);
+        stl_le_p(m + 16, (uint32_t)s->tx);
+        stl_le_p(m + 20, (uint32_t)s->ty);
+        bst_vmsg_push(s, m, 24, s->tdown && was_down);
+        was_down = s->tdown;
+        return;
+    }
     stl_le_p(m, 2);                                  /* type 2 = touch */
     for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
         stl_le_p(m + 4 + 8 * i, VMSG_TOUCH_NONE);
@@ -563,6 +580,7 @@ static void bst_vmsg_realize(PCIDevice *pdev, Error **errp)
 static const Property bst_vmsg_props[] = {
     DEFINE_PROP_STRING("props", BstVmsgState, props),
     DEFINE_PROP_STRING("propsfile", BstVmsgState, propsfile),
+    DEFINE_PROP_BOOL("touch-mt", BstVmsgState, touch_mt, false),
 };
 
 static void bst_vmsg_class_init(ObjectClass *klass, const void *data)

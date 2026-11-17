@@ -295,6 +295,21 @@ def split_boot_disk(raw: bytes) -> tuple[bytes, bytes]:
     return bz[:klen], initrd
 
 
+def kernel_version(kernel: Path) -> tuple[int, int]:
+    """(major, minor) from a bzImage's setup header (kernel_version string pointer at
+    0x20E, relative to 0x200). (0, 0) if unreadable. Kernel 5.x images (Tiramisu64) use
+    the newer bstinput touch protocol."""
+    try:
+        with open(kernel, "rb") as f:
+            hdr = f.read(0x8000)
+        ptr = struct.unpack_from("<H", hdr, 0x20E)[0] + 0x200
+        ver = hdr[ptr:ptr + 32].split(b" ")[0].decode("ascii", "replace")
+        major, minor = ver.split(".")[:2]
+        return int(major), int(minor)
+    except (OSError, ValueError, struct.error, IndexError):
+        return (0, 0)
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:

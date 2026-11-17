@@ -76,7 +76,7 @@ def main():
     ap.add_argument("--prop", action="append", default=[], metavar="K=V",
                     help="override one bst.* prop (e.g. --prop abi_list=x86,x64)")
     a = ap.parse_args()
-    images = a.images
+    images = os.path.abspath(a.images)
 
     run = os.path.join(DEV, "runs", a.name)
     if os.path.exists(run):
@@ -102,6 +102,10 @@ def main():
 
     snap = "" if a.persist else ",snapshot=on"
     vmsg = "bstvmsg,id=bstv0"
+    sys.path.insert(0, os.path.join(DEV, "frontend"))
+    from openstacks.images import kernel_version
+    if kernel_version(os.path.join(images, "kernel.bin"))[0] >= 5:
+        vmsg += ",touch-mt=on"          # Phase-80: kernel 5.x bstinput (type-5 touch)
     if a.props == "host":
         sys.path.insert(0, os.path.join(DEV, "tools"))
         import bstprops

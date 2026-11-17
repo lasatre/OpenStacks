@@ -237,6 +237,9 @@ class QemuEngine:
             if dev == "hvmem":
                 opts += f",ram_size_mib={int(inst.hvmem_mb)}"
             if dev == "bstvmsg":
+                from .images import kernel_version
+                if kernel_version(kernel)[0] >= 5:
+                    opts += ",touch-mt=on"      # Phase-80: kernel 5.x bstinput (type 5)
                 # HD-Player-style bst.* host props (oem/version/abi_list/adb gate,
                 # graphics, locale...) from bluestacks.conf (dev/NOTES.md 10h/10i)
                 try:

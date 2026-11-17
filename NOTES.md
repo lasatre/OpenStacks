@@ -643,6 +643,16 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
 - Tiramisu64 (Android 13) downloaded + instance created: boots to the BlueStacks home screen
   (ro.build.version.release=13, docs/shots/phase79_android13_tiramisu64.png).
 
+- Android 13 touch (Phase 80): Tiramisu64 ships a 5.15 kernel whose bstinput.ko dispatches
+  inpOnReceive types 0 kbd, 1 IME, 3 gamepad, 4 control, **5 multi-touch** (inpMtTouchDispatch);
+  type 2 (our 4.19-era 16-slot frame) is "unknown", so clicks did nothing. Type 5 =
+  [u32 5][u32 count] + count x {u32 slot, u32 state, u32 x, u32 y}: ABS_MT_SLOT=slot; state 2 ->
+  TRACKING_ID -1 (up), else TRACKING_ID=slot + POSITION_X/Y (0..32767, 16 slots); then
+  BTN_TOUCH(active>0) + SYN. bstvmsg property touch-mt=on selects it; the launchers set it when
+  the image's bzImage kernel_version (header 0x20E) is >= 5 (images.kernel_version). Verified:
+  click on Store -> com.bluestacks.gamecenter AppCenterActivity. Pie64/Rvc64 are 4.19 (type 2).
+- boot.py --images now resolves relative paths (QEMU runs in the run dir).
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

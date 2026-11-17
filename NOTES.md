@@ -407,12 +407,35 @@ Front-end: qemu_engine adds -audiodev dsound,id=snd0 + bstaudio audiodev=snd0.
   /data/downloads/.config.db (BstFilterAppsService: GL/ABI/hotfix tweaks) is rejected by a
   NumberFormatException. Real HD-Player supplies these; worth serving later.
 
+## 10i. Phase 71: HD-Player host props (bst.oem/version/abi_list/...)
+
+- Reference: the real /data/.bstconf.prop read (read-only, 7-Zip) from
+  C:\ProgramData\BlueStacks_nxt\Engine\Pie64\Data.vhdx: 119 keys. HD-Player sends a fixed
+  whitelist: global bst.* keys + bst.instance.<name>.* (prefix dropped) + bst.oem (oem cfg,
+  "nxt") + bst.version (HKLM\SOFTWARE\BlueStacks_nxt Version, 5.21.550.1031) +
+  bst.instance; bstsetconf.sh then appends serialno/imei/macs. Secrets in bluestacks.conf
+  (refresh_token, nowgg_*) are not in the whitelist.
+- dev/tools/bstprops.py rebuilds that set from bluestacks.conf at launch (reproduces the
+  real file except two moved window coordinates); boot.py writes runs/<run>/bst.props and
+  passes bstvmsg propsfile= (default --props host; --prop k=v overrides; --props min =
+  built-ins). Overrides per boot: android_id, fb_width/height, dpi, cpus, ram,
+  status.adb_port. The front-end has a copy (openstacks/bstprops.py) and writes
+  logs/<inst>.bst.props from the instance settings.
+- Built-in fallback list gained oem/version/country/locale/abi_list/instance.
+- Result p71_props + front-end Pie64: props visible via getprop, 1600x900@240, home renders
+  (Play Store icon now on the home screen). BstFilterAppsService loads .config.db:
+  per-package Gl_renderer answers (bstfilterapps txn 20, e.g. com.infoldgames.infinitynikki
+  -> Mali-G72, wildcard -> Adreno (TM) 650). The boot "loadConfigDb ... Permission denied"
+  is a race inside BlueStacks: com.bluestacks.home writes the file via su (root umask),
+  the FileObserver fires on CLOSE_WRITE before the chown/chmod, and the queued ATTRIB events
+  reload it successfully. Rules gated on prodversion_gte 5.22.x stay off (installed 5.21).
+- boot.py's monitor moved to 4456 (the front-end's Pie64 uses 4446; a just-killed dev boot
+  made the front-end launch fail with "address in use").
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).
-- DONE: full ADB incl. push/install (p70).
-- TODO: serve bst.version/bst.oem/bst.country (+ per-instance identity via props=) so
-  .config.db app rules apply.
+- DONE: full ADB incl. push/install (p70); HD-Player host props (p71).
 - DONE: live display (VNC console), touch (bstinput), keyboard (PS/2), front-end launch.
 - DONE: audio playback. Open: capture source (mic), the shared-IRQ noise before config,
   big-slot (BAR2) clients, Linux portability (gfxstream), front-end GUI smoke test.

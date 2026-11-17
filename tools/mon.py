@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""QEMU telnet-monitor helper (127.0.0.1:4446).
+"""QEMU telnet-monitor helper (127.0.0.1:4456; boot.py, distinct from the front-end 4446+).
 
   python dev\\tools\\mon.py cmd "info status"           one command
   python dev\\tools\\mon.py freeze <outdir>              stop + the THREE pmemsave
@@ -13,7 +13,7 @@ import socket
 import sys
 import time
 
-HOST, PORT = "127.0.0.1", 4446
+HOST, PORT = "127.0.0.1", 4456
 WINDOWS = [("lo", 0x0, 0x80000000), ("mid", 0x80000000, 0x80000000),
            ("top", 0x100000000, 0x40000000)]
 

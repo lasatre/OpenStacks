@@ -47,6 +47,11 @@ def main():
     ap.add_argument("--persist", action="store_true")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")
+    ap.add_argument("--props", default="host", choices=["host", "min"],
+                    help="host: HD-Player-style bst.* props from bluestacks.conf "
+                         "(tools/bstprops.py); min: bstvmsg built-in list only")
+    ap.add_argument("--prop", action="append", default=[], metavar="K=V",
+                    help="override one bst.* prop (e.g. --prop abi_list=x86,x64)")
     a = ap.parse_args()
 
     run = os.path.join(DEV, "runs", a.name)
@@ -70,6 +75,15 @@ def main():
         env[k] = v
 
     snap = "" if a.persist else ",snapshot=on"
+    vmsg = "bstvmsg,id=bstv0"
+    if a.props == "host":
+        sys.path.insert(0, os.path.join(DEV, "tools"))
+        import bstprops
+        ov = {"android_id": "bfd0e87474aa4028", "fb_width": "1600", "fb_height": "900",
+              "dpi": "240", "cpus": "2", "ram": "4096", "status.adb_port": "25556"}
+        ov.update(kv.split("=", 1) for kv in a.prop)
+        pf = bstprops.write_props_file(os.path.join(run, "bst.props"), "Pie64", ov)
+        vmsg += ",propsfile=" + str(pf).replace(",", ",,")
     img = lambda f: os.path.join(IMAGES, f).replace(",", ",,")
     argv = [
         exe, "-name", "openstacks-" + a.name,
@@ -81,7 +95,7 @@ def main():
         "-drive", "file=%s,format=vpc,if=ide,index=0%s" % (img(a.root), snap),
         "-drive", "file=%s,format=qcow2,if=ide,index=1%s" % (img(a.data), snap),
         "-nic", "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:25556-10.0.2.15:5555",
-        "-device", "bstvmsg,id=bstv0",
+        "-device", vmsg,
         "-device", "bstpgaipc,id=bstpgaipc0,gr=on",
     ] + ({"dsound": ["-audiodev", "dsound,id=snd0"],
           "wav": ["-audiodev", "wav,id=snd0,path=" + os.path.join(run, "audio.wav")],
@@ -92,7 +106,7 @@ def main():
         "-no-reboot", "-no-shutdown", "-display", "none",
     ] + (["-vga", "none", "-parallel", "none", "-vnc", "127.0.0.1:%d" % a.vnc] if a.vnc is not None else []) + [
         "-serial", "file:" + os.path.join(run, "serial.log"),
-        "-monitor", "telnet:127.0.0.1:4446,server,nowait",
+        "-monitor", "telnet:127.0.0.1:4456,server,nowait",
     ]
     knobs = {k: env[k] for k in sorted(env) if k.startswith("GR_")}
     with open(os.path.join(run, "meta.txt"), "w") as f:

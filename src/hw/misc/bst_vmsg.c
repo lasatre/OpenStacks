@@ -143,7 +143,16 @@ static const char bst_vmsg_props_text[] =
     "bst.device_carrier_code=310_260\n"
     /* adbd gate (_bst_allow_adb_cmd): >0 allows every shell/sync/exec service;
      * real BlueStacks gets it from bluestacks.conf (Settings > Enable ADB). */
-    "bst.enable_adb_access=1\n";
+    "bst.enable_adb_access=1\n"
+    /* BstFilterAppsService rejects every /data/downloads/.config.db rule
+     * (NumberFormatException) without these; abi_list enables ARM translation.
+     * Full HD-Player set: propsfile= from dev/tools/bstprops.py. */
+    "bst.oem=nxt\n"
+    "bst.version=5.21.550.1031\n"
+    "bst.country=US\n"
+    "bst.locale=en-US\n"
+    "bst.abi_list=x86,x64,arm,arm64\n"
+    "bst.instance=Pie64\n";
 
 static BstVmsgConn *bst_vmsg_get_conn(BstVmsgState *s, uint32_t cid)
 {

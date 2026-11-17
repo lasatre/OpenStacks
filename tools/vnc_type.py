@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Type ASCII text (and optional Enter) through QEMU's VNC server as key events.
 
-  python dev\\tools\\vnc_type.py "text" [--enter] [--port 5901]
+  python tools\\vnc_type.py "text" [--enter] [--port 5901]
 """
 import socket
 import struct

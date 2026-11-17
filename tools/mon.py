@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """QEMU telnet-monitor helper (127.0.0.1:4456; boot.py, distinct from the front-end 4446+).
 
-  python dev\\tools\\mon.py cmd "info status"           one command
-  python dev\\tools\\mon.py freeze <outdir>              stop + the THREE pmemsave
+  python tools\\mon.py cmd "info status"           one command
+  python tools\\mon.py freeze <outdir>              stop + the THREE pmemsave
                                                        windows (emugl heap is above
                                                        4 GiB) + cont
-  python dev\\tools\\mon.py freeze <outdir> --stay       same, but leave the guest stopped
-  python dev\\tools\\mon.py quit
+  python tools\\mon.py freeze <outdir> --stay       same, but leave the guest stopped
+  python tools\\mon.py quit
 """
 import os
 import socket

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Convert a run's screen_pga.bmp (top-down 32-bpp BGRA) to a half-size PNG.
 
-  python dev\\tools\\shot.py <run-or-bmp> [out.png] [--rgba]
+  python tools\\shot.py <run-or-bmp> [out.png] [--rgba]
 
 --rgba: the BMP holds raw RGBA (captures made before the Phase-66 bmp_write fix).
 """

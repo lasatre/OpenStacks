@@ -1,0 +1,39 @@
+; OpenStacks instance configuration. Copy to instances.conf (gitignored) or let
+; the manager create it. Every key is optional; defaults are shown.
+;
+; Paths default to the repo layout:
+;   qemu_path      <repo>\build\qemu-system-x86_64.exe   (qemu\build.cmd)
+;   assets_dir     <repo>\assets\Pie64                   (tools\prepare_assets.py)
+;   instances_dir  <repo>\instances                      (per-instance data disks)
+;   adb_path       adb on PATH, then C:\Path\platform-tools, then HD-Adb.exe
+
+[global]
+locale=en-US
+acceleration=whpx
+qemu_path=
+qemu_bios_dir=
+assets_dir=
+instances_dir=
+adb_path=
+default=Pie64
+
+[Pie64]
+cpus=4
+ram_mb=4096
+resolution=1600x900
+dpi=240
+adb_port=5555
+vnc_port=5901
+monitor_port=4446
+; android_id / serial_number are generated for new instances
+kernel=kernel.bin
+initrd=initramfs.bin
+root_image=Root.vhd
+; data_disk empty = instances\<name>\Data.vhdx, created from BlueStacks' blank
+; template on first launch. An absolute path (or a name inside assets_dir)
+; uses an existing disk (.vhdx / .qcow2 / .vhd).
+data_disk=
+devices=bstvmsg,bstpgaipc,bstaudio,hvmem,vbox-vmmdev
+pgaipc_gr=true
+hvmem_mb=512
+extra_append=

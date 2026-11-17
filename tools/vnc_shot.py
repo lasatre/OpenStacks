@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Grab one frame from QEMU's VNC server (raw RFB, no auth) into a half-size PNG.
 
-  python dev\\tools\\vnc_shot.py [port=5901] [out.png]
+  python tools\\vnc_shot.py [port=5901] [out.png]
 """
 import socket
 import struct

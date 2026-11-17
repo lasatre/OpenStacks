@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Send a tap (or a drag) to QEMU's VNC server as pointer events.
 
-  python dev\\tools\\vnc_tap.py <x> <y> [--port 5901] [--to X2 Y2] [--hold MS]
+  python tools\\vnc_tap.py <x> <y> [--port 5901] [--to X2 Y2] [--hold MS]
 
 Coordinates are screen pixels of the VNC framebuffer (1600x900 here).
 """

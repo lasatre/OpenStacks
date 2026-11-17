@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """Launch one guest boot with the proven QEMU argv (replaces the 51 boot_bst_*.cmd).
 
-  python dev\\boot.py <run-name> [--root Root_p54.vhd] [--data Data_fresh.qcow2]
-                     [--persist] [--exe dev|p59] [--env K=V ...]
+  python boot.py <run-name> [--vnc 1] [--images DIR] [--root Root.vhd]
+                 [--data Data_template.vhdx] [--persist] [--env K=V ...] [--prop k=v ...]
 
 Every run gets its own folder dev\\runs\\<run-name>\\ holding serial.log,
 out.log (QEMU stdout+stderr = the [gr_render] lines), screen_pga.bmp (QEMU's cwd
 is the run folder) and meta.txt. Refuses to reuse an existing run folder, so a
 log can never be overwritten by the next boot.
 
-Disks: images live in ..\\qemu_test. By default BOTH drives use snapshot=on
+Disks: images live in assets\\Pie64 (tools\\prepare_assets.py; --images for others).
+By default BOTH drives use snapshot=on
 (writes go to a temp overlay, the image files stay byte-identical), so every
 boot starts from the same disk state. --persist writes through (back up first!).
 """
@@ -21,7 +22,7 @@ import time
 
 DEV = os.path.dirname(os.path.abspath(__file__))
 PROJ = os.path.dirname(DEV)
-IMAGES = os.path.join(PROJ, "qemu_test")
+IMAGES = os.path.join(DEV, "assets", "Pie64")      # tools/prepare_assets.py
 EXES = {
     "dev": os.path.join(DEV, "build", "qemu-system-x86_64.exe"),
     "p59": os.path.join(PROJ, "qemu_bst", "build", "qemu-system-x86_64.exe"),
@@ -34,12 +35,21 @@ APPEND = ("earlyprintk=serial,keep idle=nomwait vmalloc=160M nosmap nosmep "
           "bstandroid=pie64 nokaslr console=ttyS0 BST_ANDROID_ID=bfd0e87474aa4028")
 
 
+def fmt(name):
+    return {".qcow2": "qcow2", ".vhdx": "vhdx", ".vhd": "vpc"}.get(
+        os.path.splitext(name)[1].lower(), "raw")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("name")
-    ap.add_argument("--root", default="Root_p50.vhd")
-    ap.add_argument("--data", default="Data_fresh.qcow2")
-    ap.add_argument("--initrd", default="initramfs_full_p49bak.bin")  # pristine .ko
+    ap.add_argument("--images", default=IMAGES,
+                    help="asset dir (default assets/Pie64; the old workspace is ../qemu_test)")
+    ap.add_argument("--root", default="Root.vhd")
+    ap.add_argument("--data", default="Data_template.vhdx",
+                    help="data disk in --images (default: BlueStacks' blank /data, fresh "
+                         "every boot thanks to snapshot=on)")
+    ap.add_argument("--initrd", default="initramfs.bin")  # pristine BlueStacks initramfs
     ap.add_argument("--vnc", type=int, default=None,
                     help="VNC display N (127.0.0.1:590N) showing the renderer console")
     ap.add_argument("--audio", default="dsound", choices=["dsound", "wav", "none"],
@@ -55,12 +65,13 @@ def main():
     ap.add_argument("--prop", action="append", default=[], metavar="K=V",
                     help="override one bst.* prop (e.g. --prop abi_list=x86,x64)")
     a = ap.parse_args()
+    images = a.images
 
     run = os.path.join(DEV, "runs", a.name)
     if os.path.exists(run):
         sys.exit("run folder exists: %s (pick a new name)" % run)
     exe = EXES[a.exe]
-    for p in (exe, os.path.join(IMAGES, a.root), os.path.join(IMAGES, a.data)):
+    for p in (exe, os.path.join(images, a.root), os.path.join(images, a.data)):
         if not os.path.exists(p):
             sys.exit("missing: %s" % p)
     os.makedirs(run)
@@ -86,16 +97,16 @@ def main():
         ov.update(kv.split("=", 1) for kv in a.prop)
         pf = bstprops.write_props_file(os.path.join(run, "bst.props"), "Pie64", ov)
         vmsg += ",propsfile=" + str(pf).replace(",", ",,")
-    img = lambda f: os.path.join(IMAGES, f).replace(",", ",,")
+    img = lambda f: os.path.join(images, f).replace(",", ",,")
     argv = [
         exe, "-name", "openstacks-" + a.name,
         "-L", os.path.join(os.path.dirname(exe), "pc-bios"),
         "-machine", "pc", "-accel", "whpx", "-cpu", a.cpu, "-m", "4096", "-smp", "2",
-        "-kernel", os.path.join(IMAGES, "kernel.bin"),
-        "-initrd", os.path.join(IMAGES, a.initrd),
+        "-kernel", os.path.join(images, "kernel.bin"),
+        "-initrd", os.path.join(images, a.initrd),
         "-append", APPEND,
         "-drive", "file=%s,format=vpc,if=ide,index=0%s" % (img(a.root), snap),
-        "-drive", "file=%s,format=qcow2,if=ide,index=1%s" % (img(a.data), snap),
+        "-drive", "file=%s,format=%s,if=ide,index=1%s" % (img(a.data), fmt(a.data), snap),
         "-nic", "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:25556-10.0.2.15:5555",
         "-device", vmsg,
         "-device", "bstpgaipc,id=bstpgaipc0,gr=on",

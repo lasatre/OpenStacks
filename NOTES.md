@@ -4,17 +4,20 @@ The old canon (`../grbridge/NOTES.md` §1–69, `../qemu_bst/REPORT.md`, `../FIN
 stays as the historical record. **Its numbering is off by 10 for the late phases**
 (NOTES §69 = Phase 59). Treat its conclusions as hypotheses: §1 below refutes several.
 
-Workspace: `dev/` (git). `dev/src/hw/misc` is the ONLY canonical device source.
-Build: `dev\build.cmd`. Boot: `python dev\boot.py <run> [--root ..] [--env K=V]`.
-Grade: `python dev\tools\grade.py <run> --write`. Monitor: `dev\tools\mon.py`.
+Workspace: `dev/` (git; layout reorganised in Phase 74, see §10l and README.md).
+`qemu/hw/misc` is the ONLY canonical device source (older entries say `src/hw/misc`).
+Build: `qemu\build.cmd`. Boot: `python boot.py <run> [--vnc 1] [--env K=V]`.
+Assets: `python tools\prepare_assets.py`. Grade: `python tools\grade.py <run> --write`.
+Monitor: `tools\mon.py` (port 4456).
 
-## Current best configuration (Phase 66: pristine Root.vhd boots to the BlueStacks home screen)
+## Current best configuration (Phase 74: everything from the user's BlueStacks install)
 
-    python dev\boot.py <name> --root Root.vhd
+    python boot.py <name> --vnc 1
 
-All other boot.py defaults are the working path: Data_fresh.qcow2,
-initramfs_full_p49bak.bin (pristine .ko), PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0.
-Rebuild (dev\build.cmd) for the RGBA->BGRA capture fix.
+boot.py defaults are the working path: assets/Pie64 (kernel.bin + pristine initramfs.bin
+cut from fastboot.vdi, Root.vhd, Data_template.vhdx = BlueStacks' blank Data_orig.vhdx),
+CPU qemu64+SSE4, host props from bluestacks.conf, PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0.
+(Before Phase 74: --root Root.vhd with ../qemu_test images, initramfs_full_p49bak.bin.)
 
 -> sys.boot_completed=1 (~3 min), adb works (refs\HD-Adb.exe connect 127.0.0.1:25556),
 focus = com.uncube.launcher3/HomeActivity; 24 GL clients (surfaceflinger, systemui,
@@ -472,6 +475,26 @@ Two independent blockers, both fixed:
   is not applied to the console yet).
 - Also seen: every bstpgaipc IRQ makes the guest bstaudio ISR print "Unknown cmd = 0" on
   the shared line (serial printk per interrupt): costly, fix with the perf work.
+
+## 10l. Phase 74: production layout (self-contained repo, assets from the BlueStacks install)
+
+- Layout: qemu/hw/misc (devices), qemu/apply_to_tree.py + qemu/build.cmd (fetches QEMU 11.1.0
+  into deps/, also disables the meson symlink-install postconf that needs Developer Mode,
+  copies the ucrt64 runtime DLLs next to the exe), frontend/ (moved from ../openstacks, now
+  ../openstacks_pre_repo), tools/, docs/re (specs; raw dumps in docs/re/raw), docs/shots,
+  boot.py. Gitignored: build/ deps/ assets/ instances/ work/ (RE binaries + guestlibs).
+- tools/prepare_assets.py: kernel.bin = fastboot.vdi LBA1.. (bzImage, (1+setup_sects)*512 +
+  syssize*16 = 7068448 B), initramfs.bin = the gzip right after it, size MBR+0x1fa
+  (1350013 B, complete stream). Both byte-identical to the files we used. Root.vhd copied from
+  Engine/Pie64 (our ../qemu_test copy differed: early non-snapshot boots wrote to it),
+  Data_template.vhdx = Engine/Pie64/Data_orig.vhdx (BlueStacks' blank /data), manifest.json.
+- p74_pristine_initrd + p74_fresh_assets: the PRISTINE BlueStacks initramfs boots to the
+  home screen (initramfs_full_p49bak.bin, with its appended override cpio, is obsolete), and a
+  first boot from the blank template reaches the home screen in ~20 s.
+- Front-end: data_disk "" = instances/<name>/Data.vhdx created from the template; disk format
+  by extension (vhdx/qcow2/vhd); adb discovery has one source (config.DEFAULT_ADB_CANDIDATES,
+  HD-Adb last). The user's two instances keep their qemu_test data disks (absolute paths).
+- Full from-scratch QEMU build verified (1699 steps) and the exe runs without MSYS2 on PATH.
 
 ## 11. Next
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Wait for the render lane to go quiet, then dump all QEMU thread stacks.
 
-  python dev\\tools\\stall_stacks.py <run> [--quiet S] [--timeout S]
+  python tools\\stall_stacks.py <run> [--quiet S] [--timeout S]
 
 Watches runs/<run>/out.log for `pwrite`/`psend` lines; once there are none for
 <quiet> seconds (default 15), attaches MSYS2 gdb to qemu-system-x86_64.exe and

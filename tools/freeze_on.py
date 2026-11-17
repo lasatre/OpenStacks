@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Freeze the guest when a log event has been seen N times.
 
-  python dev\\tools\\freeze_on.py <run> <regex> <count> <delay_s> [--stay] [--timeout S]
+  python tools\\freeze_on.py <run> <regex> <count> <delay_s> [--stay] [--timeout S]
 
 Polls runs/<run>/out.log; once <regex> has matched <count> times, waits <delay_s>,
 then runs the 3-window pmemsave freeze into runs/<run>/freeze/ (see mon.py).

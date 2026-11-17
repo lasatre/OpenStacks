@@ -1,0 +1,5 @@
+PySide6>=6.9,<7
+# 6.9+ ships Python 3.14 wheels (6.10.x also fine). Nothing else is needed:
+#   * VNC protocol is pure stdlib (socket/struct)  -> openstacks/vnc.py
+#   * adb wrapper is stdlib subprocess             -> openstacks/adb.py
+#   * QEMU engine is stdlib subprocess             -> openstacks/qemu_engine.py

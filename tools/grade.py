@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Grade one boot run.
 
-  python dev\\tools\\grade.py <run-dir-or-name> [--write]
-  python dev\\tools\\grade.py --log <out.log> [--serial <serial.log>]   (archived boots)
+  python tools\\grade.py <run-dir-or-name> [--write]
+  python tools\\grade.py --log <out.log> [--serial <serial.log>]   (archived boots)
 
 Metrics are the ones that SURVIVED cross-boot validation (dev/NOTES.md §1):
 her-record evidence only (guestwrite/exeFrame/recDropped), never the

@@ -5,7 +5,7 @@ Apply the BlueStacks virtual-PCI-device add-on to a QEMU source tree.
 Usage:
     python apply_to_tree.py [path-to-qemu-source-tree]
 
-Default tree: ..\\qemu-11.1.0 (relative to this script).
+Default tree: <repo>\\deps\\qemu-11.1.0 (qemu\\build.cmd fetches it).
 The operation is idempotent: running it twice does not duplicate hooks.
 """
 
@@ -14,7 +14,7 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_TREE = os.path.normpath(os.path.join(HERE, "..", "..", "qemu_bst", "qemu-11.1.0"))
+DEFAULT_TREE = os.path.normpath(os.path.join(HERE, "..", "deps", "qemu-11.1.0"))
 
 SOURCES = ["bst_vmsg.c", "bst_pgaipc.c", "bst_audio.c", "hvmem.c", "vmmdev.c",
            "gr_render.c", "gr_render.h"]
@@ -118,6 +118,22 @@ def main() -> int:
         print("patched hw/misc/meson.build (gr_render.c line)")
     else:
         print("hw/misc/meson.build already has gr_render.c")
+
+    # Windows without Developer Mode cannot create the qemu-bundle symlinks
+    # that meson's post-configure script makes; they are not needed to run
+    # from the build dir, so disable it (idempotent).
+    top = os.path.join(tree, "meson.build")
+    with open(top, "r", encoding="utf-8") as f:
+        topm = f.read()
+    hook = "meson.add_postconf_script(find_program('scripts/symlink-install-tree.py'))"
+    if ("# " + hook) not in topm and hook in topm:
+        topm = topm.replace(
+            hook, "# [bst-patch] needs Developer Mode on Windows; disabled\n# " + hook, 1)
+        with open(top, "w", encoding="utf-8") as f:
+            f.write(topm)
+        print("patched meson.build (symlink-install-tree postconf disabled)")
+    else:
+        print("meson.build already patched")
 
     print("done - now run configure and ninja")
     return 0

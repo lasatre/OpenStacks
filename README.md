@@ -53,6 +53,7 @@ signed in (a BlueStacks rule); every other APK installs normally.
 | `docs/re/` | protocol specs from reverse engineering (`hpp_spec.md`, `hststream_notes.md`); raw dumps in `docs/re/raw/` |
 | `docs/shots/` | milestone screenshots |
 | `NOTES.md` | the engineering log: every phase, decoded protocols, pitfalls |
+| `BACKLOG.md` | known, not-yet-done items worth doing later |
 | `runs/` | per-boot evidence (`meta.txt`/`grade.txt` tracked, logs local) |
 | `build/`, `deps/`, `assets/`, `instances/`, `work/` | generated / local, gitignored |
 
@@ -68,5 +69,4 @@ signed in (a BlueStacks rule); every other APK installs normally.
 
 ## Known gaps
 
-Portrait apps are shown unrotated; no microphone input; no AVX in the guest; the
-display path (GPU -> CPU -> VNC) is slow. See NOTES.md §11.
+See [BACKLOG.md](BACKLOG.md) for everything known but not done yet.

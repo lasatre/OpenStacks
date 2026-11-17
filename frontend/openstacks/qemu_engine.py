@@ -378,6 +378,35 @@ class QemuEngine:
         pid = self._read_pidfile(name)
         return pid if pid is not None and _pid_alive(pid) else None
 
+    def monitor(self, inst: Instance, command: str, timeout: float = 3.0) -> str:
+        """Run one HMP command on the instance's telnet monitor."""
+        with socket.create_connection(("127.0.0.1", int(inst.monitor_port)),
+                                      timeout=timeout) as s:
+            s.settimeout(timeout)
+            buf = b""
+            while b"(qemu)" not in buf:          # banner + first prompt
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            s.sendall(command.encode() + b"\r\n")
+            out = b""
+            try:
+                while b"(qemu)" not in out:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    out += chunk
+            except socket.timeout:
+                pass
+            return out.decode(errors="replace")
+
+    def send_key(self, inst: Instance, qcode: str) -> None:
+        """Press+release one key on the guest PS/2 keyboard (instant, no adb).
+        Android Generic.kl: ac_back (158) BACK, ac_home (172) HOME,
+        audionext (163) APP_SWITCH."""
+        self.monitor(inst, f"sendkey {qcode}")
+
     def is_running(self, inst: Instance | str) -> bool:
         name = inst.name if isinstance(inst, Instance) else inst
         obj = self.instances.get(name)

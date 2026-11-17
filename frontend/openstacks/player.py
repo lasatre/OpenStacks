@@ -266,6 +266,25 @@ class PlayerPane(QWidget):
         self._emit_status()
 
     # -- sidebar operations --------------------------------------------------------
+    # -- Android navigation (BlueStacks side bar) ------------------------------
+    def _nav(self, qcode: str, label: str) -> None:
+        def job():
+            qemu_engine.send_key(self.inst, qcode)
+            return label
+        th = _CallThread(job)
+        th.failed.connect(lambda e: self.flash(f"{label} failed: {e}"))
+        th.start()
+        self._adb_threads.append(th)
+
+    def nav_back(self) -> None:
+        self._nav("ac_back", "back")
+
+    def nav_home(self) -> None:
+        self._nav("ac_home", "home")
+
+    def nav_recents(self) -> None:
+        self._nav("audionext", "recent apps")
+
     def rotate(self) -> None:
         def job():
             # best effort via user_rotation system setting
@@ -365,6 +384,9 @@ class PlayerWindow(QMainWindow):
 
     # -- sidebar ---------------------------------------------------------------------
     _PANE_ACTIONS = ("rotate", "keymap", "screenshot", "install_apk", "multitouch")
+    _NAV_ACTIONS = (("nav_back", "Back", "Android Back"),
+                    ("nav_home", "Home", "Android Home"),
+                    ("nav_recents", "Recents", "Recent apps (task list)"))
 
     def _build_sidebar(self) -> None:
         bar = QToolBar("Actions", self)
@@ -394,6 +416,13 @@ class PlayerWindow(QMainWindow):
             keys = {"rotate": "Ctrl+Shift+R", "screenshot": "Ctrl+S",
                     "install_apk": "Ctrl+I"}
             add(method.replace("_", " ").title(), tips[method], keys.get(method, ""))
+
+        # Android navigation, like BlueStacks' side bar (bottom group)
+        bar.addSeparator()
+        for method, text, tip in self._NAV_ACTIONS:
+            act = add(text, tip)
+            act.triggered.connect(lambda _=False, m=method: self._with_pane(m))
+        bar.addSeparator()
 
         self.act_input_mode = add("Input: VNC",
                                   "Toggle input pipeline (QEMU VNC <-> ADB)")

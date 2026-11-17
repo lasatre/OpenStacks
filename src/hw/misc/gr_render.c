@@ -2220,6 +2220,8 @@ static DWORD WINAPI gr_ui_thread(LPVOID arg)
     return 0;
 }
 
+static unsigned g_frameSeq;          /* Phase-67: bumps on every new frame */
+
 /* [dll+0xb25670] post hook state */
 typedef struct GrPostCtx { uint8_t *buf; unsigned posts; } GrPostCtx;
 static GrPostCtx g_postctx;
@@ -2242,6 +2244,16 @@ static void gr_pixPost(void *dst, unsigned long long a2,
     memcpy(g.fbBuf, dst, bytes);
     g.postOn = true;
     ++g_postctx.posts;
+    qatomic_inc(&g_frameSeq);
+}
+
+/* Phase-67: live display accessor (see gr_render.h) */
+const uint8_t *gr_render_frame(unsigned *seq, int *w, int *h)
+{
+    if (seq) *seq = qatomic_read(&g_frameSeq);
+    if (w) *w = GR_W;
+    if (h) *h = GR_H;
+    return (g.ready && g.fbHas) || g_postctx.posts ? g.fbBuf : NULL;
 }
 
 /* register our frame consumer + start the DLL's readpixel loop       */
@@ -2315,6 +2327,7 @@ static DWORD WINAPI readpix_engine(LPVOID arg)
                 gr_once(0x11, "getPixels route rc=%d (display 0)", rc);
                 continue;
             }
+            qatomic_inc(&g_frameSeq);
         } else {
             g.lastPosts = g_postctx.posts;
         }

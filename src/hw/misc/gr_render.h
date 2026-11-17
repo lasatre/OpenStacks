@@ -46,4 +46,11 @@ bool gr_render_op_connect(uint32_t cid);
 bool gr_render_op_disconnect(uint32_t cid);
 bool gr_render_op_request(uint32_t cid, uint32_t cmd, uint32_t len);
 
+/*
+ * Phase-67 live display: latest composited frame from the renderer
+ * (RGBA, *w x *h, tightly packed) and a sequence number that changes
+ * whenever new pixels arrived. NULL until the first frame.
+ */
+const uint8_t *gr_render_frame(unsigned *seq, int *w, int *h);
+
 #endif /* HW_MISC_GR_RENDER_H */

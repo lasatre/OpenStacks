@@ -40,6 +40,8 @@ def main():
     ap.add_argument("--root", default="Root_p50.vhd")
     ap.add_argument("--data", default="Data_fresh.qcow2")
     ap.add_argument("--initrd", default="initramfs_full_p49bak.bin")  # pristine .ko
+    ap.add_argument("--vnc", type=int, default=None,
+                    help="VNC display N (127.0.0.1:590N) showing the renderer console")
     ap.add_argument("--persist", action="store_true")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")
@@ -83,6 +85,7 @@ def main():
         "-device", "hvmem,id=hvmem0,ram_size_mib=512",
         "-device", "vbox-vmmdev,id=vmmdev0",
         "-no-reboot", "-no-shutdown", "-display", "none",
+    ] + (["-vga", "none", "-parallel", "none", "-vnc", "127.0.0.1:%d" % a.vnc] if a.vnc is not None else []) + [
         "-serial", "file:" + os.path.join(run, "serial.log"),
         "-monitor", "telnet:127.0.0.1:4446,server,nowait",
     ]

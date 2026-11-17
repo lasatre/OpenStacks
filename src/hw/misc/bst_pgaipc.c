@@ -59,6 +59,9 @@
 #include "qom/object.h"
 #include "system/memory.h"
 #include "gr_render.h"
+#include "ui/console.h"
+#include "ui/surface.h"
+#include "qemu/timer.h"
 
 #define TYPE_BST_PGAIPC "bstpgaipc"
 OBJECT_DECLARE_SIMPLE_TYPE(BstPgaipcState, BST_PGAIPC)
@@ -127,6 +130,11 @@ struct BstPgaipcState {
     struct GrBhCtx { BstPgaipcState *dev; uint32_t cid; } grctx[GR_MAX_CID_BR];
 
     struct pgacid_state cid[BST_PGAIPC_MAX_CID + 1];
+
+    /* Phase-67 live display (renderer frames -> QEMU graphic console) */
+    QemuConsole *con;
+    QEMUTimer *con_timer;
+    unsigned con_seq;
 };
 
 /* ------------------------------------------------------------------ */
@@ -249,6 +257,9 @@ static uint8_t *gr_host_mbox(void *dev, uint32_t cid)
     if (cid > BST_PGAIPC_MAX_CID) return NULL;
     return pga_mbox(s, cid);
 }
+
+static void pga_con_tick(void *opaque);          /* Phase-67 live display */
+static const GraphicHwOps pga_con_ops;
 
 static uint8_t *gr_host_window(void *dev, uint32_t cid)
 {
@@ -526,9 +537,55 @@ static void bst_pgaipc_realize(PCIDevice *pdev, Error **errp)
     }
     gr_render_set_device_enabled(s->gr);
     gr_render_attach(s, &gr_host_ops);
+    if (s->gr) {
+        /* Phase-67: expose renderer frames as a QEMU graphic console
+         * (VNC/any display shows it; run with -vga none -parallel none
+         * so it is the default console).                                */
+        s->con = qemu_graphic_console_create(DEVICE(s), 0, &pga_con_ops, s);
+        qemu_console_set_surface(s->con, qemu_create_displaysurface(1600, 900));
+        s->con_timer = timer_new_ms(QEMU_CLOCK_REALTIME, pga_con_tick, s);
+        timer_mod(s->con_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 500);
+    }
     fprintf(stderr, "[bstpgaipc] gr render bridge %s\n",
             s->gr ? "ENABLED (prop gr=on)" : "off (prop gr=off; env may enable)");
 }
+
+/* Phase-67: copy each new renderer frame (RGBA) into the console surface
+ * (x8r8g8b8 = B,G,R,X in memory) at <= 30 Hz on the main loop.          */
+static void pga_con_tick(void *opaque)
+{
+    BstPgaipcState *s = opaque;
+    unsigned seq;
+    int w, h;
+    const uint8_t *src = gr_render_frame(&seq, &w, &h);
+
+    if (src && seq != s->con_seq) {
+        DisplaySurface *ds = qemu_console_surface(s->con);
+        if (!ds || surface_width(ds) != w || surface_height(ds) != h) {
+            qemu_console_set_surface(s->con, qemu_create_displaysurface(w, h));
+            ds = qemu_console_surface(s->con);
+        }
+        uint8_t *dst = surface_data(ds);
+        int stride = surface_stride(ds);
+        for (int y = 0; y < h; y++) {
+            const uint8_t *sp = src + (size_t)y * w * 4;
+            uint8_t *dp = dst + (size_t)y * stride;
+            for (int x = 0; x < w; x++, sp += 4, dp += 4) {
+                dp[0] = sp[2];
+                dp[1] = sp[1];
+                dp[2] = sp[0];
+                dp[3] = 0xff;
+            }
+        }
+        s->con_seq = seq;
+        qemu_console_update_full(s->con);
+    }
+    timer_mod(s->con_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 33);
+}
+
+static const GraphicHwOps pga_con_ops = {
+    .gfx_update = NULL,
+};
 
 static const Property bst_pgaipc_props[] = {
     DEFINE_PROP_BOOL("gr", BstPgaipcState, gr, false),

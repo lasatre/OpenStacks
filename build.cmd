@@ -20,7 +20,7 @@ for /f "delims=" %%i in ('C:\msys64\usr\bin\bash.exe -lc "cygpath -u '%ROOT%'"')
 if not exist "%ROOT%build" mkdir "%ROOT%build"
 
 if not exist "%ROOT%build\build.ninja" (
-  C:\msys64\usr\bin\bash.exe -lc "cd '%UROOT%build' && ../../qemu_bst/qemu-11.1.0/configure --target-list=x86_64-softmmu --enable-slirp --enable-whpx --disable-werror --disable-docs --disable-tools --disable-vnc --disable-sdl --disable-gtk"
+  C:\msys64\usr\bin\bash.exe -lc "cd '%UROOT%build' && ../../qemu_bst/qemu-11.1.0/configure --target-list=x86_64-softmmu --enable-slirp --enable-whpx --disable-werror --disable-docs --disable-tools --disable-sdl --disable-gtk"
   if errorlevel 1 goto :fail
 )
 

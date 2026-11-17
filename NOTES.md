@@ -297,6 +297,24 @@ All legacy shims stay intact for GR_PURE=0.
   kill each other's server.
 - Settings opened via am start renders correctly (dev/shots/phase66_settings.png).
 
+## 10d. Phase 67: live display over VNC; front-end updated
+
+- bst_pgaipc (gr=on) registers a QEMU graphic console (qemu_graphic_console_create) and a
+  30 Hz main-loop timer copies each new renderer frame (gr_render_frame(): RGBA + seq,
+  bumped by the DLL's pixel post and the getPixels fallback) into the console surface
+  (x8r8g8b8). Build now has VNC (configure without --disable-vnc).
+- QEMU picks the first console for VNC: run with `-vga none -parallel none` (the default
+  parallel port is a vc text console that would come first; `-vnc ...,display=<id>` fails
+  in QEMU 11 on that text console's missing 'device' property). boot.py --vnc N does this.
+- dev/tools/vnc_shot.py (raw RFB client) grabs a frame: phase67_vnc_home.png = 1600x900,
+  correct colours.
+- openstacks front-end (outside git, original in the user's 7z): adb.shell() prefixes the
+  adbd allow-list word; qemu_engine GR_ENV = Phase-65 knobs, default initrd =
+  initramfs_full_p49bak.bin, `-vga none -parallel none` with gr=on; instances.conf points
+  at F:\Projects\BluestacksReversing (dev build, pristine initrd; instance Pie64 uses its own
+  qemu_test\Data_ost1.qcow2, a copy of the known-good Data); selftest 16/16 with PySide6
+  6.12 in openstacks\.venv.
+
 ## 11. Next
 
 - Make the good path the default: PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0, pristine initramfs.

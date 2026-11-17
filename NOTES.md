@@ -379,9 +379,40 @@ Front-end: qemu_engine adds -audiodev dsound,id=snd0 + bstaudio audiodev=snd0.
   KeyEvent (4,down,pad,u32 keysym). Verified: the RfbClient receives 1600x900 frames and
   its click opens App Center (dev/shots/phase69_fe_click.png).
 
+## 10h. Phase 70: full ADB (gate property served by bstvmsg)
+
+- Gate: BlueStacks adbd `bst_allow_adb_cmd(char*)` @0x4162f0, called from handle_packet on
+  every A_OPEN with the text after the first ':' (`shell:ls` -> `ls`, `sync:` literal); also
+  re-checked per sync request path in file_sync_service (that was the push "protocol fault").
+  Core `_bst_allow_adb_cmd` @0x415df0: allow all if `atoi(bst.enable_adb_access) > 0` or
+  /data/downloads/.tmp/.adbconnect exists; otherwise prefix-match against comma tokens on the
+  first line of /data/downloads/.adbcmd (`*` = all; fgets keeps the newline, so the last
+  token never matches); a missing file denies everything.
+- Source of the property: host props -> initramfs `bstconf` (bstvmsg GetProps, method 1) ->
+  /.bstconf.prop -> /data/.bstconf.prop -> init. Real host value comes from bluestacks.conf
+  `bst.enable_adb_access="1"`. bst_vmsg.c now serves it by default and gained
+  `props=k=v;k=v` and `propsfile=<path>` device properties (appended; one k=v per line).
+  The per-request log line is capped (method 0 polls made the qemu log 46 MB).
+- Result p70_adb: unrestricted shell (id/echo/uptime), 5 MB push+pull byte-identical,
+  40/40 shells and 10/10 disconnect/connect cycles clean. The old "offline" flapping was the
+  gate closing adb's own service opens plus HD-Adb (v36) vs platform-tools (v41) killing each
+  other's server; the front-end now prefers the PATH / platform-tools adb, HD-Adb last.
+- Install: `adb install` works (ExternalStorageProvider reinstall: Success 0.5 s). BlueStacks
+  PackageManagerService.installPackageLI -> isGoogleAppUpdateUnsafe refuses
+  com.android.chrome / com.android.vending / com.google.android.gms ("has not been validated
+  for this platform", INSTALL_FAILED_INVALID_APK) until a `com.google` account exists; with a
+  test account added (as uid 10004 via addAccountExplicitly) Chrome install-multiple succeeded.
+  System APKs from /system are odexed ("code is missing") so they are no install test.
+- Also found: bst.version / bst.oem / bst.country are empty in our guest, so every rule in
+  /data/downloads/.config.db (BstFilterAppsService: GL/ABI/hotfix tweaks) is rejected by a
+  NumberFormatException. Real HD-Player supplies these; worth serving later.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).
+- DONE: full ADB incl. push/install (p70).
+- TODO: serve bst.version/bst.oem/bst.country (+ per-instance identity via props=) so
+  .config.db app rules apply.
 - DONE: live display (VNC console), touch (bstinput), keyboard (PS/2), front-end launch.
 - DONE: audio playback. Open: capture source (mic), the shared-IRQ noise before config,
   big-slot (BAR2) clients, Linux portability (gfxstream), front-end GUI smoke test.

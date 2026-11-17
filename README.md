@@ -12,8 +12,10 @@ Read `NOTES.md` for the full history and decoded protocols.
     python dev\tools\vnc_shot.py 5901 shot.png      # grab a frame
     python dev\tools\vnc_tap.py 170 294             # tap (App Center on the home screen)
     python dev\tools\vnc_type.py "hello" --enter    # type
-    adb connect 127.0.0.1:25556
-    adb -s 127.0.0.1:25556 shell "getprop ro.serialno >/dev/null; <command>"   # adbd allow-list
+    adb connect 127.0.0.1:25556                     # full adb: shell, push/pull, install
+    adb -s 127.0.0.1:25556 install app.apk          # (Chrome/Play/GMS need a Google account)
+
+Use the platform-tools adb, not BlueStacks' HD-Adb.exe: the two kill each other's server.
 
 Any VNC viewer works on 127.0.0.1:5901 (the console is the renderer output; clicks become
 BlueStacks Virtual Touch, keys go to the PS/2 keyboard). Audio plays to the default output

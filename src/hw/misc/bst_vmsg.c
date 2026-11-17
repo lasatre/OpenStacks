@@ -49,6 +49,7 @@
 #include "system/memory.h"
 #include "ui/input.h"
 #include "system/system.h"
+#include "hw/core/qdev-properties.h"
 
 #define TYPE_BST_VMSG "bstvmsg"
 OBJECT_DECLARE_SIMPLE_TYPE(BstVmsgState, BST_VMSG)
@@ -117,6 +118,12 @@ typedef struct BstVmsgState {
     Notifier init_done;
     int tx, ty;
     bool tdown, tdirty;
+
+    /* host props served to the guest's bstconf (GetProps) */
+    char *props;            /* extra 'k=v;k=v' (later lines win) */
+    char *propsfile;        /* extra props file, one k=v per line */
+    GString *props_text;
+    unsigned reqlog;
 } BstVmsgState;
 
 /* identity/config text bstconf serves (REA_BSTCONF.md 6). No spaces around
@@ -133,7 +140,10 @@ static const char bst_vmsg_props_text[] =
     "bst.wifi_mac_addr=31:A9:A1:89:B9:EA\n"
     "bst.bssid_mac_addr=1A:9A:18:9B:9E:AC\n"
     "bst.bluetooth_addr=64:2B:0B:29:0C:0F\n"
-    "bst.device_carrier_code=310_260\n";
+    "bst.device_carrier_code=310_260\n"
+    /* adbd gate (_bst_allow_adb_cmd): >0 allows every shell/sync/exec service;
+     * real BlueStacks gets it from bluestacks.conf (Settings > Enable ADB). */
+    "bst.enable_adb_access=1\n";
 
 static BstVmsgConn *bst_vmsg_get_conn(BstVmsgState *s, uint32_t cid)
 {
@@ -150,7 +160,7 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
     uint32_t method;
     uint32_t buf_len;
     uint32_t resp_len;
-    size_t props_len = sizeof(bst_vmsg_props_text) - 1;
+    size_t props_len = s->props_text->len;
 
     if (c->guest_off + VMSG_IN_SIZE > BST_VMSG_BAR1_SIZE ||
         c->host_off + c->out_size > BST_VMSG_BAR1_SIZE) {
@@ -162,15 +172,18 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
     method = ldl_le_p(in + 0x00);
     buf_len = ldl_le_p(in + 0x08);
 
-    fprintf(stderr, "[bstvmsg] processRequest cid=%u goff=0x%x hoff=0x%x "
+    if (method != 0 || s->reqlog < 20) {
+        s->reqlog += (method == 0);
+        fprintf(stderr, "[bstvmsg] processRequest cid=%u goff=0x%x hoff=0x%x "
             "method=%u msglen=%u bufLen=%u d3=%u tail=%u\n", c - s->conn,
             c->guest_off, c->host_off, method, ldl_le_p(in + 0x04),
             buf_len, ldl_le_p(in + 0x0c), ldl_le_p(in + 0x10));
+    }
 
     if (method == 1 && buf_len != 0 && buf_len <= (VMSG_OUT_SIZE - 0x100u)) {
         memset(out, 0, c->out_size);
         resp_len = (uint32_t)MIN(props_len, buf_len);
-        memcpy(out, bst_vmsg_props_text, resp_len);
+        memcpy(out, s->props_text->str, resp_len);
         stl_le_p(out + buf_len, resp_len);
         stl_le_p(out + buf_len + 4, 0);
         fprintf(stderr, "[bstvmsg] served GetProps respLen=%u -> hoff 0x%x\n",
@@ -458,11 +471,42 @@ static void bst_vmsg_realize(PCIDevice *pdev, Error **errp)
     stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, 0xffffffffu);
     stl_le_p(s->shm + VMSG_SHM_CID, 0xffffffffu);
 
+    s->props_text = g_string_new(bst_vmsg_props_text);
+    if (s->propsfile && *s->propsfile) {
+        g_autofree char *txt = NULL;
+        g_autoptr(GError) gerr = NULL;
+        if (!g_file_get_contents(s->propsfile, &txt, NULL, &gerr)) {
+            error_setg(errp, "bstvmsg: propsfile: %s", gerr->message);
+            return;
+        }
+        for (char *c = txt; *c; c++) {
+            if (*c == '\r') {
+                *c = '\n';
+            }
+        }
+        g_string_append(s->props_text, txt);
+        g_string_append_c(s->props_text, '\n');
+    }
+    if (s->props && *s->props) {
+        g_auto(GStrv) kv = g_strsplit(s->props, ";", -1);
+        for (char **k = kv; *k; k++) {
+            if (**k) {
+                g_string_append_printf(s->props_text, "%s\n", *k);
+            }
+        }
+    }
+    fprintf(stderr, "[bstvmsg] props text %zu bytes\n", s->props_text->len);
+
     s->ihs = qemu_input_handler_register(DEVICE(s), &bst_vmsg_touch_handler);
     qemu_input_handler_activate(s->ihs);
     s->init_done.notify = bst_vmsg_init_done;
     qemu_add_machine_init_done_notifier(&s->init_done);
 }
+
+static const Property bst_vmsg_props[] = {
+    DEFINE_PROP_STRING("props", BstVmsgState, props),
+    DEFINE_PROP_STRING("propsfile", BstVmsgState, propsfile),
+};
 
 static void bst_vmsg_class_init(ObjectClass *klass, const void *data)
 {
@@ -476,6 +520,7 @@ static void bst_vmsg_class_init(ObjectClass *klass, const void *data)
     k->class_id = 0x0000;
     dc->desc = "BlueStacks bstvmsg PCI device (hcal props service)";
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
+    device_class_set_props(dc, bst_vmsg_props);
 }
 
 static const TypeInfo bst_vmsg_types[] = {

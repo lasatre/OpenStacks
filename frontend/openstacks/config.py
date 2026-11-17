@@ -149,6 +149,7 @@ class Instance:
     pgaipc_gr: bool = True             # bstpgaipc gr=on (the proven grbridge knob)
     hvmem_mb: int = 512                # hvmem ram_size_mib= (proven shape uses 512)
     extra_append: str = ""             # extra KEY=VALUE / kernel args for -append
+    display: str = "native"            # native (GPU window embed) | vnc (readback)
     is_default: bool = False
 
     # -- helpers ------------------------------------------------------------

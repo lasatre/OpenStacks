@@ -121,11 +121,18 @@ class PlayerPane(QWidget):
                                         on_error=self._on_input_error)
         self.input_bridge: InputBridge = self.vnc_input   # current mode
 
-        self.display = VncDisplay(
-            parent=self,
-            input_provider=lambda: self.input_bridge,
-            bridge_mode_provider=lambda: "adb" if self.input_bridge is self.adb_input else "vnc",
-        )
+        self.native = getattr(inst, "display", "native") == "native"
+        if self.native:
+            # Phase-75: the renderer window itself (GPU present, input direct)
+            from .native import NativeDisplay
+            self.display = NativeDisplay(lambda: qemu_engine.pid(self.inst),
+                                         aspect=inst.res_wh(), parent=self)
+        else:
+            self.display = VncDisplay(
+                parent=self,
+                input_provider=lambda: self.input_bridge,
+                bridge_mode_provider=lambda: "adb" if self.input_bridge is self.adb_input else "vnc",
+            )
 
         # nested pane tabs: Screen / Console / Diagnostics
         self.tabs = QTabWidget(self)
@@ -159,7 +166,9 @@ class PlayerPane(QWidget):
     # -- wiring ------------------------------------------------------------------
     def start(self) -> None:
         """(Re)start VNC streaming + adb poll for this instance."""
-        if self.vnc_thread is None:
+        if self.native:
+            self._vnc_state = "display: native (GPU)"
+        elif self.vnc_thread is None:
             self.input_worker.start()
             self.vnc_thread = VncClientThread("127.0.0.1", self.inst.vnc_port,
                                               on_send_error=self._on_send_error)
@@ -173,6 +182,8 @@ class PlayerPane(QWidget):
         t, w, b, c, d = (self.vnc_thread, self.input_worker, self.boot_watch,
                          self.console, self.diagnostics)
         self.vnc_thread, self.input_worker, self.boot_watch = None, None, None
+        if self.native:
+            self.display.release()   # hand the renderer window back first
         if b:
             b.stop()
         if t:
@@ -280,7 +291,7 @@ class PlayerPane(QWidget):
         shots.mkdir(parents=True, exist_ok=True)
         png = shots / f"{self.inst.name}_{time.strftime('%Y%m%d_%H%M%S')}.png"
         # 1) fast path: our own VNC frame
-        if self.display._img is not None:
+        if not self.native and self.display._img is not None:
             if self.display._img.save(str(png), "PNG"):
                 self.flash(f"screenshot: {png.name} (VNC frame)")
                 return

@@ -44,6 +44,9 @@
 #include "qemu/bswap.h"
 #include "qemu/atomic.h"
 #include "hw/misc/gr_render.h"
+#include "qemu/main-loop.h"
+#include "qemu/aio.h"
+#include "ui/input.h"
 
 /* windows.h comes in via qemu/osdep.h on win32 */
 
@@ -1110,6 +1113,16 @@ static void vt_table_init(void)
 
 #define PURE_RBUF_CAP  (8u << 20)
 
+static int gr_verbose(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        char b[4] = {0};
+        v = GetEnvironmentVariableA("GR_VERBOSE", b, sizeof(b)) > 0 && b[0] == '1';
+    }
+    return v;
+}
+
 static int gr_pure(void)
 {
     static int cached = -1;
@@ -1176,7 +1189,7 @@ static uint8_t *pure_take(GrSock *s, uint32_t n, bool advance,
     int64_t waited = 0;
     static unsigned dbg;
     if (!win || n == 0) return NULL;
-    if (dbg < 300) {
+    if (gr_verbose() && dbg < 300) {
         dbg++;
         gr_log("ptake cid=%u n=%u adv=%d rpos=%u wcnt=%u carry=%u to=%lld",
                s->cid, n, advance, S_RPOS(s), S_WCNT(s),
@@ -1243,10 +1256,12 @@ static uint8_t *pure_take(GrSock *s, uint32_t n, bool advance,
                    s->pWritePending, s->pReadPending, s->pReadWant, s->pWpos,
                    s->pWrites, s->pReads, s->pSends, hc);
         }
-        S_UNLOCK(s);
-        Sleep(1);
+        /* Phase-75: wait on the sock condvar (pure_write/pure_read/
+         * disconnect wake it) instead of a Sleep(1) poll, which costs up
+         * to a whole Windows timer tick per wait. 1 ms cap = the old
+         * accounting for timeouts and the stall watchdog.             */
+        SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), 1, 0);
         waited++;
-        S_LOCK(s);
     }
     S_UNLOCK(s);
     return NULL;
@@ -1557,7 +1572,7 @@ static void *pvt_alloc(void *w, uint32_t len)
     uint8_t *p = s->pRbuf + s->pWpos;
     s->pWpos += len;
     S_UNLOCK(s);
-    gr_log("palloc cid=%u len=%u -> wpos=%u", s->cid, len, s->pWpos);
+    if (gr_verbose()) gr_log("palloc cid=%u len=%u -> wpos=%u", s->cid, len, s->pWpos);
     return p;
 }
 
@@ -1644,13 +1659,11 @@ static int pure_flush(GrSock *s)
                 S_UNLOCK(s);
                 return -1;
             }
-            S_UNLOCK(s);
-            Sleep(1);
+            SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), 1, 0);
             if (++spins == 3000) {
                 gr_log("pure send cid=%u waiting >3 s for the guest READ "
                        "(staged %u B, sent %u)", s->cid, total, pos);
             }
-            S_LOCK(s);
         }
         uint32_t n = total - pos;
         uint32_t want = s->pReadWant;
@@ -1664,7 +1677,7 @@ static int pure_flush(GrSock *s)
             if (mb) mbox_set(mb, (int32_t)n, 0);
         }
         S_UNLOCK(s);
-        if (total <= wsz || pos == n || pos == total) {
+        if (gr_verbose() && (total <= wsz || pos == n || pos == total)) {
             char h[3 * 16 + 4];
             hexn(h, win ? win : (uint8_t *)"", n < 16 ? n : 16);
             gr_log("psend cid=%u want=%u served=%u (%u/%u): %s", s->cid, want,
@@ -1758,9 +1771,12 @@ static void pure_write(GrSock *s, uint8_t *mb, uint32_t len)
     s->pWriteLen = len;
     s->pWrites++;
     S_UNLOCK(s);
+    WakeAllConditionVariable(S_CNDP(s));
     sock_req_prepare(s, mb);
-    hexn(h, win ? win : (uint8_t *)"", len < 16 ? len : 16);
-    gr_log("pwrite cid=%u len=%u: %s", s->cid, len, h);
+    if (gr_verbose()) {
+        hexn(h, win ? win : (uint8_t *)"", len < 16 ? len : 16);
+        gr_log("pwrite cid=%u len=%u: %s", s->cid, len, h);
+    }
 }
 
 static void pure_read(GrSock *s, uint32_t want)
@@ -1770,7 +1786,8 @@ static void pure_read(GrSock *s, uint32_t want)
     s->pReadWant = want;
     s->pReads++;
     S_UNLOCK(s);
-    gr_log("pread cid=%u want=%u", s->cid, want);
+    WakeAllConditionVariable(S_CNDP(s));
+    if (gr_verbose()) gr_log("pread cid=%u want=%u", s->cid, want);
 }
 
 static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win);
@@ -2442,11 +2459,148 @@ static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win)
     rcOpApply(op, s, win + GR_WIN_RBASE);
 }
 
+/* ================================================================== */
+/* Phase-75 native display: the DLL presents straight into a child   */
+/* window ("BlueStacksApp") it creates inside the HWND we pass to     */
+/* PgaServerInit - the HD-Player path, GPU-only, no pixel readback.   */
+/* The front-end embeds our top window (found by pid + class) and the */
+/* input arrives here: mouse -> abs pointer + left button (bstvmsg's  */
+/* touch handler), keys -> PS/2 scancodes, both injected on the main  */
+/* loop via a oneshot BH (thread-safe; the BH runs under the BQL).    */
+
 static bool wndclass_registered;
+static HWND g_child;                 /* the DLL's present window       */
+static WNDPROC g_childProc;          /* its original wndproc           */
+static bool g_mouseDown;
+
+typedef struct GrInputEv {
+    int kind;                        /* 0 = pointer, 1 = key           */
+    int x, y, down;                  /* pointer: 0..0x7fff, button     */
+    int qnum;                        /* key: QEMU key number           */
+} GrInputEv;
+
+static void gr_input_bh(void *opaque)
+{
+    GrInputEv *e = (GrInputEv *)opaque;
+    if (e->kind == 0) {
+        qemu_input_queue_abs(NULL, INPUT_AXIS_X, e->x, 0, INPUT_EVENT_ABS_MAX);
+        qemu_input_queue_abs(NULL, INPUT_AXIS_Y, e->y, 0, INPUT_EVENT_ABS_MAX);
+        if (e->down >= 0) {
+            qemu_input_queue_btn(NULL, INPUT_BUTTON_LEFT, e->down != 0);
+        }
+        qemu_input_event_sync();
+    } else {
+        qemu_input_event_send_key_number(NULL, e->qnum, e->down != 0);
+    }
+    g_free(e);
+}
+
+static void gr_input_post(GrInputEv ev)
+{
+    GrInputEv *e = g_new(GrInputEv, 1);
+    *e = ev;
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), gr_input_bh, e);
+}
+
+static void gr_pointer(HWND h, LPARAM l, int down)
+{
+    RECT rc;
+    int w, hh, x = (short)LOWORD(l), y = (short)HIWORD(l);
+    GetClientRect(h, &rc);
+    w = rc.right > 1 ? rc.right : 1;
+    hh = rc.bottom > 1 ? rc.bottom : 1;
+    x = x < 0 ? 0 : x >= w ? w - 1 : x;
+    y = y < 0 ? 0 : y >= hh ? hh - 1 : y;
+    gr_input_post((GrInputEv){ .kind = 0,
+                               .x = (int)((int64_t)x * INPUT_EVENT_ABS_MAX / (w - 1 ? w - 1 : 1)),
+                               .y = (int)((int64_t)y * INPUT_EVENT_ABS_MAX / (hh - 1 ? hh - 1 : 1)),
+                               .down = down });
+}
+
+/* returns true when the message was an input message we consumed */
+static bool gr_input_msg(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    switch (m) {
+    case WM_LBUTTONDOWN:
+        SetFocus(h);
+        SetCapture(h);
+        g_mouseDown = true;
+        gr_pointer(h, l, 1);
+        return true;
+    case WM_LBUTTONUP:
+        ReleaseCapture();
+        g_mouseDown = false;
+        gr_pointer(h, l, 0);
+        return true;
+    case WM_MOUSEMOVE:
+        if (g_mouseDown) gr_pointer(h, l, -1);    /* drag = touch move */
+        return true;
+    case WM_KEYDOWN: case WM_SYSKEYDOWN:
+    case WM_KEYUP: case WM_SYSKEYUP: {
+        int sc = (int)((l >> 16) & 0xff);
+        bool ext = (l >> 24) & 1;
+        if (sc == 0) return true;
+        gr_input_post((GrInputEv){ .kind = 1, .qnum = ext ? (0x80 | sc) : sc,
+                                   .down = (m == WM_KEYDOWN || m == WM_SYSKEYDOWN) });
+        return true;
+    }
+    case WM_CHAR: case WM_SYSCHAR: case WM_DEADCHAR:
+        return true;
+    }
+    return false;
+}
+
+static LRESULT CALLBACK gr_child_proc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    if (gr_input_msg(h, m, w, l)) return 0;
+    if (m == WM_MOUSEACTIVATE) return MA_ACTIVATE;
+    return CallWindowProcW(g_childProc, h, m, w, l);
+}
+
+static BOOL CALLBACK gr_find_child(HWND c, LPARAM l)
+{
+    (void)l;
+    if (!g_child) g_child = c;
+    return TRUE;
+}
+
+/* fit the DLL's present window to our client area; subclass it once */
+static void gr_layout(HWND parent)
+{
+    RECT rc;
+    if (!g_child) {
+        EnumChildWindows(parent, gr_find_child, 0);
+        if (g_child) {
+            g_childProc = (WNDPROC)SetWindowLongPtrW(g_child, GWLP_WNDPROC,
+                                                      (LONG_PTR)gr_child_proc);
+            gr_log("native display: DLL window %p subclassed", (void *)g_child);
+        }
+    }
+    if (!g_child) return;
+    GetClientRect(parent, &rc);
+    if (rc.right > 0 && rc.bottom > 0) {
+        SetWindowPos(g_child, NULL, 0, 0, rc.right, rc.bottom,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
 
 static LRESULT CALLBACK gr_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
-    (void)h; (void)m; (void)w; (void)l;
+    switch (m) {
+    case WM_SIZE:
+        gr_layout(h);
+        break;
+    case WM_TIMER:
+        if (!g_child) gr_layout(h);
+        else KillTimer(h, 1);
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_CLOSE:
+        return 0;                    /* only the front-end/QEMU end us */
+    default:
+        if (gr_input_msg(h, m, w, l)) return 0;
+    }
     return DefWindowProcW(h, m, w, l);
 }
 
@@ -2458,6 +2612,7 @@ static HWND gr_make_window(int w, int h)
         memset(&wc, 0, sizeof(wc));
         wc.lpfnWndProc = gr_wndproc;
         wc.hInstance = GetModuleHandleW(NULL);
+        wc.hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
         wc.lpszClassName = k_class;
         if (!RegisterClassW(&wc)) {
             gr_log("RegisterClassW failed err=%lu", (unsigned long)GetLastError());
@@ -2465,13 +2620,21 @@ static HWND gr_make_window(int w, int h)
         }
         wndclass_registered = true;
     }
+    /* GR_SHOW=1: a normal top-level window (debug / standalone use).
+     * Otherwise a hidden borderless popup the front-end reparents.   */
+    char b[4] = {0};
+    bool show = GetEnvironmentVariableA("GR_SHOW", b, sizeof(b)) > 0 && b[0] == '1';
+    DWORD style = show ? WS_OVERLAPPEDWINDOW : WS_POPUP;
     RECT r = { 0, 0, w, h };
-    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND hwnd = CreateWindowExW(0, k_class, L"gr_render", WS_OVERLAPPEDWINDOW,
-                                r.left, r.top, r.right - r.left,
+    AdjustWindowRect(&r, style, FALSE);
+    HWND hwnd = CreateWindowExW(0, k_class, L"OpenStacks display", style,
+                                CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left,
                                 r.bottom - r.top, NULL, NULL,
                                 GetModuleHandleW(NULL), NULL);
-    if (hwnd) ShowWindow(hwnd, SW_HIDE);
+    if (hwnd) {
+        ShowWindow(hwnd, show ? SW_SHOWNORMAL : SW_HIDE);
+        SetTimer(hwnd, 1, 250, NULL);  /* pick up the DLL's child window */
+    }
     return hwnd;
 }
 
@@ -2490,6 +2653,7 @@ static DWORD WINAPI gr_ui_thread(LPVOID arg)
     return 0;
 }
 
+static bool g_readback = true;
 static unsigned g_frameSeq;          /* Phase-67: bumps on every new frame */
 
 /* [dll+0xb25670] post hook state */
@@ -2738,14 +2902,21 @@ static bool gr_init_dll_and_host(void)
     gr_log("PgaServerInit(1600x900, mode%s) -> %d", mode1 ? "1" : "2", rc2);
     if (rc2 != 0) { g.failed = true; return false; }
 
-    post_install();          /* frame-post consumer (screen_pga.bmp)   */
+    {   /* Phase-75: GR_READBACK=0 = native display only (no 30 fps GPU->CPU
+         * copy; the VNC console then stays blank). Default on.         */
+        char rb[4] = {0};
+        g_readback = !(GetEnvironmentVariableA("GR_READBACK", rb, sizeof(rb)) > 0 &&
+                       rb[0] == '0');
+        gr_log("readback %s", g_readback ? "on (VNC console)" : "off (native only)");
+    }
+    if (g_readback) post_install();  /* frame-post consumer (VNC console) */
 
     g.rgba = (fn_rgba_t)(void (*)(void))TAB(0xa0);
     g.fbBuf = (uint8_t *)calloc(1, GR_FB_BYTES);
     g.fbPrev = (uint8_t *)calloc(1, GR_FB_BYTES);
 
     g.ready = true;
-    readpix_spawn();
+    if (g_readback) readpix_spawn();
     gr_log("READY (HandConn at +0x88)");
     return true;
 }
@@ -3850,16 +4021,31 @@ write_done:                            /* Phase-57: dropped-record exit */
         stl_le_p(mb + 0x08, 0);
         break;
     }
-    gr_log("op done cid=%u cmd=%u len=%u", cid, cmd, len);
+    if (gr_verbose()) gr_log("op done cid=%u cmd=%u len=%u", cid, cmd, len);
     GR_DONE(cid);
 }
 
 /* ================================================================= */
 /* worker thread                                                     */
 
+static DWORD g_workerPad;
+
 static void *gr_worker(void *arg)
 {
     (void)arg;
+    {
+        char b[8] = {0};
+        if (GetEnvironmentVariableA("GR_WORKER_PAD", b, sizeof(b)) > 0) {
+            g_workerPad = (DWORD)atoi(b);
+        }
+        /* 1 ms scheduler/timer granularity for every remaining wait in
+         * this process (winmm, loaded dynamically: no new link dep). */
+        HMODULE wm = LoadLibraryA("winmm.dll");
+        typedef unsigned (WINAPI *tbp_t)(unsigned);
+        tbp_t tbp = wm ? (tbp_t)(void *)GetProcAddress(wm, "timeBeginPeriod") : NULL;
+        gr_log("worker: pad=%lu ms, timeBeginPeriod(1)=%u", (unsigned long)g_workerPad,
+               tbp ? tbp(1) : 99u);
+    }
     gr_log("worker thread running");
     gr_init_dll_and_host();
     for (;;) {
@@ -3872,6 +4058,7 @@ static void *gr_worker(void *arg)
         g.qhead = (g.qhead == GR_QSZ - 1) ? 0 : g.qhead + 1;
         qemu_mutex_unlock(&g.lock);
         worker_dispatch_op(&op);
+        if (g_workerPad) Sleep(g_workerPad);
         /* Phase-50 (result-consumption pad): the guest reads the per-cid
          * mbox result [mbox+4] only AFTER its ack flag fires. Any LATER
          * op's completion landing in that wake->read window clobbers the
@@ -3884,8 +4071,12 @@ static void *gr_worker(void *arg)
          * shared cid=1 queue). Hold the next completion ~2 ms so every
          * waiter consumes its own result first; FIFO + this pad also
          * pushes a concurrent reader's pull behind the owning attempt's
-         * pair reads. */
-        Sleep(2);
+         * pair reads.
+         * Phase-75: obsolete since the Phase-65 completion FIFO in
+         * bst_pgaipc (one served-cid per guest ack) and a major frame-
+         * rate cost (one worker serialises every channel's ops, and a
+         * 2 ms Sleep is up to 15.6 ms at the default timer resolution).
+         * Off by default; GR_WORKER_PAD=<ms> brings it back. */
     }
     return NULL;
 }

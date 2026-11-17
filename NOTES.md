@@ -496,6 +496,39 @@ Two independent blockers, both fixed:
   HD-Adb last). The user's two instances keep their qemu_test data disks (absolute paths).
 - Full from-scratch QEMU build verified (1699 steps) and the exe runs without MSYS2 on PATH.
 
+## 10m. Phase 75: performance - native GPU display, no worker pad, quiet console
+
+Measured with tools/fps.py (SurfaceFlinger flip counter, root via bstk/su), Rvc64_2 data:
+| config | home screen | ShurikenCut (3D Unity) |
+|---|---|---|
+| Phase-50 2 ms worker pad (GR_WORKER_PAD=2) | 1.1 fps | 55.8 fps |
+| Phase 75 (no pad, condvar waits, timeBeginPeriod 1) | 60.0 fps | 59.9 fps (vsync cap) |
+1. Native display: the DLL presents into a child window ("BlueStacksApp") it creates inside
+   the HWND passed to PgaServerInit - exactly HD-Player's path, GPU only. We used to keep that
+   window hidden and pull 30 fps of RGBA back (PgaStartReadPixels) into the QEMU console ->
+   VNC -> Python. Now gr_render makes it a borderless popup (class gr_renderHostWnd, title
+   "OpenStacks display"; GR_SHOW=1 = normal top-level window), resizes the DLL child to the
+   client area (the DLL scales), subclasses the child for input: mouse -> abs pointer + left
+   button (bstvmsg touch handler), keys -> PS/2 scancode (qnum, 0x80|sc for E0 keys), both via
+   aio_bh_schedule_oneshot on the main loop. GR_READBACK=0 skips the pixel readback (the VNC
+   console then stays blank); default 1 so boot.py/VNC tools keep working.
+   Front-end: openstacks/native.py finds the window by QEMU pid + class, embeds it with
+   QWindow.fromWinId + createWindowContainer (letterboxed), and SetParent(NULL)s it back
+   before the container dies (child windows die with their parent). Instance key
+   display=native|vnc (default native -> GR_READBACK=0).
+2. The Phase-50 2 ms Sleep after every gr_worker op (all channels serialised on one worker;
+   2 ms = up to 15.6 ms at the default timer resolution) is gone (GR_WORKER_PAD=<ms> restores
+   it); the Phase-65 completion FIFO made it unnecessary. pure_take/pure_flush wait on the sock
+   condvar (pure_write/pure_read wake it) instead of Sleep(1) polls; timeBeginPeriod(1).
+3. Log volume: per-op gr_render/bstpgaipc lines only with GR_VERBOSE=1 (a boot's log went from
+   tens of MB to ~60 KB).
+4. bstaudio shares IRQ 10 with bstpgaipc (IRQ 11: virtio-net, bstvmsg, vboxguest); its ISR
+   printk(KERN_ERR "Unknown cmd = 0") for any event other than 7/13 (bstaudio.ko 0xab0), i.e.
+   on every graphics IRQ (2046 lines per boot) through the trapping serial console. The kernel
+   cmdline now has loglevel=3 (boot.py --console-verbose to keep everything on serial.log).
+- Verified: front-end player embeds the native window (home renders, click opens the Store),
+  closing the player leaves QEMU running; PostMessage'd keys arrive as KeyEvents.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

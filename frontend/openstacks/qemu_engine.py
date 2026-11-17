@@ -75,7 +75,11 @@ DEFAULT_BST_DEVICES = ("bstvmsg", "bstpgaipc", "bstaudio", "hvmem", "vbox-vmmdev
 # token order of the proven boot cmds:
 BASE_KERNEL_APPEND = (
     "earlyprintk=serial,keep idle=nomwait vmalloc=160M "
-    "nosmap nosmep nokaslr console=ttyS0"
+    "nosmap nosmep nokaslr console=ttyS0 "
+    # Phase-75: bstaudio shares IRQ 10 with bstpgaipc and its ISR printk()s
+    # "Unknown cmd = 0" (KERN_ERR) on every graphics IRQ; at loglevel 3 they
+    # stay in dmesg instead of the (slow, trapping) serial console.
+    "loglevel=3"
 )
 
 # -device id names exactly as boot_bst_grbridge.cmd uses them, so the guest's
@@ -303,6 +307,9 @@ class QemuEngine:
         # the launching shell. Active only when bstpgaipc gr=on is in play.
         if inst.pgaipc_gr and "bstpgaipc" in inst.device_list():
             env.update(GR_ENV)
+            # Phase-75: native = the player embeds the renderer window (GPU
+            # present); the 30 fps pixel readback only feeds the VNC console.
+            env["GR_READBACK"] = "0" if inst.display == "native" else "1"
         try:
             logf = open(self.qemu_log_path(inst.name), "ab")
         except OSError as e:
@@ -347,6 +354,15 @@ class QemuEngine:
             except OSError:
                 pass
         return ok
+
+    def pid(self, inst: Instance | str) -> int | None:
+        """QEMU pid of a running instance (None when stopped)."""
+        name = inst.name if isinstance(inst, Instance) else inst
+        obj = self.instances.get(name)
+        if obj is not None:
+            return obj.proc.pid if obj.is_running() else None
+        pid = self._read_pidfile(name)
+        return pid if pid is not None and _pid_alive(pid) else None
 
     def is_running(self, inst: Instance | str) -> bool:
         name = inst.name if isinstance(inst, Instance) else inst

@@ -33,6 +33,9 @@ BASE_ENV = {"GR_BRIDGE": "1", "GR_SYN_MODE": "1", "GR_RENDERER_MODE": "1",
             "GR_HPP": "0", "GR_RCVER": "3", "GR_PURE": "1", "PGA_SLOTSHIFT": "1"}
 APPEND = ("earlyprintk=serial,keep idle=nomwait vmalloc=160M nosmap nosmep "
           "bstandroid=pie64 nokaslr console=ttyS0 BST_ANDROID_ID=bfd0e87474aa4028")
+# Phase-75: quiet the serial console (bstaudio ISR spam on the shared IRQ);
+# --console-verbose keeps every kernel message on serial.log for debugging.
+QUIET = " loglevel=3"
 
 
 def fmt(name):
@@ -55,6 +58,8 @@ def main():
     ap.add_argument("--audio", default="dsound", choices=["dsound", "wav", "none"],
                     help="bstaudio backend: host speakers, runs/<name>/audio.wav, or silent")
     ap.add_argument("--persist", action="store_true")
+    ap.add_argument("--console-verbose", action="store_true",
+                    help="print every kernel message to serial.log (slower)")
     ap.add_argument("--cpu", default="qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt",
                     help="QEMU -cpu (SSE4 family for houdini; host/AVX models crash the guest under WHPX)")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
@@ -104,7 +109,7 @@ def main():
         "-machine", "pc", "-accel", "whpx", "-cpu", a.cpu, "-m", "4096", "-smp", "2",
         "-kernel", os.path.join(images, "kernel.bin"),
         "-initrd", os.path.join(images, a.initrd),
-        "-append", APPEND,
+        "-append", APPEND + ("" if a.console_verbose else QUIET),
         "-drive", "file=%s,format=vpc,if=ide,index=0%s" % (img(a.root), snap),
         "-drive", "file=%s,format=%s,if=ide,index=1%s" % (img(a.data), fmt(a.data), snap),
         "-nic", "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:25556-10.0.2.15:5555",

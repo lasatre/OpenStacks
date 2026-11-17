@@ -277,8 +277,15 @@ static size_t gr_host_windowsize(uint32_t cid)
 static void gr_bh_complete(void *opaque)
 {
     struct GrBhCtx *c = opaque;
+    static int verbose = -1;
     pga_complete(c->dev, c->cid);
-    fprintf(stderr, "[bstpgaipc] gr ack cid=%u\n", c->cid);
+    if (verbose < 0) {
+        const char *v = getenv("GR_VERBOSE");
+        verbose = v && v[0] == '1';
+    }
+    if (verbose) {
+        fprintf(stderr, "[bstpgaipc] gr ack cid=%u\n", c->cid);
+    }
 }
 
 static void gr_host_complete(void *dev, uint32_t cid)

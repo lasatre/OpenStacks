@@ -329,6 +329,17 @@ class QemuEngine:
                                 f"{inst.name} looks already running: port(s) in use "
                                 f"({', '.join(busy)}). Stop the other QEMU first.")
         env = os.environ.copy()
+        # Phase-80: the root disk is snapshot=on; QEMU's overlay ("vl.XXXXXX", can grow to
+        # GBs) lives in TEMP and is left behind when QEMU is killed. Keep it per instance
+        # (on the project drive) and drop stale ones - this instance is not running.
+        qtmp = Path(g.resolved_instances_dir()) / inst.name / "tmp"
+        qtmp.mkdir(parents=True, exist_ok=True)
+        for f in qtmp.glob("vl.*"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        env["TMP"] = env["TEMP"] = str(qtmp)
         if "qemu_bst" in argv[0] or Path(argv[0]).parent.name == "build":
             env["PATH"] = MSYS2_BIN + os.pathsep + env.get("PATH", "")
             env.setdefault("QEMU_AUDIO_DRV", "none")

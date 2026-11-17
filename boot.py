@@ -92,6 +92,17 @@ def main():
     time.sleep(1.0)
 
     env = dict(os.environ)
+    # Phase-80: snapshot=on overlays (QEMU "vl.XXXXXX", GBs each) go to TEMP and survive a
+    # taskkill; keep them in deps/qtmp and clear leftovers (all QEMUs were just killed).
+    qtmp = os.path.join(DEV, "deps", "qtmp")
+    os.makedirs(qtmp, exist_ok=True)
+    for f in os.listdir(qtmp):
+        if f.startswith("vl."):
+            try:
+                os.remove(os.path.join(qtmp, f))
+            except OSError:
+                pass
+    env["TMP"] = env["TEMP"] = qtmp
     env["PATH"] = r"C:\msys64\ucrt64\bin;" + env.get("PATH", "")
     env.update(BASE_ENV)
     rw, rh = a.res.lower().split("x")

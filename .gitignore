@@ -4,3 +4,4 @@ runs/**
 !runs/*/
 !runs/*/grade.txt
 !runs/*/meta.txt
+guestlibs/

@@ -109,12 +109,16 @@ class GlobalSettings:
             return self.adb_path
         return _first_existing(DEFAULT_ADB_CANDIDATES)
 
-    def resolved_assets_dir(self) -> str:
+    def resolved_assets_dir(self, image: str = "") -> str:
+        """Asset dir of one engine image (assets/<image>/, made by prepare_assets.py or
+        the manager's download). A global assets_dir is either a root holding <image>/
+        subdirs or (legacy) one image's files directly."""
+        image = image or DEFAULT_IMAGE
         if self.assets_dir:
-            return str(Path(self.assets_dir).resolve() if not Path(self.assets_dir).is_absolute()
-                       else Path(self.assets_dir))
-        # default: <repo>/assets/Pie64 made by tools/prepare_assets.py
-        cand = PROJECT_ROOT / "assets" / DEFAULT_IMAGE
+            base = Path(self.assets_dir)
+            base = base if base.is_absolute() else base.resolve()
+            return str(base / image if (base / image).is_dir() else base)
+        cand = PROJECT_ROOT / "assets" / image
         if cand.exists():
             return str(cand)
         legacy = PROJECT_ROOT.parent / "qemu_test"   # pre-repo workspace
@@ -150,6 +154,7 @@ class Instance:
     hvmem_mb: int = 512                # hvmem ram_size_mib= (proven shape uses 512)
     extra_append: str = ""             # extra KEY=VALUE / kernel args for -append
     display: str = "native"            # native (GPU window embed) | vnc (readback)
+    image: str = "Pie64"               # engine image: Pie64 (Android 9), Rvc64 (11), Nougat*
     is_default: bool = False
 
     # -- helpers ------------------------------------------------------------

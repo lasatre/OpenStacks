@@ -63,10 +63,10 @@ def resolve_data_disk(inst: Instance, g: GlobalSettings, create: bool = True) ->
     on first use. Relative names resolve against the assets dir (legacy layout)."""
     if inst.data_disk:
         p = Path(inst.data_disk)
-        return p if p.is_absolute() else Path(g.resolved_assets_dir() or ".") / p
+        return p if p.is_absolute() else Path(g.resolved_assets_dir(inst.image) or ".") / p
     p = Path(g.resolved_instances_dir()) / inst.name / "Data.vhdx"
     if create and not p.exists():
-        tmpl = Path(g.resolved_assets_dir() or ".") / "Data_template.vhdx"
+        tmpl = Path(g.resolved_assets_dir(inst.image) or ".") / "Data_template.vhdx"
         if tmpl.exists():
             import shutil
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -162,7 +162,7 @@ class QemuEngine:
                 "qemu-system-x86_64.exe not found; set global 'qemu_path' in "
                 "instances.conf (patched build needs C:\\msys64\\ucrt64\\bin on PATH)."
             )
-        assets = Path(g.resolved_assets_dir() or ".")
+        assets = Path(g.resolved_assets_dir(inst.image) or ".")
         kernel = assets / inst.kernel
         initrd = assets / (inst.initrd or DEFAULT_INITRD)
         root = assets / inst.effective_root_disk()
@@ -278,7 +278,8 @@ class QemuEngine:
             ov["android_id"] = inst.android_id
         path = self.serial_log_path(inst).with_name(f"{inst.name}.bst.props")
         path.parent.mkdir(parents=True, exist_ok=True)
-        return bstprops.write_props_file(path, inst.name, ov)
+        ov.setdefault("instance", inst.image)
+        return bstprops.write_props_file(path, inst.image, ov)
 
     def build_append(self, inst: Instance) -> str:
         """Kernel cmdline; includes the BST_ANDROID-style property injection hook.
@@ -286,7 +287,8 @@ class QemuEngine:
         BST_ANDROID_ID / BST_SERNO ride the cmdline into populate_environment
         of the pristine initramfs (see FINDINGS.md, 'remaining blocker').
         """
-        parts = [BASE_KERNEL_APPEND, f"bstandroid={inst.name.lower()}"]
+        # BlueStacks passes the engine image name (pie64, rvc64, nougat64, ...)
+        parts = [BASE_KERNEL_APPEND, f"bstandroid={(inst.image or 'Pie64').lower()}"]
         if inst.android_id:
             parts.append(f"BST_ANDROID_ID={inst.android_id}")
         if inst.serial_number:

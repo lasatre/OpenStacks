@@ -1,0 +1,354 @@
+"""BlueStacks engine images: download -> extract -> patch -> assets.
+
+Pipeline (each stage is a function, so the front-end and the CLI share it):
+
+  1. download(image)      <cache>/<Image>.exe from BlueStacks' CDN (resumable, md5-checked).
+                          One self-extracting 7z per image: a 392,848-byte ELF 7-Zip SFX stub
+                          + a standard 7z archive (docs/re/image_download_spec.md).
+  2. extract(exe)         -> <staging>/<Image>/  (Root.vhd, fastboot.vdi, Data.vhdx,
+                          Android.bstk.in, oem_<Image>.cfg)
+  3. apply_patches()      patches/<Image>/*.py and patches/all/*.py run in name order on the
+                          staging dir (the hook for the image clean-up step; none yet)
+  4. build_assets()       -> assets/<Image>/: kernel.bin + initramfs.bin cut from fastboot.vdi,
+                          Root.vhd, Data_template.vhdx, oem cfg, manifest.json
+
+Nothing BlueStacks-owned is stored in the repo; everything is fetched/derived locally.
+build_assets() also works on an installed BlueStacks Engine/<Image> dir (prepare_assets.py).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import time
+import urllib.request
+import zlib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Optional
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ASSETS_ROOT = PROJECT_ROOT / "assets"
+CACHE_DIR = PROJECT_ROOT / "deps" / "images"
+PATCH_DIR = PROJECT_ROOT / "patches"
+
+# Download locations are per BlueStacks client build: the URL embeds the version and a
+# per-build key baked into HD-MultiInstanceManager.exe (getImageDownloadUrl).
+CDN_BASE = "https://cdn3.bluestacks.com/downloads"
+CLIENT_BUILDS = {
+    "5.21.550.1031": {
+        "oem": "nxt",
+        "key": "5a99b4c3b70826e26cecb85b296b66c5",
+        "images": {
+            # name: (android, download bytes, md5 of the whole .exe)
+            "Nougat32": ("7 (32-bit)", 514831954, "316e7ad283cf6045bf0fd5caef7895b4"),
+            "Nougat64": ("7", 714106476, "8b48c5f81bcf8e9055fb1e58e75afd9f"),
+            "Pie64": ("9", 594114143, "f482bb4cf40abcbec8422f5d4168c846"),
+            "Rvc64": ("11", 693493911, "ffaea01e90e5e0ef2e7b1288c5df3306"),
+        },
+    },
+}
+DEFAULT_BUILD = "5.21.550.1031"
+SFX_STUB = 392848
+SEVENZ_MAGIC = b"7z\xbc\xaf\x27\x1c"
+UA = "OpenStacks-image-fetch/1.0"
+SECTOR = 512
+
+ProgressFn = Callable[[str, int, int], None]      # (stage, done, total)
+
+
+@dataclass
+class ImageInfo:
+    name: str
+    android: str
+    size: int
+    md5: str
+    build: str
+
+    @property
+    def url(self) -> str:
+        b = CLIENT_BUILDS[self.build]
+        return (f"{CDN_BASE}/windows/{b['oem']}/{self.build}/{b['key']}"
+                f"/Android/{self.name}/{self.name}.exe")
+
+
+def catalog(build: str = DEFAULT_BUILD) -> list[ImageInfo]:
+    imgs = CLIENT_BUILDS[build]["images"]
+    return [ImageInfo(n, a, s, m, build) for n, (a, s, m) in imgs.items()]
+
+
+def image_info(name: str) -> ImageInfo:
+    for build in CLIENT_BUILDS:
+        for info in catalog(build):
+            if info.name == name:
+                return info
+    raise KeyError(f"unknown image {name!r} (known: "
+                   f"{', '.join(i.name for b in CLIENT_BUILDS for i in catalog(b))})")
+
+
+def installed_images(root: Path = ASSETS_ROOT) -> list[str]:
+    """Images with usable assets (kernel + initramfs + Root.vhd)."""
+    if not root.exists():
+        return []
+    return sorted(d.name for d in root.iterdir()
+                  if (d / "kernel.bin").exists() and (d / "initramfs.bin").exists()
+                  and (d / "Root.vhd").exists())
+
+
+class Cancelled(Exception):
+    pass
+
+
+def _check(cancel: Optional[Callable[[], bool]]) -> None:
+    if cancel and cancel():
+        raise Cancelled()
+
+
+# -- 1. download ----------------------------------------------------------------------
+def download(info: ImageInfo, cache: Path = CACHE_DIR, progress: Optional[ProgressFn] = None,
+             cancel: Optional[Callable[[], bool]] = None) -> Path:
+    """Fetch <cache>/<Image>.exe; resumes a .part file; verifies the md5."""
+    cache.mkdir(parents=True, exist_ok=True)
+    final = cache / f"{info.name}.exe"
+    if final.exists() and final.stat().st_size == info.size:
+        return final
+    part = cache / f"{info.name}.exe.part"
+    have = part.stat().st_size if part.exists() else 0
+    if have > info.size:
+        part.unlink()
+        have = 0
+    if have < info.size:
+        req = urllib.request.Request(info.url, headers={"User-Agent": UA})
+        if have:
+            req.add_header("Range", f"bytes={have}-")
+        with urllib.request.urlopen(req, timeout=60) as r:   # follows the 301 to the mirror
+            if have and r.status != 206:                       # server ignored Range: restart
+                have = 0
+                part.unlink(missing_ok=True)
+            with open(part, "ab") as f:
+                last = 0.0
+                while True:
+                    _check(cancel)
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    have += len(chunk)
+                    if progress and time.time() - last > 0.2:
+                        progress("download", have, info.size)
+                        last = time.time()
+    if progress:
+        progress("verify", 0, info.size)
+    h = hashlib.md5()
+    with open(part, "rb") as f:
+        done = 0
+        for chunk in iter(lambda: f.read(8 << 20), b""):
+            _check(cancel)
+            h.update(chunk)
+            done += len(chunk)
+            if progress:
+                progress("verify", done, info.size)
+    if h.hexdigest() != info.md5:
+        part.unlink(missing_ok=True)
+        raise IOError(f"{info.name}: md5 mismatch ({h.hexdigest()} != {info.md5}); "
+                      "the partial download was removed, try again")
+    part.replace(final)
+    return final
+
+
+# -- 2. extract -------------------------------------------------------------------------
+def find_7z() -> Optional[str]:
+    for name in ("7z", "7za", "7zz", "7zr"):
+        p = shutil.which(name)
+        if p:
+            return p
+    for p in (r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe",
+              r"C:\Program Files\BlueStacks_nxt\7zr.exe"):
+        if Path(p).exists():
+            return p
+    return None
+
+
+def extract(exe: Path, staging: Path, progress: Optional[ProgressFn] = None,
+            cancel: Optional[Callable[[], bool]] = None) -> Path:
+    """Unpack the self-extracting download into a fresh staging dir. 7-Zip reads the
+    archive behind the ELF SFX stub itself (exit code 1 = warnings, e.g. the stub)."""
+    seven = find_7z()
+    if not seven:
+        raise RuntimeError("7-Zip not found: install 7-Zip (https://7-zip.org) or p7zip")
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    total = exe.stat().st_size
+    if progress:
+        progress("unpack", 0, total)
+    _check(cancel)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    r = subprocess.run([seven, "x", "-y", f"-o{staging}", str(exe)],
+                       capture_output=True, text=True, creationflags=flags)
+    if r.returncode not in (0, 1) or not (staging / "Root.vhd").exists():
+        raise RuntimeError(f"7-Zip failed ({r.returncode}): {(r.stderr or r.stdout)[-400:]}")
+    if progress:
+        progress("unpack", total, total)
+    return staging
+
+
+# -- 3. patch hook ----------------------------------------------------------------------
+def apply_patches(staging: Path, image: str, progress: Optional[ProgressFn] = None) -> list[str]:
+    """Run patches/all/*.py then patches/<Image>/*.py (name order) against the extracted
+    files. Each patch module defines `apply(image_dir: Path, image: str) -> None`.
+    Returns the names of the patches applied (recorded in the manifest)."""
+    done: list[str] = []
+    scripts: list[Path] = []
+    for sub in ("all", image):
+        d = PATCH_DIR / sub
+        if d.is_dir():
+            scripts += sorted(p for p in d.glob("*.py") if not p.name.startswith("_"))
+    for i, script in enumerate(scripts):
+        if progress:
+            progress(f"patch {script.name}", i, len(scripts))
+        spec = importlib.util.spec_from_file_location(f"ost_patch_{i}", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.apply(staging, image)
+        done.append(f"{script.parent.name}/{script.name}")
+    return done
+
+
+# -- 4. assets --------------------------------------------------------------------------
+def read_vdi(path: Path, max_bytes: int) -> bytes:
+    """Flatten the first max_bytes of a VirtualBox VDI (fixed or dynamic)."""
+    with path.open("rb") as f:
+        hdr = f.read(0x200)
+        if struct.unpack_from("<I", hdr, 0x40)[0] != 0xBEDA107F:
+            raise IOError(f"{path}: not a VDI image")
+        off_blocks, off_data = struct.unpack_from("<II", hdr, 0x154)
+        cb_disk = struct.unpack_from("<Q", hdr, 0x170)[0]
+        cb_block, _, c_blocks = struct.unpack_from("<III", hdr, 0x178)
+        f.seek(off_blocks)
+        bmap = struct.unpack(f"<{c_blocks}I", f.read(4 * c_blocks))
+        want = min(max_bytes, cb_disk)
+        out = bytearray()
+        for i in range((want + cb_block - 1) // cb_block):
+            if bmap[i] >= 0xFFFFFFFE:
+                out += bytes(cb_block)
+            else:
+                f.seek(off_data + bmap[i] * cb_block)
+                out += f.read(cb_block)
+    return bytes(out[:want])
+
+
+def split_boot_disk(raw: bytes) -> tuple[bytes, bytes]:
+    """fastboot.vdi: LBA0 BlueStacks loader, LBA1.. bzImage, then the initrd (gzip, size at
+    MBR+0x1fa, exactly what BlueStacks' loader hands the kernel)."""
+    bz = raw[SECTOR:]
+    if bz[0x202:0x206] != b"HdrS":
+        raise IOError("fastboot: no bzImage header at LBA1")
+    setup_sects = bz[0x1F1] or 4
+    syssize = struct.unpack_from("<I", bz, 0x1F4)[0] * 16
+    klen = (1 + setup_sects) * SECTOR + syssize
+    isize = struct.unpack_from("<I", raw, 0x1FA)[0]
+    gz = raw.find(b"\x1f\x8b\x08", SECTOR + klen)
+    if gz < 0 or gz - (SECTOR + klen) > 0x10000:
+        raise IOError("fastboot: initramfs gzip not found after the kernel")
+    initrd = raw[gz:gz + isize]
+    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    d.decompress(initrd)
+    if not d.eof:
+        raise IOError("fastboot: initramfs gzip stream incomplete")
+    return bz[:klen], initrd
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _place(src: Path, dst: Path, move: bool) -> None:
+    if dst.exists() and dst.stat().st_size == src.stat().st_size and not move and \
+            dst.stat().st_mtime >= src.stat().st_mtime:
+        return
+    dst.unlink(missing_ok=True)
+    if move:
+        shutil.move(str(src), str(dst))
+    else:
+        shutil.copy2(src, dst)
+
+
+def build_assets(src: Path, image: str, out_root: Path = ASSETS_ROOT, move: bool = False,
+                 source: dict | None = None, progress: Optional[ProgressFn] = None) -> Path:
+    """src = an extracted download (staging) or an installed Engine/<Image> dir.
+    move=True moves the big files out of a staging dir instead of copying."""
+    out = out_root / image
+    out.mkdir(parents=True, exist_ok=True)
+    if progress:
+        progress("assets", 0, 3)
+    raw = read_vdi(src / "fastboot.vdi", 32 << 20)
+    kernel, initrd = split_boot_disk(raw)
+    (out / "kernel.bin").write_bytes(kernel)
+    (out / "initramfs.bin").write_bytes(initrd)
+    if progress:
+        progress("assets", 1, 3)
+    _place(src / "Root.vhd", out / "Root.vhd", move)
+    # blank /data: Data_orig.vhdx in an installed engine dir, Data.vhdx in a download
+    for name in ("Data_orig.vhdx", "Data.vhdx"):
+        if (src / name).exists() and not (name == "Data.vhdx" and not source):
+            _place(src / name, out / "Data_template.vhdx", move)
+            break
+    for extra in (f"oem_{image}.cfg", "Android.bstk.in"):
+        if (src / extra).exists():
+            shutil.copy2(src / extra, out / extra)
+    if progress:
+        progress("assets", 2, 3)
+    man = {"image": image, "android": _android_of(image), "source": source or {"from": str(src)},
+           "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+           "files": {p.name: _sha256(p) for p in sorted(out.iterdir())
+                     if p.is_file() and p.name != "manifest.json"}}
+    (out / "manifest.json").write_text(json.dumps(man, indent=2), encoding="utf-8")
+    if progress:
+        progress("assets", 3, 3)
+    return out
+
+
+def _android_of(image: str) -> str:
+    try:
+        return image_info(image).android
+    except KeyError:
+        return "?"
+
+
+# -- all stages -------------------------------------------------------------------------
+def install_image(name: str, progress: Optional[ProgressFn] = None,
+                  cancel: Optional[Callable[[], bool]] = None, keep_download: bool = False,
+                  out_root: Path = ASSETS_ROOT) -> Path:
+    """download -> extract -> patch -> assets/<Image>/. Returns the asset dir."""
+    info = image_info(name)
+    exe = download(info, progress=progress, cancel=cancel)
+    staging = CACHE_DIR / f"{name}.staging"
+    extract(exe, staging, progress=progress, cancel=cancel)
+    patches = apply_patches(staging, name, progress=progress)
+    src = {"from": "download", "url": info.url, "client_build": info.build,
+           "md5": info.md5, "patches": patches}
+    out = build_assets(staging, name, out_root=out_root, move=True, source=src,
+                       progress=progress)
+    shutil.rmtree(staging, ignore_errors=True)
+    if not keep_download:
+        exe.unlink(missing_ok=True)
+    return out
+
+
+def _cli_progress(stage: str, done: int, total: int) -> None:
+    pct = 100 * done / total if total else 100
+    sys.stdout.write(f"\r  {stage:<12} {pct:5.1f}%  ({done >> 20} / {total >> 20} MiB)   ")
+    sys.stdout.flush()
+    if done >= total:
+        sys.stdout.write("\n")

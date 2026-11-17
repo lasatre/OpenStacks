@@ -11,8 +11,9 @@ user's own BlueStacks 5 install by `tools/prepare_assets.py`.
 
 ## Requirements (Windows 10/11 x64)
 
-- **BlueStacks 5** installed (tested 5.21.550; Pie64 instance created once), for the
-  guest images and `libOpenglRender.dll`.
+- **BlueStacks 5** installed (tested 5.21.550) for `libOpenglRender.dll`. The Android images
+  themselves are downloaded from BlueStacks' CDN (or taken from the install).
+- **7-Zip** (to unpack downloaded images).
 - **Windows Hypervisor Platform** enabled (QEMU uses WHPX).
 - **MSYS2** at `C:\msys64` with the ucrt64 toolchain, to build QEMU:
   `pacman -S mingw-w64-ucrt-x86_64-{gcc,ninja,meson,python,glib2,pixman,libslirp,pkgconf}`
@@ -22,7 +23,11 @@ user's own BlueStacks 5 install by `tools/prepare_assets.py`.
 ## Setup
 
     qemu\build.cmd                      # fetch QEMU 11.1.0 -> deps\, add devices, build -> build\
-    python tools\prepare_assets.py      # BlueStacks images -> assets\Pie64\
+    python tools\prepare_assets.py --download Pie64   # Android 9 -> assets\Pie64\ (also Rvc64 =
+                                                       # Android 11, Nougat64/32 = Android 7)
+    python tools\prepare_assets.py --list              # what is available / installed
+
+The manager's **New** dialog can also download an image (pick the Android version).
 
 ## Run
 

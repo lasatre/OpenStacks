@@ -616,6 +616,25 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
 - The "Dinosaur crashes" report on Rvc64_2 was the low memory killer (2 GB instance, the game
   needs ~1.6 GB): Rvc64_2 is now 4096 MB in the user's instances.conf.
 
+## 10q. Phase 79: images from BlueStacks' CDN, instances per image, Android 11 boots
+
+- Spec: docs/re/image_download_spec.md. No metadata API: one self-extracting 7z per image at
+  `https://cdn3.bluestacks.com/downloads/windows/nxt/<client version>/<per-build key>/Android/
+  <Image>/<Image>.exe` (5.21.550.1031 key 5a99b4c3b70826e26cecb85b296b66c5; 301 -> ak-build mirror,
+  Range ok, md5 in x-amz-meta-md5). Contents: Root.vhd, fastboot.vdi, Data.vhdx (blank template),
+  Android.bstk.in, oem_<Image>.cfg. 5.21.550 offers Nougat32/64, Pie64, Rvc64.
+- frontend/openstacks/images.py: download (resumable .part, md5) -> extract (7-Zip reads the
+  archive behind the ELF SFX stub; note the 7z magic ALSO occurs inside the stub at 390,248, so
+  never slice at the first match) -> apply_patches (patches/all + patches/<Image>/*.py, recorded
+  in the manifest) -> build_assets (assets/<Image>/). tools/prepare_assets.py --list/--download.
+- Downloaded Pie64: kernel/initramfs/Data template byte-identical to the install-derived ones;
+  Root.vhd is BlueStacks' original 2024-09 image (the installed one was updated in place). Boots
+  to home in ~30 s (p79_dl_pie64).
+- Instances have an `image` key (assets/<image>/, bstandroid=<image lower>, bst.instance=<image>);
+  the manager's New dialog picks the Android version and downloads it with a progress dialog.
+- Rvc64 (Android 11) created through that flow boots to the BlueStacks home screen on the first
+  try (ro.build.version.release=11, docs/shots/phase79_android11_rvc64.png).
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

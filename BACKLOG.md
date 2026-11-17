@@ -43,12 +43,14 @@ NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
 - **Shared folders** (vboxsf: Documents/Pictures/InputMapper) - vmmdev HGCM stubs only.
 
 ## Distribution / platform
-- **Download images on demand** from BlueStacks' servers (HD-MultiInstanceManager
-  `MimBackend::downloadImage`) so no BlueStacks install is needed; checksums + pinned
-  versions.
-- **Other Android versions** - Rvc64 (Android 11), Tiramisu64 (Android 13) images; asset prep
-  is per image already (`prepare_assets.py --image`).
-- **Cleaned-up images** - script that strips ads/bloat and swaps the launcher on a local copy.
+- **Android 13 (Tiramisu64) and newer images** - downloads are keyed per BlueStacks client
+  build (URL = version + a key baked into HD-MultiInstanceManager.exe). 5.21.550 offers
+  Nougat32/64, Pie64, Rvc64 only; add a newer build's version + key to
+  `images.CLIENT_BUILDS` (the user is getting a newer client's files) [10q].
+- **Android 11 (Rvc64) / Nougat beyond boot** - Rvc64 boots to the home screen; games, HPP,
+  rotation etc. untested there; Nougat untested [10q].
+- **Cleaned-up images** - patch scripts in `patches/<Image>/` (hook already runs between unpack
+  and asset build, see patches/README.md): strip ads/bloat, swap the launcher.
 - **Linux host (plan: option A, open-source gfxstream renderer)**. Everything except the renderer
   is porting work; the renderer swap is the project (estimate: ~2 weeks focused).
   1. Pluggable renderer backend in gr_render: the DLL only sees the HstSocketHost vtable

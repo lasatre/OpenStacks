@@ -16,7 +16,8 @@ from typing import Optional
 
 from PySide6.QtCore import QRect, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox,
+                               QProgressDialog,
                                QFormLayout, QHBoxLayout, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QMessageBox, QPushButton,
@@ -98,7 +99,18 @@ class InstanceEditDialog(QDialog):
 
         self.ed_name = QLineEdit(i.name)
         self.ed_name.setPlaceholderText("Pie64-style name (letters/digits/_)")
+
+        from . import images
+        self.cb_image = QComboBox()
+        have = set(images.installed_images())
+        for info in images.catalog():
+            state = "ready" if info.name in have else f"download {info.size / 2**20:,.0f} MB"
+            self.cb_image.addItem(f"Android {info.android} - {info.name} ({state})", info.name)
+        k = self.cb_image.findData(i.image)
+        self.cb_image.setCurrentIndex(k if k >= 0 else self.cb_image.findData("Pie64"))
+        self.cb_image.setEnabled(inst is None)
         form.addRow("Name", self.ed_name)
+        form.addRow("Android", self.cb_image)
 
         self.sp_cpus = QSpinBox()
         self.sp_cpus.setRange(1, 32)
@@ -148,6 +160,8 @@ class InstanceEditDialog(QDialog):
             pass
         inst.devices = self.ed_devices.text().strip()
         inst.extra_append = self.ed_append.text().strip()
+        if self.cb_image.isEnabled():
+            inst.image = self.cb_image.currentData()
 
 
 # -- main window ---------------------------------------------------------------------
@@ -340,14 +354,68 @@ class ManagerWindow(QMainWindow):
         if errs:
             QMessageBox.critical(self, "Invalid", "\n".join(errs))
             return
+        from . import images
+        if inst.image not in images.installed_images():
+            if not self._install_image(inst.image):
+                return
         try:
             self.store.create(inst.name, cpus=inst.cpus, ram_mb=inst.ram_mb,
                               dpi=inst.dpi, resolution=inst.resolution,
                               adb_port=inst.adb_port, devices=inst.devices,
-                              extra_append=inst.extra_append)
+                              extra_append=inst.extra_append, image=inst.image,
+                              data_disk="")
         except ValueError as e:
             QMessageBox.critical(self, "Create failed", str(e))
         self.refresh()
+
+    def _install_image(self, image: str) -> bool:
+        """Download + prepare an engine image with a progress dialog. True = ready."""
+        from . import images
+        info = images.image_info(image)
+        if QMessageBox.question(
+                self, "Download Android image",
+                f"{image} (Android {info.android}) is not on this PC yet.\n\n"
+                f"Download it from BlueStacks' servers ({info.size / 2**20:,.0f} MB, "
+                f"about {info.size * 4 / 2**30:.1f} GB on disk once unpacked)?") \
+                != QMessageBox.Yes:
+            return False
+        dlg = QProgressDialog(f"Downloading {image}...", "Cancel", 0, 1000, self)
+        dlg.setWindowTitle("Preparing Android image")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        th = _ImageInstallThread(image, self)
+        result = {"ok": False, "err": ""}
+        labels = {"download": "Downloading", "verify": "Verifying", "unpack": "Unpacking",
+                  "assets": "Preparing kernel and disks"}
+
+        def on_progress(stage, done, total):
+            name = labels.get(stage, stage.capitalize())
+            if stage == "download" and total:
+                name += f" {done / 2**20:,.0f} / {total / 2**20:,.0f} MB"
+            dlg.setLabelText(f"{name} - {image}")
+            dlg.setValue(int(1000 * done / total) if total else 0)
+
+        def on_ok(_path):
+            result["ok"] = True
+            dlg.close()
+
+        def on_fail(msg):
+            result["err"] = msg
+            dlg.close()
+
+        th.progress.connect(on_progress)
+        th.finished_ok.connect(on_ok)
+        th.failed.connect(on_fail)
+        dlg.canceled.connect(th.cancel)
+        th.start()
+        dlg.exec()
+        th.wait()
+        if not result["ok"]:
+            QMessageBox.warning(self, "Image not ready",
+                                f"{image}: {result['err'] or 'cancelled'}")
+        return result["ok"]
 
     def _set_default(self) -> None:
         name = self._selected_name()
@@ -415,6 +483,33 @@ class ManagerWindow(QMainWindow):
     def showEvent(self, ev) -> None:  # keep current icon size applied
         self.list.setIconSize(self._icon_size())
         super().showEvent(ev)
+
+
+class _ImageInstallThread(QThread):
+    """images.install_image() off the GUI thread (download, extract, patch, assets)."""
+    progress = Signal(str, object, object)     # stage, done, total (can exceed 2^31)
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, image: str, parent=None):
+        super().__init__(parent)
+        self.image = image
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:
+        from . import images
+        try:
+            out = images.install_image(self.image,
+                                       progress=lambda st, d, t: self.progress.emit(st, d, t),
+                                       cancel=lambda: self._cancel)
+            self.finished_ok.emit(str(out))
+        except images.Cancelled:
+            self.failed.emit("cancelled (the partial download is kept and resumes next time)")
+        except Exception as e:                   # network, disk, 7-Zip ...
+            self.failed.emit(str(e))
 
 
 class _LaunchThread(QThread):

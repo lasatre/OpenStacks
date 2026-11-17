@@ -149,6 +149,48 @@ tools/dump_guestlibs.sh; image libEGL_emulation.so == qemu_test/dpyfix/libEGL_em
    commit) is driven by our own reply bytes. Its "success" in p61 is coincidental pacing,
    not protocol fidelity.
 
+## 7. ROOT CAUSE: device slot mapping off by one (Phase 63)
+
+1. HstStream decode (OpenCode Go DeepSeek V4.1 Flash; raw notes dev/re_scratch/hststream_notes.md),
+   libOpenglSystemCommon: vtable _ZTV9HstStream 0x2a348. alloc (+0x50 -> hstAlloc 0x192d0)
+   returns window+wcur (wcur += len; heap buffer if len > windowSize). flush (hstFlush
+   0x18fb0) = WRITE ioctl 0x40087004 with len = wcur and data at window+0, then wcur = 0.
+   readback (+0x60 -> hstRecvCopy 0x19270 -> hstRecv 0x18b70) flushes first, then
+   READ ioctl 0x40087003 with want = the full length; the guest copies `want` bytes from
+   window+0. commitBuffer/readFully are no-ops. The first WRITE after connect is the
+   0x100-B handshake plus the first record (276 = 0x100 + 20). The ioctl arg is 8 B but
+   only dword 0 is set; dword 1 = stack canary low half (ignore).
+   Records are plain goldfish {u32 op, u32 len, payload}: there is NO index-record layer.
+2. p62B (recscan: scan every slot window on each WRITE for goldfish records): guest
+   channel c's records are in OUR slot c+1. Channel 1: {0x2713,20,0x1F03,0x400} at
+   slot2+0x100 (after the handshake), then {0x2710,8} and {0x2711,16,4,4} at slot2+0.
+   Slot 0 = control page (mailboxes at cid*0x10, served-cid at +0x870), so the windows
+   start at BAR1 + (c+1)*0x40000. bst_pgaipc.c pga_window used c*0x40000.
+   => **Since Phase 1 the guest never received one reply byte we served** (it read
+   back its own records), and the host never saw a real record after the first one.
+   Phases 12–62's sfIdx/echo/pair/commit machinery was built on that artifact.
+3. Fix (knob PGA_SLOTSHIFT=1, bst_pgaipc.c): p63A shows the real op stream above and no
+   storm, with the guest reaching rcChooseConfig. The served replies are still
+   synthesised by the legacy shims (e.g. the 0x2710 reply), so they are meaningless.
+   Big slots (cid >= 0x7f, BAR2) are untested for the same shift.
+
+## 8. Next (redesign, not tweaks)
+
+With the transport correct, the render lane should be a faithful pipe:
+guest WRITE bytes (slot c+1, [0..len)) -> libOpenglRender's own decoder (the HstSocketHost
+vtable recv path, exe semantics) -> its hstAlloc/hstSend reply bytes -> slot c+1 [0..want)
+on READ. Plan:
+1. Make PGA_SLOTSHIFT=1 the default.
+2. Add GR_PURE=1: bypass every synthetic stage (sfIdx translation, rcInit step machine,
+   prefill builders, pair/commit/fallback reserves, echo drops, synOp, string-class clamps)
+   so OP_WRITE only appends the guest's bytes to the exe record lane, and OP_READ only serves
+   what the exe staged (blocking up to a bound for the exe's reply). Keep the knob-off path
+   intact for A/B.
+3. Boot GR_PURE=1 and grade: rc op census, eglChooseConfig/eglCreateContext progress,
+   bootanim, screen_pga.bmp.
+4. Re-test on Root.vhd (pristine, no libEGL patches) once the pure lane works: most image
+   patches compensated for garbage replies and should become unnecessary.
+
 ## Pitfalls (new)
 
 - `dev\build.cmd` taskkills QEMU, so a running boot dies on rebuild. Grade it first.

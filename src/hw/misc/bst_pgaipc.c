@@ -132,10 +132,27 @@ static uint8_t *pga_mbox(BstPgaipcState *s, uint32_t cid)
     return s->shm + cid * PGAIPC_MAILBOX_STRIDE;
 }
 
+/* Phase-63 (dev/NOTES.md §7): the guest maps channel c's small window at
+ * BAR1 + (c+1)*0x40000, not c*0x40000. Slot 0 is the control page
+ * (mailboxes at cid*0x10, served-cid at +0x870). Proof (p62B recscan):
+ * channel 1's goldfish records ({0x2710,8}, {0x2711,16,4,4}, and
+ * {0x2713,20,0x1F03,0x400} after the 0x100-B handshake) all sit in our
+ * slot 2. PGA_SLOTSHIFT=1 applies the +1; default 0 = legacy layout. */
+static unsigned pga_slotshift(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("PGA_SLOTSHIFT");
+        cached = (v && v[0] == '1') ? 1 : 0;
+        fprintf(stderr, "[bstpgaipc] PGA_SLOTSHIFT=%d\n", cached);
+    }
+    return (unsigned)cached;
+}
+
 static uint8_t *pga_window(BstPgaipcState *s, uint32_t cid)
 {
     if (cid < 0x7f) {
-        return s->shm + cid * PGAIPC_SMALL_WIN;
+        return s->shm + (cid + pga_slotshift()) * PGAIPC_SMALL_WIN;
     }
     return s->mem + (cid - 0x7f) * PGAIPC_BIG_WIN;
 }

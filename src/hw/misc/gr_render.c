@@ -2131,6 +2131,38 @@ static void worker_dispatch_op(const GrOp *op)
                         }
                         gr_log("windump cid=%u len=%u nz=[%u..%u] w0: %s",
                                cid, len, lo == 0xffffffffu ? 0 : lo, hi, h2);
+                        /* Phase-62b: per the HstStream decode the guest's
+                         * record must be at ITS window+0 on every WRITE.
+                         * Scan all small slot windows (record region
+                         * excluded) for goldfish records {op 0x2710..0x2750,
+                         * len 8..0x1000, 4-aligned} to find where they are. */
+                        {
+                            unsigned wi, hits = 0;
+                            for (wi = 0; wi < 0x7f && hits < 6; wi++) {
+                                uint8_t *w = GR_WIN(wi);
+                                uint32_t off;
+                                if (!w) continue;
+                                for (off = 0; off + 16 <= GR_WIN_RECORD &&
+                                     hits < 6; off += 4) {
+                                    uint32_t op = ldl_le_p(w + off);
+                                    uint32_t rl = ldl_le_p(w + off + 4);
+                                    if (op >= 0x2710 && op <= 0x2750 &&
+                                        rl >= 8 && rl <= 0x1000 &&
+                                        (rl & 3) == 0) {
+                                        gr_log("recscan wr-cid=%u len=%u "
+                                               "hit win=%u off=0x%x op=0x%x "
+                                               "rl=%u +8=%08x +12=%08x",
+                                               cid, len, wi, off, op, rl,
+                                               ldl_le_p(w + off + 8),
+                                               ldl_le_p(w + off + 12));
+                                        hits++;
+                                    }
+                                }
+                            }
+                            if (!hits)
+                                gr_log("recscan wr-cid=%u len=%u: no goldfish "
+                                       "record in any slot window", cid, len);
+                        }
                     }
                     /* Phase-27: the guest's 276-B name record
                      * ("/system/bin/<proc> (pid N)") — the exe's

@@ -529,6 +529,38 @@ Measured with tools/fps.py (SurfaceFlinger flip counter, root via bstk/su), Rvc6
 - Verified: front-end player embeds the native window (home renders, click opens the Store),
   closing the player leaves QEMU running; PostMessage'd keys arrive as KeyEvents.
 
+## 10n. Phase 76: Unity game 13 -> 60 fps (uncached BAR2), gcal spin, clocks, IRQ split
+
+Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured with tools/fps.py.
+| step | fps | notes |
+|---|---|---|
+| Phase 75 baseline | 12.6 | BstCommandProcessor 169% + logd 54% CPU in the guest |
+| gcal parked | 13.2 | spin gone; UnityMain still 100% |
+| hRx compaction fix | 13.1 | |
+| TSC clocksource | 13.2 | clocks were not the bottleneck |
+| BAR2 64-bit prefetchable | **59.9** | UnityMain 100% -> 31% |
+1. Root cause (simpleperf on UnityMain): 77% memcpy + 15% _hppFlushDataInBuf = the guest
+   copying ~120 MB/s of GL data (glBufferSubData) into the HPP big-slot window. BAR2 lived at
+   0xfa000000, inside the 32-bit PCI hole that SeaBIOS' MTRR (reg00 3G-4G) marks uncachable,
+   so the guest's mmap was UC- -> every store uncached. bst_pgaipc BAR2 is now 64-bit
+   prefetchable: the firmware puts it above 4 GiB (0xc020000000), default MTRR type WB.
+   BAR1 (small slots: surfaceflinger/systemui) is still 32-bit in the hole (UC) because the
+   .ko reads resource index 2 for BAR2; low traffic, fine for now.
+2. gcal: BstCommandProcessor's host->guest call channel ('gcal', sid 0x6c616367) sends
+   method 0 = "wait for the next host call"; bstvmsg answered at once -> guest spin
+   ("gcallDecode: invalid opcode: 0" flood). bstvmsg.ko vmsgIoctlProcessRequest sleeps while
+   the poll word is 1 (woken by vmsgIsr for that cid), so the device now parks it (poll=1).
+3. hpp_take compacted (memmove) the receive buffer on every message (O(n^2)); now it resets
+   when fully consumed and compacts only before growing (HD-Player semantics).
+4. Clock: the BlueStacks kernel had no usable TSC clocksource (hpet only: every
+   clock_gettime = MMIO exit). Real BlueStacks sets VBoxInternal/GIM/Provider=KVM (kvm-clock).
+   We use QEMU's existing WHPX VMware mode instead: -accel whpx,hyperv=off + -cpu
+   ...,+invtsc,vmware-cpuid-freq=on -> "Hypervisor detected: VMware", "TSC freq read from
+   hypervisor", clocksource tsc. Defaults in boot.py and the front-end.
+5. IRQs: bstaudio pinned to slot 0x0c (IRQ 11), bstpgaipc to 0x05 (IRQ 10): graphics IRQs no
+   longer run the bstaudio ISR (which printk()s on every foreign IRQ).
+- boot.py gained --smp (default 4), --mem, --accel, --append.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

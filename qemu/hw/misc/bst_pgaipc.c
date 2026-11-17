@@ -532,7 +532,16 @@ static void bst_pgaipc_realize(PCIDevice *pdev, Error **errp)
                                 BST_PGAIPC_BAR2_SIZE, errp)) {
         return;
     }
-    pci_register_bar(pdev, 2, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->bar2);
+    /* Phase-76: 64-bit prefetchable so the firmware maps it above 4 GiB.
+     * In the 32-bit PCI hole SeaBIOS' MTRR makes it uncachable, and the
+     * guest's mmap of the big-slot windows became UC-: every store of the
+     * HPP ring copy (~120 MB/s for a Unity game) was an uncached write,
+     * pinning the game's main thread in memcpy. Above 4 GiB the default
+     * MTRR type (WB) applies. Resource index 2 is unchanged for the .ko
+     * (a 64-bit BAR at 2 also occupies register 3, which it never reads). */
+    pci_register_bar(pdev, 2, PCI_BASE_ADDRESS_SPACE_MEMORY |
+                     PCI_BASE_ADDRESS_MEM_TYPE_64 | PCI_BASE_ADDRESS_MEM_PREFETCH,
+                     &s->bar2);
 
     s->shm = memory_region_get_ram_ptr(&s->bar1);
     s->mem = memory_region_get_ram_ptr(&s->bar2);

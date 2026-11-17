@@ -1447,11 +1447,12 @@ static uint8_t *hpp_take(GrSock *s, uint32_t need, bool advance, bool atPeek)
     uint8_t *W = GR_WIN(s->cid);
     uint32_t N = hpp_nslots(s);
     if (!W || need == 0) return NULL;
-    if (atPeek && s->hRxCons) {          /* new message: compact */
-        uint32_t left = s->hRxValid - s->hRxCons;
-        if (left) memmove(s->hRx, s->hRx + s->hRxCons, left);
-        s->hRxValid = left;
-        s->hRxCons = 0;
+    /* Phase-76: like HD-Player, reset only when everything was consumed.
+     * Compacting on every peek memmove'd up to ~128 KiB per message
+     * (O(n^2): ~15 GB/min for a busy Unity game). Compaction now happens
+     * only when the buffer is about to grow (below).                    */
+    if (atPeek && s->hRxCons && s->hRxCons == s->hRxValid) {
+        s->hRxValid = s->hRxCons = 0;
     }
     while (s->hRxValid - s->hRxCons < need) {
         uint32_t head, tail;
@@ -1482,6 +1483,14 @@ static uint8_t *hpp_take(GrSock *s, uint32_t need, bool advance, bool atPeek)
             uint32_t slot = head % N;
             uint32_t len = hpp_ld(W, 0xc + 4 * slot);
             if (len > HPP_SLOT) len = HPP_SLOT;
+            if (s->hRxValid + len > s->hRxCap && atPeek && s->hRxCons) {
+                /* out of room at a message boundary: compact once (no
+                 * outstanding packet pointer can exist at a peek)      */
+                uint32_t left = s->hRxValid - s->hRxCons;
+                memmove(s->hRx, s->hRx + s->hRxCons, left);
+                s->hRxValid = left;
+                s->hRxCons = 0;
+            }
             if (!pure_ensure(&s->hRx, &s->hRxCap, s->hRxValid + len)) return NULL;
             memcpy(s->hRx + s->hRxValid, W + HPP_HDR + slot * HPP_SLOT, len);
             s->hRxValid += len;

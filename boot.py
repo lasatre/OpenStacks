@@ -58,9 +58,14 @@ def main():
     ap.add_argument("--audio", default="dsound", choices=["dsound", "wav", "none"],
                     help="bstaudio backend: host speakers, runs/<name>/audio.wav, or silent")
     ap.add_argument("--persist", action="store_true")
+    ap.add_argument("--smp", type=int, default=4)
+    ap.add_argument("--accel", default="whpx,hyperv=off",
+                    help="hyperv=off: QEMU reports VMware + the TSC frequency (fast tsc clocksource)")
+    ap.add_argument("--append", default="", help="extra kernel cmdline tokens")
+    ap.add_argument("--mem", type=int, default=4096, help="guest RAM MiB")
     ap.add_argument("--console-verbose", action="store_true",
                     help="print every kernel message to serial.log (slower)")
-    ap.add_argument("--cpu", default="qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt",
+    ap.add_argument("--cpu", default="qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on",
                     help="QEMU -cpu (SSE4 family for houdini; host/AVX models crash the guest under WHPX)")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")
@@ -106,19 +111,19 @@ def main():
     argv = [
         exe, "-name", "openstacks-" + a.name,
         "-L", os.path.join(os.path.dirname(exe), "pc-bios"),
-        "-machine", "pc", "-accel", "whpx", "-cpu", a.cpu, "-m", "4096", "-smp", "2",
+        "-machine", "pc", "-accel", a.accel, "-cpu", a.cpu, "-m", str(a.mem), "-smp", str(a.smp),
         "-kernel", os.path.join(images, "kernel.bin"),
         "-initrd", os.path.join(images, a.initrd),
-        "-append", APPEND + ("" if a.console_verbose else QUIET),
+        "-append", APPEND + ("" if a.console_verbose else QUIET) + (" " + a.append if a.append else ""),
         "-drive", "file=%s,format=vpc,if=ide,index=0%s" % (img(a.root), snap),
         "-drive", "file=%s,format=%s,if=ide,index=1%s" % (img(a.data), fmt(a.data), snap),
         "-nic", "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:25556-10.0.2.15:5555",
         "-device", vmsg,
-        "-device", "bstpgaipc,id=bstpgaipc0,gr=on",
+        "-device", "bstpgaipc,id=bstpgaipc0,gr=on,addr=0x05",
     ] + ({"dsound": ["-audiodev", "dsound,id=snd0"],
           "wav": ["-audiodev", "wav,id=snd0,path=" + os.path.join(run, "audio.wav")],
           "none": []}[a.audio]) + [
-        "-device", "bstaudio,id=bstaudio0" + ("" if a.audio == "none" else ",audiodev=snd0"),
+        "-device", "bstaudio,id=bstaudio0,addr=0x0c" + ("" if a.audio == "none" else ",audiodev=snd0"),
         "-device", "hvmem,id=hvmem0,ram_size_mib=512",
         "-device", "vbox-vmmdev,id=vmmdev0",
         "-no-reboot", "-no-shutdown", "-display", "none",

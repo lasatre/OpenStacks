@@ -92,6 +92,7 @@ typedef struct BstVmsgConn {
  * runs cb(cid, shm+host_off) and acks with BAR0+0x38 = cid. One message
  * in flight at a time (a second IRQ before the ack corrupts its list). */
 #define VMSG_INP_SID            0x00706e69u     /* "inp" */
+#define VMSG_GCAL_SID           0x6c616367u     /* "gcal": host->guest calls */
 #define VMSG_PUSH_SLOTS         64
 #define VMSG_PUSH_MAX           132             /* touch frame = largest */
 #define VMSG_TOUCH_SLOTS        16
@@ -124,6 +125,7 @@ typedef struct BstVmsgState {
     char *propsfile;        /* extra props file, one k=v per line */
     GString *props_text;
     unsigned reqlog;
+    bool gcal_parked_logged;
 } BstVmsgState;
 
 /* identity/config text bstconf serves (REA_BSTCONF.md 6). No spaces around
@@ -180,6 +182,23 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
     out = s->shm + c->host_off;
     method = ldl_le_p(in + 0x00);
     buf_len = ldl_le_p(in + 0x08);
+
+    /* Phase-76: on 'gcal' (BstCommandProcessor's host->guest call channel)
+     * method 0 = "wait for the next host call". HD-Player keeps it pending
+     * until it has a call; answering at once made the guest spin (about two
+     * vCPUs in BstCommandProcessor + logd: "gcallDecode: invalid opcode: 0").
+     * Poll word 1 = pending: bstvmsg.ko vmsgIoctlProcessRequest sleeps on the
+     * connection's waitqueue until an IRQ names this cid (vmsgIsr). We have
+     * no host calls to deliver, so it simply stays parked.              */
+    if (method == 0 && c->service_id == VMSG_GCAL_SID) {
+        if (!s->gcal_parked_logged) {
+            s->gcal_parked_logged = true;
+            fprintf(stderr, "[bstvmsg] gcal cid=%u: wait-for-host-call parked\n",
+                    (unsigned)(c - s->conn));
+        }
+        stl_le_p(s->shm + c->poll_off, 1);
+        return;
+    }
 
     if (method != 0 || s->reqlog < 20) {
         s->reqlog += (method == 0);

@@ -44,7 +44,11 @@ MSYS2_BIN = r"C:\msys64\ucrt64\bin"          # DLLs needed by the patched build
 # Phase-73 guest CPU: qemu64 lacks SSSE3/SSE4 (libhoudini aborts ARM apps,
 # 0xdead0000); "host"/AVX models crash the initramfs sh under WHPX (AVX
 # state), so: the baseline + the SSE4 family. Override with OST_CPU.
-QEMU_CPU = "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt"
+# Phase-76: +invtsc + vmware-cpuid-freq (with -accel whpx,hyperv=off) make
+# QEMU report VMware and the TSC frequency, so the guest kernel uses the TSC
+# clocksource instead of the HPET, whose every read is an MMIO exit. (Real
+# BlueStacks gives the guest a paravirtual KVM clock for the same reason.)
+QEMU_CPU = "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on"
 
 def disk_format(path: Path) -> str:
     return {".qcow2": "qcow2", ".vhdx": "vhdx", ".vhd": "vpc",
@@ -185,7 +189,10 @@ class QemuEngine:
         if Path(bios).exists():
             argv += ["-L", bios]
 
-        argv += ["-machine", "pc", "-accel", g.acceleration or "whpx"]
+        accel = g.acceleration or "whpx"
+        if accel == "whpx":
+            accel = "whpx,hyperv=off"   # Phase-76: VMware leaf + TSC freq
+        argv += ["-machine", "pc", "-accel", accel]
         # Phase-73: QEMU's default qemu64 model has no SSSE3/SSE4/POPCNT/AVX;
         # libhoudini (ARM translation) and games abort without them.
         argv += ["-cpu", getattr(g, "cpu_model", "") or os.environ.get("OST_CPU", QEMU_CPU)]
@@ -218,6 +225,13 @@ class QemuEngine:
             opts = f",id={BST_DEVICE_IDS.get(dev, 'ost-' + dev)}"
             if dev == "bstpgaipc" and inst.pgaipc_gr:
                 opts += ",gr=on"
+            # Phase-76: pin the slots so bstaudio (PIRQ via slot 12 -> IRQ 11) never
+            # shares bstpgaipc's line (slot 5 -> IRQ 10): its ISR printk()s on every
+            # foreign IRQ, flooding dmesg and the serial console.
+            if dev == "bstpgaipc":
+                opts += ",addr=0x05"
+            if dev == "bstaudio":
+                opts += ",addr=0x0c"
             if dev == "hvmem":
                 opts += f",ram_size_mib={int(inst.hvmem_mb)}"
             if dev == "bstvmsg":

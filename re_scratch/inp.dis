@@ -1,0 +1,1507 @@
+
+/mnt/f/Projects/BluestacksReversing/qemu_test/initramfs_x/boot/bstmods/bstinput.ko:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <inpOnReceive>:
+       0:	push   rbp
+       1:	mov    rdi,rsi
+       4:	mov    esi,DWORD PTR [rsi]
+       6:	mov    rbp,rsp
+       9:	cmp    esi,0x4
+       c:	jbe    1e <inpOnReceive+0x1e>
+       e:	mov    rdi,0x0
+			11: R_X86_64_32S	.rodata.str1.8
+      15:	xor    eax,eax
+      17:	call   1c <inpOnReceive+0x1c>
+			18: R_X86_64_PC32	printk-0x4
+      1c:	pop    rbp
+      1d:	ret
+      1e:	jmp    QWORD PTR [rsi*8+0x0]
+			21: R_X86_64_32S	.rodata
+      25:	data16 cs nop WORD PTR [rax+rax*1+0x0]
+      30:	call   35 <inpOnReceive+0x35>
+			31: R_X86_64_PC32	inpGamepadDispatch-0x4
+      35:	pop    rbp
+      36:	ret
+      37:	call   3c <inpOnReceive+0x3c>
+			38: R_X86_64_PC32	inpControlDispatch-0x4
+      3c:	pop    rbp
+      3d:	nop    DWORD PTR [rax]
+      40:	ret
+      41:	call   46 <inpOnReceive+0x46>
+			42: R_X86_64_PC32	inpKeyboardDispatch-0x4
+      46:	pop    rbp
+      47:	ret
+      48:	nop    DWORD PTR [rax+rax*1+0x0]
+      50:	call   55 <inpOnReceive+0x55>
+			51: R_X86_64_PC32	inpImeDispatch-0x4
+      55:	pop    rbp
+      56:	ret
+      57:	call   5c <inpOnReceive+0x5c>
+			58: R_X86_64_PC32	inpTouchDispatch-0x4
+      5c:	pop    rbp
+      5d:	nop    DWORD PTR [rax]
+      60:	ret
+      61:	cs nop WORD PTR [rax+rax*1+0x0]
+      6b:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000070 <inpKeyboardInit>:
+      70:	push   rbp
+      71:	mov    rdi,QWORD PTR [rip+0x0]        # 78 <inpKeyboardInit+0x8>
+			74: R_X86_64_PC32	kmalloc_caches+0x54
+      78:	mov    edx,0x508
+      7d:	mov    esi,0x6080c0
+      82:	mov    rbp,rsp
+      85:	call   8a <inpKeyboardInit+0x1a>
+			86: R_X86_64_PC32	kmem_cache_alloc_trace-0x4
+      8a:	test   rax,rax
+      8d:	mov    QWORD PTR [rip+0x0],rax        # 94 <inpKeyboardInit+0x24>
+			90: R_X86_64_PC32	.bss-0x4
+      94:	je     e5 <inpKeyboardInit+0x75>
+      96:	lea    rdi,[rax+0x8]
+      9a:	mov    edx,0x20
+      9f:	mov    rsi,0x0
+			a2: R_X86_64_32S	.rodata.str1.1
+      a6:	mov    BYTE PTR [rax+0xc9],0x6
+      ad:	call   b2 <inpKeyboardInit+0x42>
+			ae: R_X86_64_PC32	strlcpy-0x4
+      b2:	mov    rdi,QWORD PTR [rip+0x0]        # b9 <inpKeyboardInit+0x49>
+			b5: R_X86_64_PC32	.bss-0x4
+      b9:	mov    edx,0x20
+      be:	mov    rsi,0x0
+			c1: R_X86_64_32S	.rodata.str1.1
+      c5:	add    rdi,0x28
+      c9:	call   ce <inpKeyboardInit+0x5e>
+			ca: R_X86_64_PC32	strlcpy-0x4
+      ce:	mov    rdi,QWORD PTR [rip+0x0]        # d5 <inpKeyboardInit+0x65>
+			d1: R_X86_64_PC32	.bss-0x4
+      d5:	mov    rsi,0x0
+			d8: R_X86_64_32S	__this_module
+      dc:	call   e1 <inpKeyboardInit+0x71>
+			dd: R_X86_64_PC32	__serio_register_port-0x4
+      e1:	xor    eax,eax
+      e3:	pop    rbp
+      e4:	ret
+      e5:	mov    eax,0xfffffff4
+      ea:	pop    rbp
+      eb:	ret
+      ec:	nop    DWORD PTR [rax+0x0]
+
+00000000000000f0 <inpKeyboardFini>:
+      f0:	push   rbp
+      f1:	mov    rbp,rsp
+      f4:	pop    rbp
+      f5:	ret
+      f6:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000100 <inpKeyboardDispatch>:
+     100:	push   rbp
+     101:	movzx  esi,BYTE PTR [rdi+0x4]
+     105:	mov    rbp,rsp
+     108:	cmp    sil,0xff
+     10c:	je     145 <inpKeyboardDispatch+0x45>
+     10e:	mov    eax,DWORD PTR [rip+0x0]        # 114 <inpKeyboardDispatch+0x14>
+			110: R_X86_64_PC32	.bss+0x4
+     114:	test   eax,eax
+     116:	jne    12e <inpKeyboardDispatch+0x2e>
+     118:	mov    rdi,QWORD PTR [rip+0x0]        # 11f <inpKeyboardDispatch+0x1f>
+			11b: R_X86_64_PC32	.bss-0x4
+     11f:	movzx  esi,sil
+     123:	xor    edx,edx
+     125:	call   12a <inpKeyboardDispatch+0x2a>
+			126: R_X86_64_PC32	serio_interrupt-0x4
+     12a:	xor    eax,eax
+     12c:	pop    rbp
+     12d:	ret
+     12e:	movzx  edi,sil
+     132:	call   137 <inpKeyboardDispatch+0x37>
+			133: R_X86_64_PC32	handle_sysrq-0x4
+     137:	xor    eax,eax
+     139:	mov    DWORD PTR [rip+0x0],0x0        # 143 <inpKeyboardDispatch+0x43>
+			13b: R_X86_64_PC32	.bss
+     143:	pop    rbp
+     144:	ret
+     145:	mov    rdi,0x0
+			148: R_X86_64_32S	.rodata.str1.1+0x7
+     14c:	xor    eax,eax
+     14e:	call   153 <inpKeyboardDispatch+0x53>
+			14f: R_X86_64_PC32	printk-0x4
+     153:	mov    DWORD PTR [rip+0x0],0x1        # 15d <inpKeyboardDispatch+0x5d>
+			155: R_X86_64_PC32	.bss
+     15d:	jmp    12a <inpKeyboardDispatch+0x2a>
+     15f:	nop
+
+0000000000000160 <inpTouchInit>:
+     160:	push   rbp
+     161:	mov    rbp,rsp
+     164:	push   rbx
+     165:	sub    rsp,0x8
+     169:	call   16e <inpTouchInit+0xe>
+			16a: R_X86_64_PC32	input_allocate_device-0x4
+     16e:	test   rax,rax
+     171:	mov    QWORD PTR [rip+0x0],rax        # 178 <inpTouchInit+0x18>
+			174: R_X86_64_PC32	.bss+0xc
+     178:	je     21d <inpTouchInit+0xbd>
+     17e:	mov    QWORD PTR [rax],0x0
+			181: R_X86_64_32S	.rodata.str1.1+0x23
+     185:	lock or BYTE PTR [rax+0x28],0x8
+     18a:	mov    rax,QWORD PTR [rip+0x0]        # 191 <inpTouchInit+0x31>
+			18d: R_X86_64_PC32	.bss+0xc
+     191:	lock or BYTE PTR [rax+0x28],0x1
+     196:	mov    rax,QWORD PTR [rip+0x0]        # 19d <inpTouchInit+0x3d>
+			199: R_X86_64_PC32	.bss+0xc
+     19d:	lock or BYTE PTR [rax+0x52],0x1
+     1a2:	mov    rax,QWORD PTR [rip+0x0]        # 1a9 <inpTouchInit+0x49>
+			1a5: R_X86_64_PC32	.bss+0xc
+     1a9:	lock or BYTE PTR [rax+0x52],0x2
+     1ae:	mov    rax,QWORD PTR [rip+0x0]        # 1b5 <inpTouchInit+0x55>
+			1b1: R_X86_64_PC32	.bss+0xc
+     1b5:	lock or BYTE PTR [rax+0x52],0x4
+     1ba:	mov    rdi,QWORD PTR [rip+0x0]        # 1c1 <inpTouchInit+0x61>
+			1bd: R_X86_64_PC32	.bss+0xc
+     1c1:	xor    r9d,r9d
+     1c4:	xor    r8d,r8d
+     1c7:	xor    edx,edx
+     1c9:	mov    ecx,0x7fff
+     1ce:	mov    esi,0x35
+     1d3:	call   1d8 <inpTouchInit+0x78>
+			1d4: R_X86_64_PC32	input_set_abs_params-0x4
+     1d8:	mov    rdi,QWORD PTR [rip+0x0]        # 1df <inpTouchInit+0x7f>
+			1db: R_X86_64_PC32	.bss+0xc
+     1df:	xor    r9d,r9d
+     1e2:	xor    r8d,r8d
+     1e5:	xor    edx,edx
+     1e7:	mov    ecx,0x7fff
+     1ec:	mov    esi,0x36
+     1f1:	call   1f6 <inpTouchInit+0x96>
+			1f2: R_X86_64_PC32	input_set_abs_params-0x4
+     1f6:	mov    rdi,QWORD PTR [rip+0x0]        # 1fd <inpTouchInit+0x9d>
+			1f9: R_X86_64_PC32	.bss+0xc
+     1fd:	mov    DWORD PTR [rdi+0xd0],0x3c
+     207:	call   20c <inpTouchInit+0xac>
+			208: R_X86_64_PC32	input_register_device-0x4
+     20c:	test   eax,eax
+     20e:	mov    ebx,eax
+     210:	js     230 <inpTouchInit+0xd0>
+     212:	xor    ebx,ebx
+     214:	add    rsp,0x8
+     218:	mov    eax,ebx
+     21a:	pop    rbx
+     21b:	pop    rbp
+     21c:	ret
+     21d:	mov    rdi,0x0
+			220: R_X86_64_32S	.rodata.str1.8+0x120
+     224:	mov    ebx,0xfffffff4
+     229:	call   22e <inpTouchInit+0xce>
+			22a: R_X86_64_PC32	printk-0x4
+     22e:	jmp    214 <inpTouchInit+0xb4>
+     230:	mov    esi,eax
+     232:	mov    rdi,0x0
+			235: R_X86_64_32S	.rodata.str1.8+0x148
+     239:	xor    eax,eax
+     23b:	call   240 <inpTouchInit+0xe0>
+			23c: R_X86_64_PC32	printk-0x4
+     240:	jmp    214 <inpTouchInit+0xb4>
+     242:	data16 data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000250 <inpTouchFini>:
+     250:	mov    rdi,QWORD PTR [rip+0x0]        # 257 <inpTouchFini+0x7>
+			253: R_X86_64_PC32	.bss+0xc
+     257:	push   rbp
+     258:	mov    rbp,rsp
+     25b:	test   rdi,rdi
+     25e:	je     27c <inpTouchFini+0x2c>
+     260:	call   265 <inpTouchFini+0x15>
+			261: R_X86_64_PC32	input_unregister_device-0x4
+     265:	mov    rdi,QWORD PTR [rip+0x0]        # 26c <inpTouchFini+0x1c>
+			268: R_X86_64_PC32	.bss+0xc
+     26c:	call   271 <inpTouchFini+0x21>
+			26d: R_X86_64_PC32	input_free_device-0x4
+     271:	mov    QWORD PTR [rip+0x0],0x0        # 27c <inpTouchFini+0x2c>
+			274: R_X86_64_PC32	.bss+0x8
+     27c:	pop    rbp
+     27d:	ret
+     27e:	xchg   ax,ax
+
+0000000000000280 <inpTouchDispatch>:
+     280:	push   rbp
+     281:	xor    edx,edx
+     283:	mov    rbp,rsp
+     286:	push   r13
+     288:	mov    r13,rdi
+     28b:	push   r12
+     28d:	push   rbx
+     28e:	xor    ebx,ebx
+     290:	sub    rsp,0x8
+     294:	lea    rax,[r13+rbx*8+0x0]
+     299:	mov    ecx,DWORD PTR [rax+0x4]
+     29c:	lea    r12,[rax+0x4]
+     2a0:	cmp    ecx,0x7fffffff
+     2a6:	je     2fc <inpTouchDispatch+0x7c>
+     2a8:	cmp    DWORD PTR [rax+0x8],0x7fffffff
+     2af:	je     2fc <inpTouchDispatch+0x7c>
+     2b1:	mov    rdi,QWORD PTR [rip+0x0]        # 2b8 <inpTouchDispatch+0x38>
+			2b4: R_X86_64_PC32	.bss+0xc
+     2b8:	mov    edx,0x35
+     2bd:	mov    esi,0x3
+     2c2:	call   2c7 <inpTouchDispatch+0x47>
+			2c3: R_X86_64_PC32	input_event-0x4
+     2c7:	mov    ecx,DWORD PTR [r12+0x4]
+     2cc:	mov    rdi,QWORD PTR [rip+0x0]        # 2d3 <inpTouchDispatch+0x53>
+			2cf: R_X86_64_PC32	.bss+0xc
+     2d3:	mov    edx,0x36
+     2d8:	mov    esi,0x3
+     2dd:	call   2e2 <inpTouchDispatch+0x62>
+			2de: R_X86_64_PC32	input_event-0x4
+     2e2:	mov    rdi,QWORD PTR [rip+0x0]        # 2e9 <inpTouchDispatch+0x69>
+			2e5: R_X86_64_PC32	.bss+0xc
+     2e9:	mov    edx,0x2
+     2ee:	xor    ecx,ecx
+     2f0:	xor    esi,esi
+     2f2:	call   2f7 <inpTouchDispatch+0x77>
+			2f3: R_X86_64_PC32	input_event-0x4
+     2f7:	mov    edx,0x1
+     2fc:	add    rbx,0x1
+     300:	cmp    rbx,0x10
+     304:	jne    294 <inpTouchDispatch+0x14>
+     306:	test   dl,dl
+     308:	jne    31f <inpTouchDispatch+0x9f>
+     30a:	mov    rdi,QWORD PTR [rip+0x0]        # 311 <inpTouchDispatch+0x91>
+			30d: R_X86_64_PC32	.bss+0xc
+     311:	xor    ecx,ecx
+     313:	mov    edx,0x2
+     318:	xor    esi,esi
+     31a:	call   31f <inpTouchDispatch+0x9f>
+			31b: R_X86_64_PC32	input_event-0x4
+     31f:	mov    rdi,QWORD PTR [rip+0x0]        # 326 <inpTouchDispatch+0xa6>
+			322: R_X86_64_PC32	.bss+0xc
+     326:	xor    ecx,ecx
+     328:	xor    edx,edx
+     32a:	xor    esi,esi
+     32c:	call   331 <inpTouchDispatch+0xb1>
+			32d: R_X86_64_PC32	input_event-0x4
+     331:	add    rsp,0x8
+     335:	xor    eax,eax
+     337:	pop    rbx
+     338:	pop    r12
+     33a:	pop    r13
+     33c:	pop    rbp
+     33d:	ret
+     33e:	xchg   ax,ax
+
+0000000000000340 <inpControlThreadEntry>:
+     340:	push   rbp
+     341:	mov    edx,edi
+     343:	xor    eax,eax
+     345:	mov    rsi,0x0
+			348: R_X86_64_32S	.rodata+0x70
+     34c:	mov    rbp,rsp
+     34f:	push   r12
+     351:	push   rbx
+     352:	mov    rbx,rdi
+     355:	mov    rdi,0x0
+			358: R_X86_64_32S	.rodata.str1.1+0x54
+     35c:	sub    rsp,0x40
+     360:	mov    QWORD PTR [rbp-0x38],0x0
+     368:	mov    QWORD PTR [rbp-0x30],0x0
+     370:	mov    QWORD PTR [rbp-0x28],0x0
+     378:	mov    QWORD PTR [rbp-0x20],0x0
+     380:	mov    QWORD PTR [rbp-0x18],0x0
+     388:	call   38d <inpControlThreadEntry+0x4d>
+			389: R_X86_64_PC32	printk-0x4
+     38d:	test   ebx,ebx
+     38f:	je     3fb <inpControlThreadEntry+0xbb>
+     391:	mov    esi,ebx
+     393:	mov    rdi,0x0
+			396: R_X86_64_32S	.rodata.str1.8+0x178
+     39a:	xor    eax,eax
+     39c:	call   3a1 <inpControlThreadEntry+0x61>
+			39d: R_X86_64_PC32	printk-0x4
+     3a1:	mov    rdx,QWORD PTR [rbp-0x38]
+     3a5:	mov    rsi,0x0
+			3a8: R_X86_64_32S	.rodata+0x90
+     3ac:	mov    rdi,0x0
+			3af: R_X86_64_32S	.rodata.str1.1+0x68
+     3b3:	xor    eax,eax
+     3b5:	call   3ba <inpControlThreadEntry+0x7a>
+			3b6: R_X86_64_PC32	printk-0x4
+     3ba:	mov    rdi,QWORD PTR [rbp-0x38]
+     3be:	lea    rsi,[rbp-0x38]
+     3c2:	xor    r9d,r9d
+     3c5:	xor    r8d,r8d
+     3c8:	xor    edx,edx
+     3ca:	mov    ecx,0x6000c0
+     3cf:	mov    QWORD PTR [rsp],0x0
+     3d7:	call   3dc <inpControlThreadEntry+0x9c>
+			3d8: R_X86_64_PC32	call_usermodehelper_setup-0x4
+     3dc:	test   rax,rax
+     3df:	je     40c <inpControlThreadEntry+0xcc>
+     3e1:	mov    esi,0x2
+     3e6:	mov    rdi,rax
+     3e9:	call   3ee <inpControlThreadEntry+0xae>
+			3ea: R_X86_64_PC32	call_usermodehelper_exec-0x4
+     3ee:	test   eax,eax
+     3f0:	js     41f <inpControlThreadEntry+0xdf>
+     3f2:	xor    esi,esi
+     3f4:	xor    edi,edi
+     3f6:	call   3fb <inpControlThreadEntry+0xbb>
+			3f7: R_X86_64_PC32	complete_and_exit-0x4
+     3fb:	mov    QWORD PTR [rbp-0x38],0x0
+			3ff: R_X86_64_32S	.rodata.str1.1+0x3c
+     403:	mov    rdx,0x0
+			406: R_X86_64_32S	.rodata.str1.1+0x3c
+     40a:	jmp    3a5 <inpControlThreadEntry+0x65>
+     40c:	mov    rdi,0x0
+			40f: R_X86_64_32S	.rodata.str1.8+0x1a0
+     413:	call   418 <inpControlThreadEntry+0xd8>
+			414: R_X86_64_PC32	printk-0x4
+     418:	mov    esi,0x1
+     41d:	jmp    3f4 <inpControlThreadEntry+0xb4>
+     41f:	mov    esi,eax
+     421:	mov    rdi,0x0
+			424: R_X86_64_32S	.rodata.str1.8+0x1c8
+     428:	xor    eax,eax
+     42a:	call   42f <inpControlThreadEntry+0xef>
+			42b: R_X86_64_PC32	printk-0x4
+     42f:	mov    esi,0x1
+     434:	jmp    3f4 <inpControlThreadEntry+0xb4>
+     436:	cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000440 <inpControlInit>:
+     440:	push   rbp
+     441:	mov    rsi,0x0
+			444: R_X86_64_32S	.rodata+0x30
+     448:	mov    rdi,0x0
+			44b: R_X86_64_32S	.rodata.str1.1+0x7c
+     44f:	xor    eax,eax
+     451:	mov    rbp,rsp
+     454:	call   459 <inpControlInit+0x19>
+			455: R_X86_64_PC32	printk-0x4
+     459:	xor    eax,eax
+     45b:	pop    rbp
+     45c:	ret
+     45d:	nop    DWORD PTR [rax]
+
+0000000000000460 <inpControlFini>:
+     460:	push   rbp
+     461:	mov    rsi,0x0
+			464: R_X86_64_32S	.rodata+0x3f
+     468:	mov    rdi,0x0
+			46b: R_X86_64_32S	.rodata.str1.1+0x7c
+     46f:	xor    eax,eax
+     471:	mov    rbp,rsp
+     474:	call   479 <inpControlFini+0x19>
+			475: R_X86_64_PC32	printk-0x4
+     479:	pop    rbp
+     47a:	ret
+     47b:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000480 <inpControlDispatch>:
+     480:	push   rbp
+     481:	mov    rsi,0x0
+			484: R_X86_64_32S	.rodata+0x50
+     488:	xor    eax,eax
+     48a:	mov    rbp,rsp
+     48d:	push   rbx
+     48e:	mov    rbx,rdi
+     491:	sub    rsp,0x8
+     495:	mov    edx,DWORD PTR [rdi+0x4]
+     498:	mov    rdi,0x0
+			49b: R_X86_64_32S	.rodata.str1.1+0x8c
+     49f:	call   4a4 <inpControlDispatch+0x24>
+			4a0: R_X86_64_PC32	printk-0x4
+     4a4:	mov    esi,DWORD PTR [rbx+0x4]
+     4a7:	xor    eax,eax
+     4a9:	mov    rcx,0x0
+			4ac: R_X86_64_32S	.rodata.str1.1+0xa2
+     4b0:	mov    edx,0xffffffff
+     4b5:	mov    rdi,0x0
+			4b8: R_X86_64_32S	.text+0x340
+     4bc:	call   4c1 <inpControlDispatch+0x41>
+			4bd: R_X86_64_PC32	kthread_create_on_node-0x4
+     4c1:	cmp    rax,0xfffffffffffff000
+     4c7:	ja     4da <inpControlDispatch+0x5a>
+     4c9:	mov    rdi,rax
+     4cc:	call   4d1 <inpControlDispatch+0x51>
+			4cd: R_X86_64_PC32	wake_up_process-0x4
+     4d1:	xor    eax,eax
+     4d3:	add    rsp,0x8
+     4d7:	pop    rbx
+     4d8:	pop    rbp
+     4d9:	ret
+     4da:	mov    rsi,rax
+     4dd:	mov    rdi,0x0
+			4e0: R_X86_64_32S	.rodata.str1.8+0x1f8
+     4e4:	xor    eax,eax
+     4e6:	call   4eb <inpControlDispatch+0x6b>
+			4e7: R_X86_64_PC32	printk-0x4
+     4eb:	or     eax,0xffffffff
+     4ee:	jmp    4d3 <inpControlDispatch+0x53>
+
+00000000000004f0 <inpImeRelease>:
+     4f0:	push   rbp
+     4f1:	mov    rdi,0x0
+			4f4: R_X86_64_32S	.bss+0x20
+     4f8:	mov    rbp,rsp
+     4fb:	call   500 <inpImeRelease+0x10>
+			4fc: R_X86_64_PC32	mutex_lock-0x4
+     500:	mov    rdi,0x0
+			503: R_X86_64_32S	.bss+0x20
+     507:	mov    DWORD PTR [rip+0x0],0x0        # 511 <inpImeRelease+0x21>
+			509: R_X86_64_PC32	.bss+0x1fc4
+     511:	call   516 <inpImeRelease+0x26>
+			512: R_X86_64_PC32	mutex_unlock-0x4
+     516:	xor    ecx,ecx
+     518:	mov    edx,0x1
+     51d:	mov    esi,0x1
+     522:	mov    rdi,0x0
+			525: R_X86_64_32S	.bss+0x1fd0
+     529:	mov    DWORD PTR [rip+0x0],0x1        # 533 <inpImeRelease+0x43>
+			52b: R_X86_64_PC32	.bss+0x1fe0
+     533:	call   538 <inpImeRelease+0x48>
+			534: R_X86_64_PC32	__wake_up-0x4
+     538:	xor    eax,eax
+     53a:	pop    rbp
+     53b:	ret
+     53c:	nop    DWORD PTR [rax+0x0]
+
+0000000000000540 <inpImeRead>:
+     540:	push   rbp
+     541:	mov    rbp,rsp
+     544:	push   r13
+     546:	mov    r13,0xffffffffffffffb5
+     54d:	push   r12
+     54f:	push   rbx
+     550:	mov    rbx,rsi
+     553:	sub    rsp,0x38
+     557:	cmp    rdx,0x7c
+     55b:	jbe    627 <inpImeRead+0xe7>
+     561:	mov    rdi,0x0
+			564: R_X86_64_32S	.bss+0x20
+     568:	call   56d <inpImeRead+0x2d>
+			569: R_X86_64_PC32	mutex_lock-0x4
+     56d:	mov    edi,DWORD PTR [rip+0x0]        # 573 <inpImeRead+0x33>
+			56f: R_X86_64_PC32	.bss+0x44
+     573:	test   edi,edi
+     575:	je     635 <inpImeRead+0xf5>
+     57b:	mov    edx,DWORD PTR [rip+0x0]        # 581 <inpImeRead+0x41>
+			57d: R_X86_64_PC32	.bss+0x1fc8
+     581:	test   edx,edx
+     583:	je     63f <inpImeRead+0xff>
+     589:	mov    eax,DWORD PTR [rip+0x0]        # 58f <inpImeRead+0x4f>
+			58b: R_X86_64_PC32	.bss+0x44
+     58f:	test   eax,eax
+     591:	je     715 <inpImeRead+0x1d5>
+     597:	movsxd r12,DWORD PTR [rip+0x0]        # 59e <inpImeRead+0x5e>
+			59a: R_X86_64_PC32	.bss+0x3c
+     59e:	mov    edx,0x1
+     5a3:	lea    rax,[r12+r12*1]
+     5a7:	shl    r12,0x7
+     5ab:	sub    r12,rax
+     5ae:	movsx  r13,BYTE PTR [r12+0x0]
+			5b3: R_X86_64_32S	.bss+0xc9
+     5b7:	add    r12,0x0
+			5ba: R_X86_64_32S	.bss+0x4c
+     5be:	mov    rdi,r12
+     5c1:	mov    rsi,r13
+     5c4:	call   5c9 <inpImeRead+0x89>
+			5c5: R_X86_64_PC32	__check_object_size-0x4
+     5c9:	mov    rdx,r13
+     5cc:	mov    rsi,r12
+     5cf:	mov    rdi,rbx
+     5d2:	call   5d7 <inpImeRead+0x97>
+			5d3: R_X86_64_PC32	_copy_to_user-0x4
+     5d7:	test   rax,rax
+     5da:	jne    73b <inpImeRead+0x1fb>
+     5e0:	mov    eax,DWORD PTR [rip+0x0]        # 5e6 <inpImeRead+0xa6>
+			5e2: R_X86_64_PC32	.bss+0x3c
+     5e6:	sub    DWORD PTR [rip+0x0],0x1        # 5ed <inpImeRead+0xad>
+			5e8: R_X86_64_PC32	.bss+0x43
+     5ed:	movsxd rdx,eax
+     5f0:	add    eax,0x1
+     5f3:	lea    rcx,[rdx+rdx*1]
+     5f7:	shl    rdx,0x7
+     5fb:	sub    rdx,rcx
+     5fe:	movsx  r13,BYTE PTR [rdx+0x0]
+			602: R_X86_64_32S	.bss+0xc9
+     606:	mov    edx,eax
+     608:	sar    edx,0x1f
+     60b:	shr    edx,0x1a
+     60e:	add    eax,edx
+     610:	and    eax,0x3f
+     613:	sub    eax,edx
+     615:	mov    DWORD PTR [rip+0x0],eax        # 61b <inpImeRead+0xdb>
+			617: R_X86_64_PC32	.bss+0x3c
+     61b:	mov    rdi,0x0
+			61e: R_X86_64_32S	.bss+0x20
+     622:	call   627 <inpImeRead+0xe7>
+			623: R_X86_64_PC32	mutex_unlock-0x4
+     627:	add    rsp,0x38
+     62b:	mov    rax,r13
+     62e:	pop    rbx
+     62f:	pop    r12
+     631:	pop    r13
+     633:	pop    rbp
+     634:	ret
+     635:	mov    esi,DWORD PTR [rip+0x0]        # 63b <inpImeRead+0xfb>
+			637: R_X86_64_PC32	.bss+0x1fc8
+     63b:	test   esi,esi
+     63d:	jne    66e <inpImeRead+0x12e>
+     63f:	mov    rdi,0x0
+			642: R_X86_64_32S	.bss+0x20
+     646:	mov    r13,0xfffffffffffffff7
+     64d:	call   652 <inpImeRead+0x112>
+			64e: R_X86_64_PC32	mutex_unlock-0x4
+     652:	mov    edx,0x83
+     657:	mov    rsi,0x0
+			65a: R_X86_64_32S	.rodata+0xb6
+     65e:	mov    rdi,0x0
+			661: R_X86_64_32S	.rodata.str1.8+0x230
+     665:	xor    eax,eax
+     667:	call   66c <inpImeRead+0x12c>
+			668: R_X86_64_PC32	printk-0x4
+     66c:	jmp    627 <inpImeRead+0xe7>
+     66e:	mov    rdi,0x0
+			671: R_X86_64_32S	.bss+0x20
+     675:	movabs r12,0x3ffffffffffffffe
+     67f:	call   684 <inpImeRead+0x144>
+			680: R_X86_64_PC32	mutex_unlock-0x4
+     684:	lea    rdi,[rbp-0x48]
+     688:	xor    esi,esi
+     68a:	mov    DWORD PTR [rip+0x0],0x0        # 694 <inpImeRead+0x154>
+			68c: R_X86_64_PC32	.bss+0x1fe0
+     694:	call   699 <inpImeRead+0x159>
+			695: R_X86_64_PC32	init_wait_entry-0x4
+     699:	lea    rsi,[rbp-0x48]
+     69d:	mov    edx,0x1
+     6a2:	mov    rdi,0x0
+			6a5: R_X86_64_32S	.bss+0x1fd0
+     6a9:	call   6ae <inpImeRead+0x16e>
+			6aa: R_X86_64_PC32	prepare_to_wait_event-0x4
+     6ae:	mov    ecx,DWORD PTR [rip+0x0]        # 6b4 <inpImeRead+0x174>
+			6b0: R_X86_64_PC32	.bss+0x1fe4
+     6b4:	test   ecx,ecx
+     6b6:	je     6f9 <inpImeRead+0x1b9>
+     6b8:	test   r12,r12
+     6bb:	mov    eax,0x1
+     6c0:	cmove  r12,rax
+     6c4:	lea    rsi,[rbp-0x48]
+     6c8:	mov    rdi,0x0
+			6cb: R_X86_64_32S	.bss+0x1fd0
+     6cf:	call   6d4 <inpImeRead+0x194>
+			6d0: R_X86_64_PC32	finish_wait-0x4
+     6d4:	cmp    r12,0xfffffffffffffe00
+     6db:	mov    r13,0xfffffffffffffffc
+     6e2:	je     627 <inpImeRead+0xe7>
+     6e8:	mov    rdi,0x0
+			6eb: R_X86_64_32S	.bss+0x20
+     6ef:	call   6f4 <inpImeRead+0x1b4>
+			6f0: R_X86_64_PC32	mutex_lock-0x4
+     6f4:	jmp    57b <inpImeRead+0x3b>
+     6f9:	test   r12,r12
+     6fc:	je     6c4 <inpImeRead+0x184>
+     6fe:	test   rax,rax
+     701:	jne    710 <inpImeRead+0x1d0>
+     703:	mov    rdi,r12
+     706:	call   70b <inpImeRead+0x1cb>
+			707: R_X86_64_PC32	schedule_timeout-0x4
+     70b:	mov    r12,rax
+     70e:	jmp    699 <inpImeRead+0x159>
+     710:	mov    r12,rax
+     713:	jmp    6d4 <inpImeRead+0x194>
+     715:	mov    rdi,0x0
+			718: R_X86_64_32S	.bss+0x20
+     71c:	mov    r13,0xffffffffffffffc3
+     723:	call   728 <inpImeRead+0x1e8>
+			724: R_X86_64_PC32	mutex_unlock-0x4
+     728:	mov    rdi,0x0
+			72b: R_X86_64_32S	.rodata.str1.8+0x258
+     72f:	xor    eax,eax
+     731:	call   736 <inpImeRead+0x1f6>
+			732: R_X86_64_PC32	printk-0x4
+     736:	jmp    627 <inpImeRead+0xe7>
+     73b:	mov    rsi,rax
+     73e:	mov    rdi,0x0
+			741: R_X86_64_32S	.rodata.str1.8+0x298
+     745:	xor    eax,eax
+     747:	call   74c <inpImeRead+0x20c>
+			748: R_X86_64_PC32	printk-0x4
+     74c:	mov    r13,0xfffffffffffffff2
+     753:	jmp    61b <inpImeRead+0xdb>
+     758:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000760 <inpImeOpen>:
+     760:	push   rbp
+     761:	mov    rdi,0x0
+			764: R_X86_64_32S	.bss+0x20
+     768:	mov    rbp,rsp
+     76b:	call   770 <inpImeOpen+0x10>
+			76c: R_X86_64_PC32	mutex_lock-0x4
+     770:	mov    r8d,DWORD PTR [rip+0x0]        # 777 <inpImeOpen+0x17>
+			773: R_X86_64_PC32	.bss+0x1fc8
+     777:	test   r8d,r8d
+     77a:	jne    7b4 <inpImeOpen+0x54>
+     77c:	mov    rdi,0x0
+			77f: R_X86_64_32S	.bss+0x20
+     783:	mov    DWORD PTR [rip+0x0],0x1        # 78d <inpImeOpen+0x2d>
+			785: R_X86_64_PC32	.bss+0x1fc4
+     78d:	mov    DWORD PTR [rip+0x0],0x0        # 797 <inpImeOpen+0x37>
+			78f: R_X86_64_PC32	.bss+0x40
+     797:	mov    DWORD PTR [rip+0x0],0x0        # 7a1 <inpImeOpen+0x41>
+			799: R_X86_64_PC32	.bss+0x3c
+     7a1:	mov    DWORD PTR [rip+0x0],0x0        # 7ab <inpImeOpen+0x4b>
+			7a3: R_X86_64_PC32	.bss+0x38
+     7ab:	call   7b0 <inpImeOpen+0x50>
+			7ac: R_X86_64_PC32	mutex_unlock-0x4
+     7b0:	xor    eax,eax
+     7b2:	pop    rbp
+     7b3:	ret
+     7b4:	mov    rdi,0x0
+			7b7: R_X86_64_32S	.bss+0x20
+     7bb:	call   7c0 <inpImeOpen+0x60>
+			7bc: R_X86_64_PC32	mutex_unlock-0x4
+     7c0:	mov    rsi,0x0
+			7c3: R_X86_64_32S	.rodata+0xab
+     7c7:	mov    rdi,0x0
+			7ca: R_X86_64_32S	.rodata.str1.1+0xad
+     7ce:	xor    eax,eax
+     7d0:	call   7d5 <inpImeOpen+0x75>
+			7d1: R_X86_64_PC32	printk-0x4
+     7d5:	mov    eax,0xfffffff0
+     7da:	pop    rbp
+     7db:	ret
+     7dc:	nop    DWORD PTR [rax+0x0]
+
+00000000000007e0 <inpImeInit>:
+     7e0:	push   rbp
+     7e1:	mov    rdx,0x0
+			7e4: R_X86_64_32S	.bss+0x1ff0
+     7e8:	mov    rsi,0x0
+			7eb: R_X86_64_32S	.rodata.str1.1+0xc8
+     7ef:	mov    rdi,0x0
+			7f2: R_X86_64_32S	.bss+0x20
+     7f6:	mov    rbp,rsp
+     7f9:	push   rbx
+     7fa:	sub    rsp,0x8
+     7fe:	call   803 <inpImeInit+0x23>
+			7ff: R_X86_64_PC32	__mutex_init-0x4
+     803:	mov    rdx,0x0
+			806: R_X86_64_32S	.bss+0x1ff0
+     80a:	mov    rsi,0x0
+			80d: R_X86_64_32S	.rodata.str1.1+0xd0
+     811:	mov    rdi,0x0
+			814: R_X86_64_32S	.bss+0x1fd0
+     818:	call   81d <inpImeInit+0x3d>
+			819: R_X86_64_PC32	__init_waitqueue_head-0x4
+     81d:	mov    rdi,0x0
+			820: R_X86_64_32S	.data+0x20
+     824:	call   829 <inpImeInit+0x49>
+			825: R_X86_64_PC32	misc_register-0x4
+     829:	test   eax,eax
+     82b:	mov    ebx,eax
+     82d:	js     83a <inpImeInit+0x5a>
+     82f:	xor    ebx,ebx
+     831:	add    rsp,0x8
+     835:	mov    eax,ebx
+     837:	pop    rbx
+     838:	pop    rbp
+     839:	ret
+     83a:	mov    esi,eax
+     83c:	mov    rdi,0x0
+			83f: R_X86_64_32S	.rodata.str1.8+0x2d0
+     843:	xor    eax,eax
+     845:	call   84a <inpImeInit+0x6a>
+			846: R_X86_64_PC32	printk-0x4
+     84a:	jmp    831 <inpImeInit+0x51>
+     84c:	nop    DWORD PTR [rax+0x0]
+
+0000000000000850 <inpImeFini>:
+     850:	push   rbp
+     851:	mov    rsi,0x0
+			854: R_X86_64_32S	.rodata+0xc1
+     858:	mov    rdi,0x0
+			85b: R_X86_64_32S	.rodata.str1.1+0xd6
+     85f:	xor    eax,eax
+     861:	mov    rbp,rsp
+     864:	call   869 <inpImeFini+0x19>
+			865: R_X86_64_PC32	printk-0x4
+     869:	pop    rbp
+     86a:	ret
+     86b:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000870 <inpImeDispatch>:
+     870:	push   rbp
+     871:	mov    rbp,rsp
+     874:	push   rbx
+     875:	mov    rbx,rdi
+     878:	mov    rdi,0x0
+			87b: R_X86_64_32S	.bss+0x20
+     87f:	sub    rsp,0x8
+     883:	call   888 <inpImeDispatch+0x18>
+			884: R_X86_64_PC32	mutex_lock-0x4
+     888:	mov    r9d,DWORD PTR [rip+0x0]        # 88f <inpImeDispatch+0x1f>
+			88b: R_X86_64_PC32	.bss+0x1fc8
+     88f:	test   r9d,r9d
+     892:	je     99f <inpImeDispatch+0x12f>
+     898:	mov    edx,DWORD PTR [rbx+0x4]
+     89b:	cmp    edx,0x7d
+     89e:	jg     981 <inpImeDispatch+0x111>
+     8a4:	test   edx,edx
+     8a6:	je     981 <inpImeDispatch+0x111>
+     8ac:	cmp    DWORD PTR [rip+0x0],0x40        # 8b3 <inpImeDispatch+0x43>
+			8ae: R_X86_64_PC32	.bss+0x43
+     8b3:	je     951 <inpImeDispatch+0xe1>
+     8b9:	movsxd rdi,DWORD PTR [rip+0x0]        # 8c0 <inpImeDispatch+0x50>
+			8bc: R_X86_64_PC32	.bss+0x40
+     8c0:	lea    rsi,[rbx+0x8]
+     8c4:	movsxd rdx,edx
+     8c7:	lea    rax,[rdi+rdi*1]
+     8cb:	shl    rdi,0x7
+     8cf:	sub    rdi,rax
+     8d2:	add    rdi,0x0
+			8d5: R_X86_64_32S	.bss+0x4c
+     8d9:	call   8de <inpImeDispatch+0x6e>
+			8da: R_X86_64_PC32	memcpy-0x4
+     8de:	mov    eax,DWORD PTR [rip+0x0]        # 8e4 <inpImeDispatch+0x74>
+			8e0: R_X86_64_PC32	.bss+0x40
+     8e4:	mov    rdi,0x0
+			8e7: R_X86_64_32S	.bss+0x20
+     8eb:	movsxd rdx,eax
+     8ee:	add    eax,0x1
+     8f1:	lea    rcx,[rdx+rdx*1]
+     8f5:	shl    rdx,0x7
+     8f9:	sub    rdx,rcx
+     8fc:	mov    ecx,DWORD PTR [rbx+0x4]
+     8ff:	add    DWORD PTR [rip+0x0],0x1        # 906 <inpImeDispatch+0x96>
+			901: R_X86_64_PC32	.bss+0x43
+     906:	mov    BYTE PTR [rdx+0x0],cl
+			908: R_X86_64_32S	.bss+0xc9
+     90c:	mov    edx,eax
+     90e:	sar    edx,0x1f
+     911:	shr    edx,0x1a
+     914:	add    eax,edx
+     916:	and    eax,0x3f
+     919:	sub    eax,edx
+     91b:	mov    DWORD PTR [rip+0x0],eax        # 921 <inpImeDispatch+0xb1>
+			91d: R_X86_64_PC32	.bss+0x40
+     921:	call   926 <inpImeDispatch+0xb6>
+			922: R_X86_64_PC32	mutex_unlock-0x4
+     926:	xor    ecx,ecx
+     928:	mov    edx,0x1
+     92d:	mov    esi,0x1
+     932:	mov    rdi,0x0
+			935: R_X86_64_32S	.bss+0x1fd0
+     939:	mov    DWORD PTR [rip+0x0],0x1        # 943 <inpImeDispatch+0xd3>
+			93b: R_X86_64_PC32	.bss+0x1fe0
+     943:	call   948 <inpImeDispatch+0xd8>
+			944: R_X86_64_PC32	__wake_up-0x4
+     948:	add    rsp,0x8
+     94c:	xor    eax,eax
+     94e:	pop    rbx
+     94f:	pop    rbp
+     950:	ret
+     951:	mov    eax,DWORD PTR [rip+0x0]        # 957 <inpImeDispatch+0xe7>
+			953: R_X86_64_PC32	.bss+0x3c
+     957:	mov    DWORD PTR [rip+0x0],0x3f        # 961 <inpImeDispatch+0xf1>
+			959: R_X86_64_PC32	.bss+0x40
+     961:	add    eax,0x1
+     964:	mov    edx,eax
+     966:	sar    edx,0x1f
+     969:	shr    edx,0x1a
+     96c:	add    eax,edx
+     96e:	and    eax,0x3f
+     971:	sub    eax,edx
+     973:	mov    DWORD PTR [rip+0x0],eax        # 979 <inpImeDispatch+0x109>
+			975: R_X86_64_PC32	.bss+0x3c
+     979:	mov    edx,DWORD PTR [rbx+0x4]
+     97c:	jmp    8b9 <inpImeDispatch+0x49>
+     981:	mov    esi,edx
+     983:	mov    rdi,0x0
+			986: R_X86_64_32S	.rodata.str1.8+0x320
+     98a:	xor    eax,eax
+     98c:	call   991 <inpImeDispatch+0x121>
+			98d: R_X86_64_PC32	printk-0x4
+     991:	mov    rdi,0x0
+			994: R_X86_64_32S	.bss+0x20
+     998:	call   99d <inpImeDispatch+0x12d>
+			999: R_X86_64_PC32	mutex_unlock-0x4
+     99d:	jmp    948 <inpImeDispatch+0xd8>
+     99f:	mov    rdi,0x0
+			9a2: R_X86_64_32S	.bss+0x20
+     9a6:	call   9ab <inpImeDispatch+0x13b>
+			9a7: R_X86_64_PC32	mutex_unlock-0x4
+     9ab:	mov    rdx,rbx
+     9ae:	mov    rsi,0x0
+			9b1: R_X86_64_32S	.rodata+0xcc
+     9b5:	mov    rdi,0x0
+			9b8: R_X86_64_32S	.rodata.str1.8+0x2f8
+     9bc:	xor    eax,eax
+     9be:	call   9c3 <inpImeDispatch+0x153>
+			9bf: R_X86_64_PC32	printk-0x4
+     9c3:	jmp    948 <inpImeDispatch+0xd8>
+     9c5:	cs nop WORD PTR [rax+rax*1+0x0]
+     9cf:	nop
+
+00000000000009d0 <inpProcWrite>:
+     9d0:	push   rbp
+     9d1:	mov    rdi,rdx
+     9d4:	mov    rbp,rsp
+     9d7:	sub    rsp,0x20
+     9db:	mov    QWORD PTR [rbp-0x10],r13
+     9df:	mov    r13,rsi
+     9e2:	mov    esi,0x6080c0
+     9e7:	mov    QWORD PTR [rbp-0x20],rbx
+     9eb:	mov    QWORD PTR [rbp-0x18],r12
+     9ef:	mov    r12,rdx
+     9f2:	mov    QWORD PTR [rbp-0x8],r14
+     9f6:	call   9fb <inpProcWrite+0x2b>
+			9f7: R_X86_64_PC32	__kmalloc-0x4
+     9fb:	test   rax,rax
+     9fe:	mov    rbx,rax
+     a01:	je     a96 <inpProcWrite+0xc6>
+     a07:	lea    r14,[r12-0x1]
+     a0c:	xor    edx,edx
+     a0e:	mov    rdi,rax
+     a11:	mov    rsi,r14
+     a14:	call   a19 <inpProcWrite+0x49>
+			a15: R_X86_64_PC32	__check_object_size-0x4
+     a19:	mov    rdx,r14
+     a1c:	mov    rsi,r13
+     a1f:	mov    rdi,rbx
+     a22:	call   a27 <inpProcWrite+0x57>
+			a23: R_X86_64_PC32	_copy_from_user-0x4
+     a27:	test   rax,rax
+     a2a:	jne    a77 <inpProcWrite+0xa7>
+     a2c:	mov    ecx,0x4
+     a31:	mov    rdi,0x0
+			a34: R_X86_64_32S	.rodata.str1.1+0xee
+     a38:	mov    rsi,rbx
+     a3b:	repz cmps BYTE PTR ds:[rsi],BYTE PTR es:[rdi]
+     a3d:	mov    rsi,rbx
+     a40:	mov    rdi,0x0
+			a43: R_X86_64_32S	.rodata.str1.8+0x388
+     a47:	sete   dl
+     a4a:	xor    eax,eax
+     a4c:	movzx  edx,dl
+     a4f:	mov    DWORD PTR [rip+0x0],edx        # a55 <inpProcWrite+0x85>
+			a51: R_X86_64_PC32	is_aga_mode-0x4
+     a55:	call   a5a <inpProcWrite+0x8a>
+			a56: R_X86_64_PC32	printk-0x4
+     a5a:	mov    rdi,rbx
+     a5d:	call   a62 <inpProcWrite+0x92>
+			a5e: R_X86_64_PC32	kfree-0x4
+     a62:	mov    rax,r12
+     a65:	mov    rbx,QWORD PTR [rbp-0x20]
+     a69:	mov    r12,QWORD PTR [rbp-0x18]
+     a6d:	mov    r13,QWORD PTR [rbp-0x10]
+     a71:	mov    r14,QWORD PTR [rbp-0x8]
+     a75:	leave
+     a76:	ret
+     a77:	mov    rdi,0x0
+			a7a: R_X86_64_32S	.rodata.str1.8+0x358
+     a7e:	xor    eax,eax
+     a80:	call   a85 <inpProcWrite+0xb5>
+			a81: R_X86_64_PC32	printk-0x4
+     a85:	mov    rdi,rbx
+     a88:	call   a8d <inpProcWrite+0xbd>
+			a89: R_X86_64_PC32	kfree-0x4
+     a8d:	mov    rax,0xfffffffffffffff2
+     a94:	jmp    a65 <inpProcWrite+0x95>
+     a96:	mov    rdi,0x0
+			a99: R_X86_64_32S	.rodata.str1.8+0x358
+     a9d:	xor    eax,eax
+     a9f:	call   aa4 <inpProcWrite+0xd4>
+			aa0: R_X86_64_PC32	printk-0x4
+     aa4:	mov    rax,0xfffffffffffffff2
+     aab:	jmp    a65 <inpProcWrite+0x95>
+     aad:	nop    DWORD PTR [rax]
+
+0000000000000ab0 <inpProcRead>:
+     ab0:	push   rbp
+     ab1:	mov    rbp,rsp
+     ab4:	sub    rsp,0x30
+     ab8:	mov    QWORD PTR [rbp-0x18],r12
+     abc:	xor    r12d,r12d
+     abf:	cmp    QWORD PTR [rcx],0x0
+     ac3:	mov    QWORD PTR [rbp-0x20],rbx
+     ac7:	mov    QWORD PTR [rbp-0x10],r13
+     acb:	mov    rbx,rsi
+     ace:	mov    QWORD PTR [rbp-0x8],r14
+     ad2:	mov    r13,rcx
+     ad5:	jle    aec <inpProcRead+0x3c>
+     ad7:	mov    rax,r12
+     ada:	mov    rbx,QWORD PTR [rbp-0x20]
+     ade:	mov    r12,QWORD PTR [rbp-0x18]
+     ae2:	mov    r13,QWORD PTR [rbp-0x10]
+     ae6:	mov    r14,QWORD PTR [rbp-0x8]
+     aea:	leave
+     aeb:	ret
+     aec:	mov    eax,DWORD PTR [rip+0x0]        # af2 <inpProcRead+0x42>
+			aee: R_X86_64_PC32	is_aga_mode-0x4
+     af2:	lea    r14,[rbp-0x30]
+     af6:	mov    edx,0x10
+     afb:	test   eax,eax
+     afd:	jne    b99 <inpProcRead+0xe9>
+     b03:	mov    rsi,0x0
+			b06: R_X86_64_32S	.rodata.str1.1+0xf2
+     b0a:	mov    rdi,r14
+     b0d:	call   b12 <inpProcRead+0x62>
+			b0e: R_X86_64_PC32	strlcpy-0x4
+     b12:	mov    r12,r14
+     b15:	mov    edx,DWORD PTR [r12]
+     b19:	add    r12,0x4
+     b1d:	lea    eax,[rdx-0x1010101]
+     b23:	not    edx
+     b25:	and    eax,edx
+     b27:	and    eax,0x80808080
+     b2c:	je     b15 <inpProcRead+0x65>
+     b2e:	mov    edx,eax
+     b30:	shr    edx,0x10
+     b33:	test   eax,0x8080
+     b38:	cmove  eax,edx
+     b3b:	lea    rdx,[r12+0x2]
+     b40:	cmove  r12,rdx
+     b44:	add    al,al
+     b46:	sbb    r12,0x3
+     b4a:	sub    r12d,r14d
+     b4d:	movsxd r12,r12d
+     b50:	cmp    r12,0x10
+     b54:	ja     bad <inpProcRead+0xfd>
+     b56:	mov    edx,0x1
+     b5b:	mov    rsi,r12
+     b5e:	mov    rdi,r14
+     b61:	call   b66 <inpProcRead+0xb6>
+			b62: R_X86_64_PC32	__check_object_size-0x4
+     b66:	mov    rdx,r12
+     b69:	mov    rsi,r14
+     b6c:	mov    rdi,rbx
+     b6f:	call   b74 <inpProcRead+0xc4>
+			b70: R_X86_64_PC32	_copy_to_user-0x4
+     b74:	test   rax,rax
+     b77:	jne    bc5 <inpProcRead+0x115>
+     b79:	add    QWORD PTR [r13+0x0],r12
+     b7d:	mov    rsi,r14
+     b80:	mov    rdi,0x0
+			b83: R_X86_64_32S	.rodata.str1.8+0x408
+     b87:	mov    edx,DWORD PTR [rip+0x0]        # b8d <inpProcRead+0xdd>
+			b89: R_X86_64_PC32	is_aga_mode-0x4
+     b8d:	xor    eax,eax
+     b8f:	call   b94 <inpProcRead+0xe4>
+			b90: R_X86_64_PC32	printk-0x4
+     b94:	jmp    ad7 <inpProcRead+0x27>
+     b99:	mov    rsi,0x0
+			b9c: R_X86_64_32S	.rodata.str1.1+0xee
+     ba0:	mov    rdi,r14
+     ba3:	call   ba8 <inpProcRead+0xf8>
+			ba4: R_X86_64_PC32	strlcpy-0x4
+     ba8:	jmp    b12 <inpProcRead+0x62>
+     bad:	mov    rdx,r12
+     bb0:	mov    esi,0x10
+     bb5:	mov    rdi,0x0
+			bb8: R_X86_64_32S	.rodata.str1.8+0x3b0
+     bbc:	xor    eax,eax
+     bbe:	call   bc3 <inpProcRead+0x113>
+			bbf: R_X86_64_PC32	__warn_printk-0x4
+     bc3:	ud2
+     bc5:	mov    rdi,0x0
+			bc8: R_X86_64_32S	.rodata.str1.8+0x3d8
+     bcc:	xor    eax,eax
+     bce:	mov    r12,0xfffffffffffffff2
+     bd5:	call   bda <inpProcRead+0x12a>
+			bd6: R_X86_64_PC32	printk-0x4
+     bda:	jmp    ad7 <inpProcRead+0x27>
+     bdf:	nop
+
+0000000000000be0 <inpProcInit>:
+     be0:	push   rbp
+     be1:	xor    edx,edx
+     be3:	mov    rcx,0x0
+			be6: R_X86_64_32S	.data+0x1a0
+     bea:	mov    esi,0x1b0
+     bef:	mov    rdi,0x0
+			bf2: R_X86_64_32S	.rodata.str1.1+0xf6
+     bf6:	mov    rbp,rsp
+     bf9:	call   bfe <inpProcInit+0x1e>
+			bfa: R_X86_64_PC32	proc_create-0x4
+     bfe:	test   rax,rax
+     c01:	je     c07 <inpProcInit+0x27>
+     c03:	xor    eax,eax
+     c05:	pop    rbp
+     c06:	ret
+     c07:	mov    rsi,0x0
+			c0a: R_X86_64_32S	.rodata+0xdb
+     c0e:	mov    rdi,0x0
+			c11: R_X86_64_32S	.rodata.str1.8+0x430
+     c15:	call   c1a <inpProcInit+0x3a>
+			c16: R_X86_64_PC32	printk-0x4
+     c1a:	mov    eax,0xfffffffb
+     c1f:	pop    rbp
+     c20:	ret
+     c21:	cs nop WORD PTR [rax+rax*1+0x0]
+     c2b:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000c30 <inpGamepadClose>:
+     c30:	push   rbp
+     c31:	mov    rsi,0x0
+			c34: R_X86_64_32S	.rodata+0x130
+     c38:	mov    rdi,0x0
+			c3b: R_X86_64_32S	.rodata.str1.1+0xfd
+     c3f:	xor    eax,eax
+     c41:	mov    rbp,rsp
+     c44:	call   c49 <inpGamepadClose+0x19>
+			c45: R_X86_64_PC32	printk-0x4
+     c49:	pop    rbp
+     c4a:	ret
+     c4b:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000c50 <inpGamepadOpen>:
+     c50:	push   rbp
+     c51:	mov    rsi,0x0
+			c54: R_X86_64_32S	.rodata+0x140
+     c58:	mov    rdi,0x0
+			c5b: R_X86_64_32S	.rodata.str1.1+0xfd
+     c5f:	xor    eax,eax
+     c61:	mov    rbp,rsp
+     c64:	call   c69 <inpGamepadOpen+0x19>
+			c65: R_X86_64_PC32	printk-0x4
+     c69:	xor    eax,eax
+     c6b:	pop    rbp
+     c6c:	ret
+     c6d:	nop    DWORD PTR [rax]
+
+0000000000000c70 <inpGamepadSetupAbs>:
+     c70:	push   rbp
+     c71:	movsx  rcx,si
+     c75:	mov    rbp,rsp
+     c78:	lock bts QWORD PTR [rdi+0x98],rcx
+     c81:	cmp    si,0x11
+     c85:	ja     cae <inpGamepadSetupAbs+0x3e>
+     c87:	mov    eax,0x1
+     c8c:	shl    rax,cl
+     c8f:	test   eax,0x30000
+     c94:	je     cb0 <inpGamepadSetupAbs+0x40>
+     c96:	movsx  esi,si
+     c99:	xor    r9d,r9d
+     c9c:	xor    r8d,r8d
+     c9f:	mov    ecx,0x1
+     ca4:	mov    edx,0xffffffff
+     ca9:	call   cae <inpGamepadSetupAbs+0x3e>
+			caa: R_X86_64_PC32	input_set_abs_params-0x4
+     cae:	pop    rbp
+     caf:	ret
+     cb0:	test   ah,0x6
+     cb3:	jne    cd9 <inpGamepadSetupAbs+0x69>
+     cb5:	test   al,0x3f
+     cb7:	je     cae <inpGamepadSetupAbs+0x3e>
+     cb9:	movsx  esi,si
+     cbc:	mov    r9d,0x80
+     cc2:	mov    r8d,0x10
+     cc8:	mov    ecx,0x7fff
+     ccd:	mov    edx,0xffff8000
+     cd2:	call   cd7 <inpGamepadSetupAbs+0x67>
+			cd3: R_X86_64_PC32	input_set_abs_params-0x4
+     cd7:	pop    rbp
+     cd8:	ret
+     cd9:	movsx  esi,si
+     cdc:	xor    r9d,r9d
+     cdf:	xor    r8d,r8d
+     ce2:	mov    ecx,0xff
+     ce7:	xor    edx,edx
+     ce9:	call   cee <inpGamepadSetupAbs+0x7e>
+			cea: R_X86_64_PC32	input_set_abs_params-0x4
+     cee:	pop    rbp
+     cef:	ret
+
+0000000000000cf0 <inpGamepadInit>:
+     cf0:	push   rbp
+     cf1:	mov    rbp,rsp
+     cf4:	push   r13
+     cf6:	mov    r13d,edi
+     cf9:	push   r12
+     cfb:	push   rbx
+     cfc:	mov    ebx,r13d
+     cff:	sub    rsp,0x8
+     d03:	call   d08 <inpGamepadInit+0x18>
+			d04: R_X86_64_PC32	input_allocate_device-0x4
+     d08:	test   rax,rax
+     d0b:	mov    QWORD PTR [rbx*8+0x0],rax
+			d0f: R_X86_64_32S	.bss+0x2000
+     d13:	je     ea1 <inpGamepadInit+0x1b1>
+     d19:	test   r13d,r13d
+     d1c:	je     e57 <inpGamepadInit+0x167>
+     d22:	mov    r12,rbx
+     d25:	mov    ecx,r13d
+     d28:	mov    rdx,0x0
+			d2b: R_X86_64_32S	.rodata.str1.1+0x117
+     d2f:	shl    r12,0x5
+     d33:	mov    esi,0x20
+     d38:	xor    eax,eax
+     d3a:	add    r12,0x0
+			d3d: R_X86_64_32S	.bss+0x2020
+     d41:	mov    rdi,r12
+     d44:	call   d49 <inpGamepadInit+0x59>
+			d45: R_X86_64_PC32	snprintf-0x4
+     d49:	mov    rax,QWORD PTR [rbx*8+0x0]
+			d4d: R_X86_64_32S	.bss+0x2000
+     d51:	mov    QWORD PTR [rax],r12
+     d54:	mov    QWORD PTR [rax+0x1d0],0x0
+			d5b: R_X86_64_32S	.text+0xc50
+     d5f:	mov    QWORD PTR [rax+0x1d8],0x0
+			d66: R_X86_64_32S	.text+0xc30
+     d6a:	lock or BYTE PTR [rax+0x28],0x2
+     d6f:	mov    rax,QWORD PTR [rbx*8+0x0]
+			d73: R_X86_64_32S	.bss+0x2000
+     d77:	lock or BYTE PTR [rax+0x28],0x1
+     d7c:	mov    rax,QWORD PTR [rbx*8+0x0]
+			d80: R_X86_64_32S	.bss+0x2000
+     d84:	lock or BYTE PTR [rax+0x28],0x8
+     d89:	mov    r12,0x0
+			d8c: R_X86_64_32S	.rodata+0xf2
+     d90:	xor    esi,esi
+     d92:	mov    rdi,QWORD PTR [rbx*8+0x0]
+			d96: R_X86_64_32S	.bss+0x2000
+     d9a:	movsx  esi,si
+     d9d:	add    r12,0x2
+     da1:	call   c70 <inpGamepadSetupAbs>
+     da6:	movzx  esi,WORD PTR [r12-0x2]
+     dac:	test   si,si
+     daf:	jns    d92 <inpGamepadInit+0xa2>
+     db1:	mov    rdx,0x0
+			db4: R_X86_64_32S	.rodata+0x102
+     db8:	mov    eax,0x130
+     dbd:	mov    rcx,QWORD PTR [rbx*8+0x0]
+			dc1: R_X86_64_32S	.bss+0x2000
+     dc5:	movsx  rax,ax
+     dc9:	lock bts QWORD PTR [rcx+0x30],rax
+     dcf:	add    rdx,0x2
+     dd3:	movzx  eax,WORD PTR [rdx-0x2]
+     dd7:	test   ax,ax
+     dda:	jns    dbd <inpGamepadInit+0xcd>
+     ddc:	mov    r12,0x0
+			ddf: R_X86_64_32S	.rodata+0x11c
+     de3:	mov    esi,0x10
+     de8:	mov    rdi,QWORD PTR [rbx*8+0x0]
+			dec: R_X86_64_32S	.bss+0x2000
+     df0:	movsx  esi,si
+     df3:	add    r12,0x2
+     df7:	call   c70 <inpGamepadSetupAbs>
+     dfc:	movzx  esi,WORD PTR [r12-0x2]
+     e02:	test   si,si
+     e05:	jns    de8 <inpGamepadInit+0xf8>
+     e07:	mov    r12,0x0
+			e0a: R_X86_64_32S	.rodata+0x122
+     e0e:	mov    esi,0xa
+     e13:	mov    rdi,QWORD PTR [rbx*8+0x0]
+			e17: R_X86_64_32S	.bss+0x2000
+     e1b:	movsx  esi,si
+     e1e:	add    r12,0x2
+     e22:	call   c70 <inpGamepadSetupAbs>
+     e27:	movzx  esi,WORD PTR [r12-0x2]
+     e2d:	test   si,si
+     e30:	jns    e13 <inpGamepadInit+0x123>
+     e32:	mov    rdi,QWORD PTR [rbx*8+0x0]
+			e36: R_X86_64_32S	.bss+0x2000
+     e3a:	call   e3f <inpGamepadInit+0x14f>
+			e3b: R_X86_64_PC32	input_register_device-0x4
+     e3f:	test   eax,eax
+     e41:	mov    r12d,eax
+     e44:	js     ec1 <inpGamepadInit+0x1d1>
+     e46:	xor    r12d,r12d
+     e49:	add    rsp,0x8
+     e4d:	mov    eax,r12d
+     e50:	pop    rbx
+     e51:	pop    r12
+     e53:	pop    r13
+     e55:	pop    rbp
+     e56:	ret
+     e57:	movabs rdx,0x6361745365756c42
+     e61:	movabs rcx,0x757472695620736b
+     e6b:	movabs rsi,0x70656d6147206c61
+     e75:	mov    QWORD PTR [rip+0x0],rdx        # e7c <inpGamepadInit+0x18c>
+			e78: R_X86_64_PC32	.bss+0x201c
+     e7c:	mov    QWORD PTR [rip+0x0],rcx        # e83 <inpGamepadInit+0x193>
+			e7f: R_X86_64_PC32	.bss+0x2024
+     e83:	mov    r12,0x0
+			e86: R_X86_64_32S	.bss+0x2020
+     e8a:	mov    QWORD PTR [rip+0x0],rsi        # e91 <inpGamepadInit+0x1a1>
+			e8d: R_X86_64_PC32	.bss+0x202c
+     e91:	mov    QWORD PTR [rip+0x0],0x6461        # e9c <inpGamepadInit+0x1ac>
+			e94: R_X86_64_PC32	.bss+0x2030
+     e9c:	jmp    d51 <inpGamepadInit+0x61>
+     ea1:	mov    rdi,0x0
+			ea4: R_X86_64_32S	.rodata.str1.8+0x460
+     ea8:	mov    r12d,0xfffffff4
+     eae:	call   eb3 <inpGamepadInit+0x1c3>
+			eaf: R_X86_64_PC32	printk-0x4
+     eb3:	mov    QWORD PTR [rbx*8+0x0],0x0
+			eb7: R_X86_64_32S	.bss+0x2000
+     ebf:	jmp    e49 <inpGamepadInit+0x159>
+     ec1:	mov    esi,eax
+     ec3:	mov    rdi,0x0
+			ec6: R_X86_64_32S	.rodata.str1.8+0x488
+     eca:	xor    eax,eax
+     ecc:	call   ed1 <inpGamepadInit+0x1e1>
+			ecd: R_X86_64_PC32	printk-0x4
+     ed1:	mov    rdi,QWORD PTR [rbx*8+0x0]
+			ed5: R_X86_64_32S	.bss+0x2000
+     ed9:	call   ede <inpGamepadInit+0x1ee>
+			eda: R_X86_64_PC32	input_free_device-0x4
+     ede:	jmp    e49 <inpGamepadInit+0x159>
+     ee3:	data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000ef0 <inpGamepadFini>:
+     ef0:	push   rbp
+     ef1:	mov    rbp,rsp
+     ef4:	push   rbx
+     ef5:	sub    rsp,0x8
+     ef9:	mov    ebx,DWORD PTR [rip+0x0]        # eff <inpGamepadFini+0xf>
+			efb: R_X86_64_PC32	.data+0x2bc
+     eff:	cmp    ebx,0xffffffff
+     f02:	je     f25 <inpGamepadFini+0x35>
+     f04:	movsxd rbx,ebx
+     f07:	mov    rdx,QWORD PTR [rbx*8+0x0]
+			f0b: R_X86_64_32S	.bss+0x2000
+     f0f:	test   rdx,rdx
+     f12:	jne    f6d <inpGamepadFini+0x7d>
+     f14:	mov    DWORD PTR [rip+0x0],0xffffffff        # f1e <inpGamepadFini+0x2e>
+			f16: R_X86_64_PC32	.data+0x2b8
+     f1e:	add    rsp,0x8
+     f22:	pop    rbx
+     f23:	pop    rbp
+     f24:	ret
+     f25:	xor    ebx,ebx
+     f27:	mov    rdx,QWORD PTR [rbx+0x0]
+			f2a: R_X86_64_32S	.bss+0x2000
+     f2e:	test   rdx,rdx
+     f31:	jne    f3f <inpGamepadFini+0x4f>
+     f33:	add    rbx,0x8
+     f37:	cmp    rbx,0x20
+     f3b:	jne    f27 <inpGamepadFini+0x37>
+     f3d:	jmp    f14 <inpGamepadFini+0x24>
+     f3f:	mov    rsi,0x0
+			f42: R_X86_64_32S	.rodata+0x150
+     f46:	mov    rdi,0x0
+			f49: R_X86_64_32S	.rodata.str1.8+0x4b8
+     f4d:	xor    eax,eax
+     f4f:	call   f54 <inpGamepadFini+0x64>
+			f50: R_X86_64_PC32	printk-0x4
+     f54:	mov    rdi,QWORD PTR [rbx+0x0]
+			f57: R_X86_64_32S	.bss+0x2000
+     f5b:	call   f60 <inpGamepadFini+0x70>
+			f5c: R_X86_64_PC32	input_unregister_device-0x4
+     f60:	mov    QWORD PTR [rbx+0x0],0x0
+			f63: R_X86_64_32S	.bss+0x2000
+     f6b:	jmp    f33 <inpGamepadFini+0x43>
+     f6d:	mov    rsi,0x0
+			f70: R_X86_64_32S	.rodata+0x150
+     f74:	mov    rdi,0x0
+			f77: R_X86_64_32S	.rodata.str1.8+0x4b8
+     f7b:	xor    eax,eax
+     f7d:	call   f82 <inpGamepadFini+0x92>
+			f7e: R_X86_64_PC32	printk-0x4
+     f82:	mov    rdi,QWORD PTR [rbx*8+0x0]
+			f86: R_X86_64_32S	.bss+0x2000
+     f8a:	call   f8f <inpGamepadFini+0x9f>
+			f8b: R_X86_64_PC32	input_unregister_device-0x4
+     f8f:	mov    QWORD PTR [rbx*8+0x0],0x0
+			f93: R_X86_64_32S	.bss+0x2000
+     f9b:	jmp    f14 <inpGamepadFini+0x24>
+
+0000000000000fa0 <inpGamepadDispatch>:
+     fa0:	push   rbp
+     fa1:	mov    rbp,rsp
+     fa4:	push   rbx
+     fa5:	mov    rbx,rdi
+     fa8:	sub    rsp,0x8
+     fac:	mov    eax,DWORD PTR [rdi+0x4]
+     faf:	mov    esi,DWORD PTR [rdi+0x10]
+     fb2:	cmp    eax,0x2
+     fb5:	je     fc8 <inpGamepadDispatch+0x28>
+     fb7:	mov    edx,esi
+     fb9:	cmp    QWORD PTR [rdx*8+0x0],0x0
+			fbd: R_X86_64_32S	.bss+0x2000
+     fc2:	je     10a3 <inpGamepadDispatch+0x103>
+     fc8:	cmp    esi,0x3
+     fcb:	ja     1085 <inpGamepadDispatch+0xe5>
+     fd1:	test   eax,eax
+     fd3:	je     ffe <inpGamepadDispatch+0x5e>
+     fd5:	cmp    eax,0x1
+     fd8:	je     104a <inpGamepadDispatch+0xaa>
+     fda:	cmp    eax,0x2
+     fdd:	nop    DWORD PTR [rax]
+     fe0:	je     1022 <inpGamepadDispatch+0x82>
+     fe2:	mov    rdi,QWORD PTR [rsi*8+0x0]
+			fe6: R_X86_64_32S	.bss+0x2000
+     fea:	xor    ecx,ecx
+     fec:	xor    edx,edx
+     fee:	xor    esi,esi
+     ff0:	call   ff5 <inpGamepadDispatch+0x55>
+			ff1: R_X86_64_PC32	input_event-0x4
+     ff5:	add    rsp,0x8
+     ff9:	xor    eax,eax
+     ffb:	pop    rbx
+     ffc:	pop    rbp
+     ffd:	ret
+     ffe:	mov    edi,DWORD PTR [rbx+0xc]
+    1001:	xor    ecx,ecx
+    1003:	mov    edx,DWORD PTR [rbx+0x8]
+    1006:	test   edi,edi
+    1008:	mov    rdi,QWORD PTR [rsi*8+0x0]
+			100c: R_X86_64_32S	.bss+0x2000
+    1010:	mov    esi,0x1
+    1015:	setne  cl
+    1018:	call   101d <inpGamepadDispatch+0x7d>
+			1019: R_X86_64_PC32	input_event-0x4
+    101d:	mov    esi,DWORD PTR [rbx+0x10]
+    1020:	jmp    fe2 <inpGamepadDispatch+0x42>
+    1022:	cmp    DWORD PTR [rbx+0xc],0x1
+    1026:	je     106a <inpGamepadDispatch+0xca>
+    1028:	mov    rdi,0x0
+			102b: R_X86_64_32S	.rodata.str1.8+0x5a8
+    102f:	xor    eax,eax
+    1031:	mov    DWORD PTR [rip+0x0],esi        # 1037 <inpGamepadDispatch+0x97>
+			1033: R_X86_64_PC32	.data+0x2bc
+    1037:	call   103c <inpGamepadDispatch+0x9c>
+			1038: R_X86_64_PC32	printk-0x4
+    103c:	call   1041 <inpGamepadDispatch+0xa1>
+			103d: R_X86_64_PC32	inpGamepadFini-0x4
+    1041:	add    rsp,0x8
+    1045:	xor    eax,eax
+    1047:	pop    rbx
+    1048:	pop    rbp
+    1049:	ret
+    104a:	mov    rdi,QWORD PTR [rsi*8+0x0]
+			104e: R_X86_64_32S	.bss+0x2000
+    1052:	mov    ecx,DWORD PTR [rbx+0xc]
+    1055:	mov    esi,0x3
+    105a:	mov    edx,DWORD PTR [rbx+0x8]
+    105d:	call   1062 <inpGamepadDispatch+0xc2>
+			105e: R_X86_64_PC32	input_event-0x4
+    1062:	mov    esi,DWORD PTR [rbx+0x10]
+    1065:	jmp    fe2 <inpGamepadDispatch+0x42>
+    106a:	mov    rdi,0x0
+			106d: R_X86_64_32S	.rodata.str1.8+0x580
+    1071:	xor    eax,eax
+    1073:	call   1078 <inpGamepadDispatch+0xd8>
+			1074: R_X86_64_PC32	printk-0x4
+    1078:	mov    edi,DWORD PTR [rbx+0x10]
+    107b:	call   1080 <inpGamepadDispatch+0xe0>
+			107c: R_X86_64_PC32	inpGamepadInit-0x4
+    1080:	jmp    ff5 <inpGamepadDispatch+0x55>
+    1085:	mov    ecx,DWORD PTR [rbx+0xc]
+    1088:	mov    edx,DWORD PTR [rbx+0x8]
+    108b:	mov    r8d,esi
+    108e:	mov    rdi,0x0
+			1091: R_X86_64_32S	.rodata.str1.8+0x518
+    1095:	mov    esi,eax
+    1097:	xor    eax,eax
+    1099:	call   109e <inpGamepadDispatch+0xfe>
+			109a: R_X86_64_PC32	printk-0x4
+    109e:	jmp    ff5 <inpGamepadDispatch+0x55>
+    10a3:	mov    rdi,0x0
+			10a6: R_X86_64_32S	.rodata.str1.8+0x4d8
+    10aa:	xor    eax,eax
+    10ac:	call   10b1 <inpGamepadDispatch+0x111>
+			10ad: R_X86_64_PC32	printk-0x4
+    10b1:	jmp    ff5 <inpGamepadDispatch+0x55>
+    10b6:	xchg   ax,ax
+
+Disassembly of section .init.text:
+
+0000000000000000 <init_module>:
+   0:	push   rbp
+   1:	mov    rbp,rsp
+   4:	push   rbx
+   5:	push   rcx
+   6:	call   b <init_module+0xb>
+			7: R_X86_64_PC32	inpKeyboardInit-0x4
+   b:	test   eax,eax
+   d:	mov    ebx,eax
+   f:	jns    26 <init_module+0x26>
+  11:	mov    esi,eax
+  13:	mov    rdi,0x0
+			16: R_X86_64_32S	.rodata.str1.8+0x30
+  1a:	xor    eax,eax
+  1c:	call   21 <init_module+0x21>
+			1d: R_X86_64_PC32	printk-0x4
+  21:	jmp    b1 <init_module+0xb1>
+  26:	call   2b <init_module+0x2b>
+			27: R_X86_64_PC32	inpImeInit-0x4
+  2b:	test   eax,eax
+  2d:	mov    ebx,eax
+  2f:	jns    43 <init_module+0x43>
+  31:	mov    esi,eax
+  33:	mov    rdi,0x0
+			36: R_X86_64_32S	.rodata.str1.8+0x68
+  3a:	xor    eax,eax
+  3c:	call   41 <init_module+0x41>
+			3d: R_X86_64_PC32	printk-0x4
+  41:	jmp    b1 <init_module+0xb1>
+  43:	call   48 <init_module+0x48>
+			44: R_X86_64_PC32	inpTouchInit-0x4
+  48:	test   eax,eax
+  4a:	mov    ebx,eax
+  4c:	jns    60 <init_module+0x60>
+  4e:	mov    esi,eax
+  50:	mov    rdi,0x0
+			53: R_X86_64_32S	.rodata.str1.8+0x90
+  57:	xor    eax,eax
+  59:	call   5e <init_module+0x5e>
+			5a: R_X86_64_PC32	printk-0x4
+  5e:	jmp    b1 <init_module+0xb1>
+  60:	call   65 <init_module+0x65>
+			61: R_X86_64_PC32	inpControlInit-0x4
+  65:	test   eax,eax
+  67:	mov    ebx,eax
+  69:	jns    7d <init_module+0x7d>
+  6b:	mov    esi,eax
+  6d:	mov    rdi,0x0
+			70: R_X86_64_32S	.rodata.str1.8+0xc0
+  74:	xor    eax,eax
+  76:	call   7b <init_module+0x7b>
+			77: R_X86_64_PC32	printk-0x4
+  7b:	jmp    b1 <init_module+0xb1>
+  7d:	call   82 <init_module+0x82>
+			7e: R_X86_64_PC32	inpProcInit-0x4
+  82:	test   eax,eax
+  84:	mov    ebx,eax
+  86:	jns    9a <init_module+0x9a>
+  88:	mov    esi,eax
+  8a:	mov    rdi,0x0
+			8d: R_X86_64_32S	.rodata.str1.8+0xf0
+  91:	xor    eax,eax
+  93:	call   98 <init_module+0x98>
+			94: R_X86_64_PC32	printk-0x4
+  98:	jmp    b1 <init_module+0xb1>
+  9a:	mov    rsi,0x0
+			9d: R_X86_64_32S	.text
+  a1:	mov    edi,0x706e69
+  a6:	call   ab <init_module+0xab>
+			a7: R_X86_64_PC32	vmsgConnect-0x4
+  ab:	mov    DWORD PTR [rip+0x0],eax        # b1 <init_module+0xb1>
+			ad: R_X86_64_PC32	.data-0x4
+  b1:	pop    rdx
+  b2:	mov    eax,ebx
+  b4:	pop    rbx
+  b5:	pop    rbp
+  b6:	ret
+
+Disassembly of section .exit.text:
+
+0000000000000000 <cleanup_module>:
+   0:	push   rbp
+   1:	mov    rbp,rsp
+   4:	call   9 <cleanup_module+0x9>
+			5: R_X86_64_PC32	inpControlFini-0x4
+   9:	call   e <cleanup_module+0xe>
+			a: R_X86_64_PC32	inpGamepadFini-0x4
+   e:	call   13 <cleanup_module+0x13>
+			f: R_X86_64_PC32	inpTouchFini-0x4
+  13:	call   18 <cleanup_module+0x18>
+			14: R_X86_64_PC32	inpImeFini-0x4
+  18:	call   1d <cleanup_module+0x1d>
+			19: R_X86_64_PC32	inpKeyboardFini-0x4
+  1d:	pop    rbp
+  1e:	ret

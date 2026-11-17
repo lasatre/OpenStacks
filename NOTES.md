@@ -315,6 +315,29 @@ All legacy shims stay intact for GR_PURE=0.
   qemu_test\Data_ost1.qcow2, a copy of the known-good Data); selftest 16/16 with PySide6
   6.12 in openstacks\.venv.
 
+## 10e. Phase 68: touch input through "BlueStacks Virtual Touch"
+
+Decode (Sonnet subagent; scratch dev/re_scratch/{vmsg,inp}.dis):
+- bstvmsg host->guest push: guest hard ISR (.text+0x460) reads cid = shm+0x1c (<0 = none),
+  writes BAR0+0x28 (clear); the threaded handler calls cb(cid, shm+host_off) and then writes
+  BAR0+0x38 = cid (ack). One message in flight (a second IRQ before the ack corrupts the list).
+- bstinput inpOnReceive: u32 type at +0: 0 keyboard (u8 set-1 scancode at +4 into serio
+  "bstkbd"; 0xFF = sysrq escape), 1 IME (s32 len at +4, bytes at +8 -> /dev/bst_ime),
+  2 touch, 3 gamepad, 4 control ({4,0} = /system/bin/bstshutdown).
+- Touch = 132 B: type 2 + 16 x {u32 x, u32 y} (MT protocol A, ABS_MT_POSITION_X/Y 0..32767,
+  0x7fffffff = no contact); each message is a full snapshot; all-none = lift.
+Implementation (bst_vmsg.c): push queue (serialised by the 0x38 ack, touch moves coalesced),
+BAR0+0x28 deasserts INTx and resets shm+0x1c to 0xFFFFFFFF; a QEMU abs+btn input handler
+maps the left button + absolute position (QEMU abs range 0..0x7fff = the device's range) to
+touch frames. It is re-activated at machine-init-done so it is first in QEMU's handler list
+(unbound: binding to a console hides it from the absolute-mode check).
+Fix: shm+0x1c was initialised to 0 = "cid 0 pending" on every shared-IRQ ISR run, causing
+the spurious "atkbd serio2: Unknown key pressed (code 0x0 on bstkbd)" lines (now 0).
+Note: QEMU's VNC server switches a client to absolute mode only on SetEncodings (real viewers
+send it; dev/tools/vnc_tap.py now does).
+Result p68D: a VNC click on App Center opens com.bluestacks.gamecenter/AppCenterActivity
+(dev/shots/phase68_after_tap.png).
+
 ## 11. Next
 
 - Make the good path the default: PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0, pristine initramfs.

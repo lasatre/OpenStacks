@@ -1,0 +1,932 @@
+
+/mnt/f/Projects/BluestacksReversing/qemu_test/initramfs_x/boot/bstmods/bstvmsg.ko:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <vmsgFopsOpen>:
+   0:	push   rbp
+   1:	xor    eax,eax
+   3:	mov    QWORD PTR [rsi+0xc8],0xffffffffffffffff
+   e:	mov    rbp,rsp
+  11:	pop    rbp
+  12:	ret
+  13:	data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000020 <vmsgFopsRelease>:
+  20:	push   rbp
+  21:	mov    rbp,rsp
+  24:	sub    rsp,0x10
+  28:	mov    QWORD PTR [rbp-0x8],r12
+  2c:	mov    QWORD PTR [rbp-0x10],rbx
+  30:	mov    r12,rsi
+  33:	mov    rbx,QWORD PTR [rsi+0xc8]
+  3a:	test   ebx,ebx
+  3c:	jns    4a <vmsgFopsRelease+0x2a>
+  3e:	xor    eax,eax
+  40:	mov    rbx,QWORD PTR [rbp-0x10]
+  44:	mov    r12,QWORD PTR [rbp-0x8]
+  48:	leave
+  49:	ret
+  4a:	mov    esi,DWORD PTR gs:[rip+0x0]        # 51 <vmsgFopsRelease+0x31>
+			4d: R_X86_64_PC32	cpu_number-0x4
+  51:	mov    rdx,0x0
+			54: R_X86_64_32S	.rodata+0x10
+  58:	mov    ecx,ebx
+  5a:	mov    rdi,0x0
+			5d: R_X86_64_32S	.rodata.str1.8
+  61:	xor    eax,eax
+  63:	call   68 <vmsgFopsRelease+0x48>
+			64: R_X86_64_PC32	printk-0x4
+  68:	mfence
+  6b:	mov    rax,QWORD PTR [rip+0x0]        # 72 <vmsgFopsRelease+0x52>
+			6e: R_X86_64_PC32	.data+0x44
+  72:	mov    DWORD PTR [rax+0x20],ebx
+  75:	mov    QWORD PTR [r12+0xc8],0xffffffffffffffff
+  81:	jmp    3e <vmsgFopsRelease+0x1e>
+  83:	data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000090 <vmsgPciRemove>:
+  90:	push   rbp
+  91:	mov    rbp,rsp
+  94:	push   rbx
+  95:	mov    rbx,rdi
+  98:	sub    rsp,0x8
+  9c:	call   a1 <vmsgPciRemove+0x11>
+			9d: R_X86_64_PC32	pci_free_irq_vectors-0x4
+  a1:	mov    rdi,QWORD PTR [rip+0x0]        # a8 <vmsgPciRemove+0x18>
+			a4: R_X86_64_PC32	.data+0x54
+  a8:	call   ad <vmsgPciRemove+0x1d>
+			a9: R_X86_64_PC32	iounmap-0x4
+  ad:	mov    rdi,QWORD PTR [rip+0x0]        # b4 <vmsgPciRemove+0x24>
+			b0: R_X86_64_PC32	.data+0x44
+  b4:	call   b9 <vmsgPciRemove+0x29>
+			b5: R_X86_64_PC32	iounmap-0x4
+  b9:	mov    rdi,rbx
+  bc:	call   c1 <vmsgPciRemove+0x31>
+			bd: R_X86_64_PC32	pci_disable_device-0x4
+  c1:	mov    rdi,rbx
+  c4:	call   c9 <vmsgPciRemove+0x39>
+			c5: R_X86_64_PC32	pci_release_regions-0x4
+  c9:	add    rsp,0x8
+  cd:	pop    rbx
+  ce:	pop    rbp
+  cf:	ret
+
+00000000000000d0 <vmsgPciProbe>:
+  d0:	push   rbp
+  d1:	mov    rbp,rsp
+  d4:	push   r12
+  d6:	push   rbx
+  d7:	mov    rbx,rdi
+  da:	mov    esi,DWORD PTR gs:[rip+0x0]        # e1 <vmsgPciProbe+0x11>
+			dd: R_X86_64_PC32	cpu_number-0x4
+  e1:	mov    rdx,0x0
+			e4: R_X86_64_32S	.rodata+0x20
+  e8:	mov    rdi,0x0
+			eb: R_X86_64_32S	.rodata.str1.1
+  ef:	xor    eax,eax
+  f1:	call   f6 <vmsgPciProbe+0x26>
+			f2: R_X86_64_PC32	printk-0x4
+  f6:	mov    rdi,rbx
+  f9:	mov    QWORD PTR [rip+0x0],rbx        # 100 <vmsgPciProbe+0x30>
+			fc: R_X86_64_PC32	.data+0x3c
+ 100:	call   105 <vmsgPciProbe+0x35>
+			101: R_X86_64_PC32	pci_enable_device-0x4
+ 105:	test   eax,eax
+ 107:	mov    r12d,eax
+ 10a:	js     1ec <vmsgPciProbe+0x11c>
+ 110:	cmp    QWORD PTR [rbx+0x448],0x0
+ 118:	je     1cf <vmsgPciProbe+0xff>
+ 11e:	cmp    QWORD PTR [rbx+0x4a8],0x0
+ 126:	je     1b2 <vmsgPciProbe+0xe2>
+ 12c:	mov    rsi,0x0
+			12f: R_X86_64_32S	.rodata.str1.1+0x3c
+ 133:	mov    rdi,rbx
+ 136:	call   13b <vmsgPciProbe+0x6b>
+			137: R_X86_64_PC32	pci_request_regions-0x4
+ 13b:	test   eax,eax
+ 13d:	mov    r12d,eax
+ 140:	js     19b <vmsgPciProbe+0xcb>
+ 142:	mov    rdi,QWORD PTR [rbx+0x448]
+ 149:	mov    rax,QWORD PTR [rbx+0x450]
+ 150:	test   rdi,rdi
+ 153:	je     192 <vmsgPciProbe+0xc2>
+ 155:	sub    rax,rdi
+ 158:	lea    rsi,[rax+0x1]
+ 15c:	call   161 <vmsgPciProbe+0x91>
+			15d: R_X86_64_PC32	ioremap_nocache-0x4
+ 161:	test   rax,rax
+ 164:	mov    QWORD PTR [rip+0x0],rax        # 16b <vmsgPciProbe+0x9b>
+			167: R_X86_64_PC32	.data+0x44
+ 16b:	jne    205 <vmsgPciProbe+0x135>
+ 171:	lea    rdi,[rbx+0xa8]
+ 178:	mov    rsi,0x0
+			17b: R_X86_64_32S	.rodata.str1.1+0x5e
+ 17f:	mov    r12d,0xfffffff0
+ 185:	call   18a <vmsgPciProbe+0xba>
+			186: R_X86_64_PC32	_dev_err-0x4
+ 18a:	pop    rbx
+ 18b:	mov    eax,r12d
+ 18e:	pop    r12
+ 190:	pop    rbp
+ 191:	ret
+ 192:	xor    esi,esi
+ 194:	test   rax,rax
+ 197:	jne    155 <vmsgPciProbe+0x85>
+ 199:	jmp    15c <vmsgPciProbe+0x8c>
+ 19b:	lea    rdi,[rbx+0xa8]
+ 1a2:	mov    rsi,0x0
+			1a5: R_X86_64_32S	.rodata.str1.1+0x44
+ 1a9:	xor    eax,eax
+ 1ab:	call   1b0 <vmsgPciProbe+0xe0>
+			1ac: R_X86_64_PC32	_dev_err-0x4
+ 1b0:	jmp    18a <vmsgPciProbe+0xba>
+ 1b2:	lea    rdi,[rbx+0xa8]
+ 1b9:	mov    rsi,0x0
+			1bc: R_X86_64_32S	.rodata.str1.1+0x29
+ 1c0:	xor    eax,eax
+ 1c2:	mov    r12d,0xfffffffa
+ 1c8:	call   1cd <vmsgPciProbe+0xfd>
+			1c9: R_X86_64_PC32	_dev_err-0x4
+ 1cd:	jmp    18a <vmsgPciProbe+0xba>
+ 1cf:	lea    rdi,[rbx+0xa8]
+ 1d6:	mov    rsi,0x0
+			1d9: R_X86_64_32S	.rodata.str1.1+0x16
+ 1dd:	xor    eax,eax
+ 1df:	mov    r12d,0xfffffffa
+ 1e5:	call   1ea <vmsgPciProbe+0x11a>
+			1e6: R_X86_64_PC32	_dev_err-0x4
+ 1ea:	jmp    18a <vmsgPciProbe+0xba>
+ 1ec:	mov    esi,DWORD PTR gs:[rip+0x0]        # 1f3 <vmsgPciProbe+0x123>
+			1ef: R_X86_64_PC32	cpu_number-0x4
+ 1f3:	mov    rdi,0x0
+			1f6: R_X86_64_32S	.rodata.str1.8+0x28
+ 1fa:	mov    edx,eax
+ 1fc:	xor    eax,eax
+ 1fe:	call   203 <vmsgPciProbe+0x133>
+			1ff: R_X86_64_PC32	printk-0x4
+ 203:	jmp    18a <vmsgPciProbe+0xba>
+ 205:	mov    rdx,QWORD PTR [rbx+0x448]
+ 20c:	test   rdx,rdx
+ 20f:	jne    21d <vmsgPciProbe+0x14d>
+ 211:	xor    ecx,ecx
+ 213:	cmp    QWORD PTR [rbx+0x450],0x0
+ 21b:	je     22b <vmsgPciProbe+0x15b>
+ 21d:	mov    rcx,QWORD PTR [rbx+0x450]
+ 224:	add    rcx,0x1
+ 228:	sub    rcx,rdx
+ 22b:	mov    esi,DWORD PTR gs:[rip+0x0]        # 232 <vmsgPciProbe+0x162>
+			22e: R_X86_64_PC32	cpu_number-0x4
+ 232:	mov    rdi,0x0
+			235: R_X86_64_32S	.rodata.str1.8+0x58
+ 239:	mov    rdx,rax
+ 23c:	xor    eax,eax
+ 23e:	call   243 <vmsgPciProbe+0x173>
+			23f: R_X86_64_PC32	printk-0x4
+ 243:	mov    rdi,QWORD PTR [rbx+0x4a8]
+ 24a:	test   rdi,rdi
+ 24d:	mov    QWORD PTR [rip+0x0],rdi        # 254 <vmsgPciProbe+0x184>
+			250: R_X86_64_PC32	.data+0x4c
+ 254:	jne    262 <vmsgPciProbe+0x192>
+ 256:	xor    esi,esi
+ 258:	cmp    QWORD PTR [rbx+0x4b0],0x0
+ 260:	je     270 <vmsgPciProbe+0x1a0>
+ 262:	mov    rsi,QWORD PTR [rbx+0x4b0]
+ 269:	add    rsi,0x1
+ 26d:	sub    rsi,rdi
+ 270:	call   275 <vmsgPciProbe+0x1a5>
+			271: R_X86_64_PC32	ioremap_nocache-0x4
+ 275:	test   rax,rax
+ 278:	mov    QWORD PTR [rip+0x0],rax        # 27f <vmsgPciProbe+0x1af>
+			27b: R_X86_64_PC32	.data+0x54
+ 27f:	je     2d0 <vmsgPciProbe+0x200>
+ 281:	mov    edi,DWORD PTR [rbx+0x444]
+ 287:	mov    r9,0x0
+			28a: R_X86_64_32S	.data+0x40
+ 28e:	mov    r8,0x0
+			291: R_X86_64_32S	.rodata.str1.1+0x3c
+ 295:	mov    ecx,0x80
+ 29a:	mov    rdx,0x0
+			29d: R_X86_64_32S	.text+0x3b0
+ 2a1:	mov    rsi,0x0
+			2a4: R_X86_64_32S	.text+0x460
+ 2a8:	call   2ad <vmsgPciProbe+0x1dd>
+			2a9: R_X86_64_PC32	request_threaded_irq-0x4
+ 2ad:	mov    r12d,eax
+ 2b0:	mov    esi,DWORD PTR gs:[rip+0x0]        # 2b7 <vmsgPciProbe+0x1e7>
+			2b3: R_X86_64_PC32	cpu_number-0x4
+ 2b7:	test   eax,eax
+ 2b9:	jns    2ee <vmsgPciProbe+0x21e>
+ 2bb:	mov    edx,eax
+ 2bd:	mov    rdi,0x0
+			2c0: R_X86_64_32S	.rodata.str1.8+0x88
+ 2c4:	xor    eax,eax
+ 2c6:	call   2cb <vmsgPciProbe+0x1fb>
+			2c7: R_X86_64_PC32	printk-0x4
+ 2cb:	jmp    18a <vmsgPciProbe+0xba>
+ 2d0:	lea    rdi,[rbx+0xa8]
+ 2d7:	mov    rsi,0x0
+			2da: R_X86_64_32S	.rodata.str1.1+0x7b
+ 2de:	mov    r12d,0xfffffff0
+ 2e4:	call   2e9 <vmsgPciProbe+0x219>
+			2e5: R_X86_64_PC32	_dev_err-0x4
+ 2e9:	jmp    18a <vmsgPciProbe+0xba>
+ 2ee:	mov    edx,DWORD PTR [rbx+0x444]
+ 2f4:	mov    rdi,0x0
+			2f7: R_X86_64_32S	.rodata.str1.1+0x95
+ 2fb:	xor    eax,eax
+ 2fd:	call   302 <vmsgPciProbe+0x232>
+			2fe: R_X86_64_PC32	printk-0x4
+ 302:	mfence
+ 305:	mov    rax,QWORD PTR [rip+0x0]        # 30c <vmsgPciProbe+0x23c>
+			308: R_X86_64_PC32	.data+0x44
+ 30c:	mov    DWORD PTR [rax+0x10],0x0
+ 313:	mov    rax,QWORD PTR [rip+0x0]        # 31a <vmsgPciProbe+0x24a>
+			316: R_X86_64_PC32	.data+0x54
+ 31a:	mov    r8d,DWORD PTR [rax]
+ 31d:	mov    esi,DWORD PTR gs:[rip+0x0]        # 324 <vmsgPciProbe+0x254>
+			320: R_X86_64_PC32	cpu_number-0x4
+ 324:	mov    ecx,0xd7
+ 329:	mov    rdx,0x0
+			32c: R_X86_64_32S	.rodata+0x20
+ 330:	mov    rdi,0x0
+			333: R_X86_64_32S	.rodata.str1.8+0xb0
+ 337:	xor    eax,eax
+ 339:	xor    ebx,ebx
+ 33b:	mov    r12d,0xfffffff4
+ 341:	call   346 <vmsgPciProbe+0x276>
+			342: R_X86_64_PC32	printk-0x4
+ 346:	mov    rax,QWORD PTR [rip+0x0]        # 34d <vmsgPciProbe+0x27d>
+			349: R_X86_64_PC32	.data+0x54
+ 34d:	mov    esi,0x6080c0
+ 352:	mov    edi,DWORD PTR [rax]
+ 354:	movsxd rdi,edi
+ 357:	imul   rdi,rdi,0x60
+ 35b:	call   360 <vmsgPciProbe+0x290>
+			35c: R_X86_64_PC32	__kmalloc-0x4
+ 360:	test   rax,rax
+ 363:	mov    QWORD PTR [rip+0x0],rax        # 36a <vmsgPciProbe+0x29a>
+			366: R_X86_64_PC32	.data+0x7c
+ 36a:	je     18a <vmsgPciProbe+0xba>
+ 370:	mov    rax,QWORD PTR [rip+0x0]        # 377 <vmsgPciProbe+0x2a7>
+			373: R_X86_64_PC32	.data+0x54
+ 377:	mov    eax,DWORD PTR [rax]
+ 379:	cmp    ebx,eax
+ 37b:	jge    3a7 <vmsgPciProbe+0x2d7>
+ 37d:	movsxd rdi,ebx
+ 380:	mov    rdx,0x0
+			383: R_X86_64_32S	.bss
+ 387:	mov    rsi,0x0
+			38a: R_X86_64_32S	.rodata.str1.8+0xe0
+ 38e:	imul   rdi,rdi,0x60
+ 392:	add    ebx,0x1
+ 395:	add    rdi,QWORD PTR [rip+0x0]        # 39c <vmsgPciProbe+0x2cc>
+			398: R_X86_64_PC32	.data+0x7c
+ 39c:	add    rdi,0x48
+ 3a0:	call   3a5 <vmsgPciProbe+0x2d5>
+			3a1: R_X86_64_PC32	__init_waitqueue_head-0x4
+ 3a5:	jmp    370 <vmsgPciProbe+0x2a0>
+ 3a7:	xor    r12d,r12d
+ 3aa:	jmp    18a <vmsgPciProbe+0xba>
+ 3af:	nop
+
+00000000000003b0 <vmsgIsrThreaded>:
+ 3b0:	push   rbp
+ 3b1:	mov    rdi,0x0
+			3b4: R_X86_64_32S	.data+0x98
+ 3b8:	mov    rbp,rsp
+ 3bb:	push   rbx
+ 3bc:	sub    rsp,0x8
+ 3c0:	call   3c5 <vmsgIsrThreaded+0x15>
+			3c1: R_X86_64_PC32	_raw_spin_lock-0x4
+ 3c5:	mov    rax,QWORD PTR [rip+0x0]        # 3cc <vmsgIsrThreaded+0x1c>
+			3c8: R_X86_64_PC32	.data+0x84
+ 3cc:	cmp    rax,0x0
+			3ce: R_X86_64_32S	.data+0x88
+ 3d2:	je     447 <vmsgIsrThreaded+0x97>
+ 3d4:	mov    rbx,QWORD PTR [rip+0x0]        # 3db <vmsgIsrThreaded+0x2b>
+			3d7: R_X86_64_PC32	.data+0x84
+ 3db:	mov    rdi,0x0
+			3de: R_X86_64_32S	.data+0x98
+ 3e2:	mov    rdx,QWORD PTR [rbx]
+ 3e5:	mov    rax,QWORD PTR [rbx+0x8]
+ 3e9:	mov    QWORD PTR [rdx+0x8],rax
+ 3ed:	mov    QWORD PTR [rax],rdx
+ 3f0:	movabs rdx,0xdead000000000200
+ 3fa:	movabs rax,0xdead000000000100
+ 404:	mov    QWORD PTR [rbx+0x8],rdx
+ 408:	mov    QWORD PTR [rbx],rax
+ 40b:	call   410 <vmsgIsrThreaded+0x60>
+			40c: R_X86_64_PC32	_raw_spin_unlock-0x4
+ 410:	mov    edi,DWORD PTR [rbx+0x30]
+ 413:	movsxd rax,edi
+ 416:	lea    rax,[rax+rax*2]
+ 41a:	shl    rax,0x5
+ 41e:	add    rax,QWORD PTR [rip+0x0]        # 425 <vmsgIsrThreaded+0x75>
+			421: R_X86_64_PC32	.data+0x7c
+ 425:	mov    rsi,QWORD PTR [rax+0x30]
+ 429:	call   QWORD PTR [rax]
+ 42b:	mov    edx,DWORD PTR [rbx+0x30]
+ 42e:	mfence
+ 431:	mov    rax,QWORD PTR [rip+0x0]        # 438 <vmsgIsrThreaded+0x88>
+			434: R_X86_64_PC32	.data+0x44
+ 438:	mov    DWORD PTR [rax+0x38],edx
+ 43b:	add    rsp,0x8
+ 43f:	mov    eax,0x1
+ 444:	pop    rbx
+ 445:	pop    rbp
+ 446:	ret
+ 447:	mov    rdi,0x0
+			44a: R_X86_64_32S	.rodata.str1.1+0xb3
+ 44e:	xor    eax,eax
+ 450:	call   455 <vmsgIsrThreaded+0xa5>
+			451: R_X86_64_PC32	panic-0x4
+ 455:	data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000460 <vmsgIsr>:
+ 460:	push   rbp
+ 461:	mov    rbp,rsp
+ 464:	push   rbx
+ 465:	sub    rsp,0x8
+ 469:	mov    rax,QWORD PTR [rip+0x0]        # 470 <vmsgIsr+0x10>
+			46c: R_X86_64_PC32	.data+0x54
+ 470:	mov    edx,DWORD PTR [rax+0x1c]
+ 473:	xor    eax,eax
+ 475:	test   edx,edx
+ 477:	js     4ea <vmsgIsr+0x8a>
+ 479:	movsxd rdx,edx
+ 47c:	mov    rdi,QWORD PTR [rip+0x0]        # 483 <vmsgIsr+0x23>
+			47f: R_X86_64_PC32	.data+0x7c
+ 483:	lea    rbx,[rdx+rdx*2]
+ 487:	shl    rbx,0x5
+ 48b:	add    rdi,rbx
+ 48e:	cmp    QWORD PTR [rdi],0x0
+ 492:	je     4f1 <vmsgIsr+0x91>
+ 494:	mov    rdi,0x0
+			497: R_X86_64_32S	.data+0x98
+ 49b:	call   4a0 <vmsgIsr+0x40>
+			49c: R_X86_64_PC32	_raw_spin_lock-0x4
+ 4a0:	add    rbx,QWORD PTR [rip+0x0]        # 4a7 <vmsgIsr+0x47>
+			4a3: R_X86_64_PC32	.data+0x7c
+ 4a7:	mov    rax,QWORD PTR [rip+0x0]        # 4ae <vmsgIsr+0x4e>
+			4aa: R_X86_64_PC32	.data+0x8c
+ 4ae:	mov    rdi,0x0
+			4b1: R_X86_64_32S	.data+0x98
+ 4b5:	lea    rdx,[rbx+0x8]
+ 4b9:	mov    QWORD PTR [rip+0x0],rdx        # 4c0 <vmsgIsr+0x60>
+			4bc: R_X86_64_PC32	.data+0x8c
+ 4c0:	mov    QWORD PTR [rbx+0x10],rax
+ 4c4:	mov    QWORD PTR [rbx+0x8],0x0
+			4c8: R_X86_64_32S	.data+0x88
+ 4cc:	mov    QWORD PTR [rax],rdx
+ 4cf:	call   4d4 <vmsgIsr+0x74>
+			4d0: R_X86_64_PC32	_raw_spin_unlock-0x4
+ 4d4:	mov    eax,0x2
+ 4d9:	mfence
+ 4dc:	mov    rdx,QWORD PTR [rip+0x0]        # 4e3 <vmsgIsr+0x83>
+			4df: R_X86_64_PC32	.data+0x44
+ 4e3:	mov    DWORD PTR [rdx+0x28],0x0
+ 4ea:	add    rsp,0x8
+ 4ee:	pop    rbx
+ 4ef:	pop    rbp
+ 4f0:	ret
+ 4f1:	add    rdi,0x48
+ 4f5:	xor    ecx,ecx
+ 4f7:	mov    edx,0x1
+ 4fc:	mov    esi,0x1
+ 501:	call   506 <vmsgIsr+0xa6>
+			502: R_X86_64_PC32	__wake_up-0x4
+ 506:	mov    eax,0x1
+ 50b:	jmp    4d9 <vmsgIsr+0x79>
+ 50d:	nop    DWORD PTR [rax]
+
+0000000000000510 <vmsgFopsMmap>:
+ 510:	push   rbp
+ 511:	mov    rax,rsi
+ 514:	mov    rbp,rsp
+ 517:	push   rbx
+ 518:	sub    rsp,0x8
+ 51c:	mov    ecx,DWORD PTR [rdi+0xc8]
+ 522:	mov    rdx,QWORD PTR [rip+0x0]        # 529 <vmsgFopsMmap+0x19>
+			525: R_X86_64_PC32	.data+0x54
+ 529:	test   ecx,ecx
+ 52b:	js     595 <vmsgFopsMmap+0x85>
+ 52d:	mov    esi,DWORD PTR [rdx]
+ 52f:	cmp    ecx,esi
+ 531:	jge    595 <vmsgFopsMmap+0x85>
+ 533:	movsxd rcx,ecx
+ 536:	mov    rsi,QWORD PTR [rax]
+ 539:	lea    rcx,[rcx+rcx*2]
+ 53d:	shl    rcx,0x5
+ 541:	add    rcx,QWORD PTR [rip+0x0]        # 548 <vmsgFopsMmap+0x38>
+			544: R_X86_64_PC32	.data+0x7c
+ 548:	mov    edx,DWORD PTR [rcx+0x18]
+ 54b:	mov    r8d,DWORD PTR [rcx+0x24]
+ 54f:	add    r8d,DWORD PTR [rcx+0x1c]
+ 553:	mov    rcx,QWORD PTR [rax+0x8]
+ 557:	sub    ecx,esi
+ 559:	sub    r8d,edx
+ 55c:	cmp    ecx,r8d
+ 55f:	jne    5db <vmsgFopsMmap+0xcb>
+ 561:	add    rdx,QWORD PTR [rip+0x0]        # 568 <vmsgFopsMmap+0x58>
+			564: R_X86_64_PC32	.data+0x4c
+ 568:	mov    r8,QWORD PTR [rax+0x48]
+ 56c:	add    ecx,0xfff
+ 572:	and    ecx,0xfffff000
+ 578:	mov    rdi,rax
+ 57b:	shr    rdx,0xc
+ 57f:	call   584 <vmsgFopsMmap+0x74>
+			580: R_X86_64_PC32	remap_pfn_range-0x4
+ 584:	test   eax,eax
+ 586:	mov    ebx,eax
+ 588:	js     5bb <vmsgFopsMmap+0xab>
+ 58a:	xor    ebx,ebx
+ 58c:	add    rsp,0x8
+ 590:	mov    eax,ebx
+ 592:	pop    rbx
+ 593:	pop    rbp
+ 594:	ret
+ 595:	mov    r8d,DWORD PTR [rdx]
+ 598:	mov    esi,DWORD PTR gs:[rip+0x0]        # 59f <vmsgFopsMmap+0x8f>
+			59b: R_X86_64_PC32	cpu_number-0x4
+ 59f:	mov    rdx,0x0
+			5a2: R_X86_64_32S	.rodata+0x96
+ 5a6:	mov    rdi,0x0
+			5a9: R_X86_64_32S	.rodata.str1.8+0x108
+ 5ad:	xor    eax,eax
+ 5af:	call   5b4 <vmsgFopsMmap+0xa4>
+			5b0: R_X86_64_PC32	printk-0x4
+ 5b4:	mov    ebx,0xffffffea
+ 5b9:	jmp    58c <vmsgFopsMmap+0x7c>
+ 5bb:	mov    esi,DWORD PTR gs:[rip+0x0]        # 5c2 <vmsgFopsMmap+0xb2>
+			5be: R_X86_64_PC32	cpu_number-0x4
+ 5c2:	mov    rdx,0x0
+			5c5: R_X86_64_32S	.rodata+0x96
+ 5c9:	mov    ecx,eax
+ 5cb:	mov    rdi,0x0
+			5ce: R_X86_64_32S	.rodata.str1.8+0x180
+ 5d2:	xor    eax,eax
+ 5d4:	call   5d9 <vmsgFopsMmap+0xc9>
+			5d5: R_X86_64_PC32	printk-0x4
+ 5d9:	jmp    58c <vmsgFopsMmap+0x7c>
+ 5db:	mov    esi,DWORD PTR gs:[rip+0x0]        # 5e2 <vmsgFopsMmap+0xd2>
+			5de: R_X86_64_PC32	cpu_number-0x4
+ 5e2:	mov    rdx,0x0
+			5e5: R_X86_64_32S	.rodata+0x96
+ 5e9:	mov    rdi,0x0
+			5ec: R_X86_64_32S	.rodata.str1.8+0x140
+ 5f0:	xor    eax,eax
+ 5f2:	call   5f7 <vmsgFopsMmap+0xe7>
+			5f3: R_X86_64_PC32	printk-0x4
+ 5f7:	mov    ebx,0xffffffea
+ 5fc:	jmp    58c <vmsgFopsMmap+0x7c>
+ 5fe:	xchg   ax,ax
+
+0000000000000600 <vmsgConnect>:
+ 600:	push   rbp
+ 601:	mov    rbp,rsp
+ 604:	push   r12
+ 606:	mov    r12,rsi
+ 609:	push   rbx
+ 60a:	mov    ebx,edi
+ 60c:	mov    rdi,0x0
+			60f: R_X86_64_32S	.data+0x60
+ 613:	call   618 <vmsgConnect+0x18>
+			614: R_X86_64_PC32	mutex_lock-0x4
+ 618:	mfence
+ 61b:	mov    rax,QWORD PTR [rip+0x0]        # 622 <vmsgConnect+0x22>
+			61e: R_X86_64_PC32	.data+0x44
+ 622:	mov    DWORD PTR [rax+0x18],ebx
+ 625:	mov    rax,QWORD PTR [rip+0x0]        # 62c <vmsgConnect+0x2c>
+			628: R_X86_64_PC32	.data+0x54
+ 62c:	mov    ebx,DWORD PTR [rax+0x4]
+ 62f:	test   ebx,ebx
+ 631:	js     6f8 <vmsgConnect+0xf8>
+ 637:	mov    eax,DWORD PTR [rax]
+ 639:	cmp    ebx,eax
+ 63b:	jge    6f8 <vmsgConnect+0xf8>
+ 641:	movsxd rax,ebx
+ 644:	mov    rdx,QWORD PTR [rip+0x0]        # 64b <vmsgConnect+0x4b>
+			647: R_X86_64_PC32	.data+0x7c
+ 64b:	mov    rdi,0x0
+			64e: R_X86_64_32S	.data+0x60
+ 652:	lea    rax,[rax+rax*2]
+ 656:	shl    rax,0x5
+ 65a:	mov    DWORD PTR [rdx+rax*1+0x38],ebx
+ 65e:	mov    rdx,QWORD PTR [rip+0x0]        # 665 <vmsgConnect+0x65>
+			661: R_X86_64_PC32	.data+0x7c
+ 665:	mov    QWORD PTR [rdx+rax*1],r12
+ 669:	mov    rdx,QWORD PTR [rip+0x0]        # 670 <vmsgConnect+0x70>
+			66c: R_X86_64_PC32	.data+0x54
+ 670:	mov    rcx,QWORD PTR [rip+0x0]        # 677 <vmsgConnect+0x77>
+			673: R_X86_64_PC32	.data+0x7c
+ 677:	mov    esi,DWORD PTR [rdx+0x10]
+ 67a:	mov    DWORD PTR [rcx+rax*1+0x20],esi
+ 67e:	mov    esi,DWORD PTR [rdx+0x14]
+ 681:	mov    rcx,QWORD PTR [rip+0x0]        # 688 <vmsgConnect+0x88>
+			684: R_X86_64_PC32	.data+0x7c
+ 688:	mov    DWORD PTR [rcx+rax*1+0x24],esi
+ 68c:	mov    esi,DWORD PTR [rdx+0x8]
+ 68f:	mov    rcx,QWORD PTR [rip+0x0]        # 696 <vmsgConnect+0x96>
+			692: R_X86_64_PC32	.data+0x7c
+ 696:	add    rsi,rdx
+ 699:	mov    QWORD PTR [rcx+rax*1+0x28],rsi
+ 69e:	mov    esi,DWORD PTR [rdx+0xc]
+ 6a1:	mov    rcx,QWORD PTR [rip+0x0]        # 6a8 <vmsgConnect+0xa8>
+			6a4: R_X86_64_PC32	.data+0x7c
+ 6a8:	add    rsi,rdx
+ 6ab:	mov    QWORD PTR [rcx+rax*1+0x30],rsi
+ 6b0:	mov    ecx,DWORD PTR [rdx+0x8]
+ 6b3:	mov    rdx,QWORD PTR [rip+0x0]        # 6ba <vmsgConnect+0xba>
+			6b6: R_X86_64_PC32	.data+0x7c
+ 6ba:	mov    DWORD PTR [rdx+rax*1+0x18],ecx
+ 6be:	mov    rdx,QWORD PTR [rip+0x0]        # 6c5 <vmsgConnect+0xc5>
+			6c1: R_X86_64_PC32	.data+0x54
+ 6c5:	mov    ecx,DWORD PTR [rdx+0xc]
+ 6c8:	mov    rdx,QWORD PTR [rip+0x0]        # 6cf <vmsgConnect+0xcf>
+			6cb: R_X86_64_PC32	.data+0x7c
+ 6cf:	mov    DWORD PTR [rdx+rax*1+0x1c],ecx
+ 6d3:	mov    rdx,QWORD PTR [rip+0x0]        # 6da <vmsgConnect+0xda>
+			6d6: R_X86_64_PC32	.data+0x54
+ 6da:	mov    ecx,DWORD PTR [rdx+0x18]
+ 6dd:	add    rdx,rcx
+ 6e0:	mov    rcx,QWORD PTR [rip+0x0]        # 6e7 <vmsgConnect+0xe7>
+			6e3: R_X86_64_PC32	.data+0x7c
+ 6e7:	mov    QWORD PTR [rcx+rax*1+0x40],rdx
+ 6ec:	call   6f1 <vmsgConnect+0xf1>
+			6ed: R_X86_64_PC32	mutex_unlock-0x4
+ 6f1:	mov    eax,ebx
+ 6f3:	pop    rbx
+ 6f4:	pop    r12
+ 6f6:	pop    rbp
+ 6f7:	ret
+ 6f8:	mov    esi,ebx
+ 6fa:	mov    rdi,0x0
+			6fd: R_X86_64_32S	.rodata.str1.1+0xcc
+ 701:	xor    eax,eax
+ 703:	call   708 <vmsgConnect+0x108>
+			704: R_X86_64_PC32	panic-0x4
+ 708:	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000000710 <vmsgIoctlConnect>:
+ 710:	push   rbp
+ 711:	mov    rbp,rsp
+ 714:	push   r12
+ 716:	mov    r12,rdi
+ 719:	lea    rdi,[rbp-0x24]
+ 71d:	push   rbx
+ 71e:	mov    rbx,rdx
+ 721:	mov    edx,0x14
+ 726:	mov    rsi,rbx
+ 729:	sub    rsp,0x20
+ 72d:	call   732 <vmsgIoctlConnect+0x22>
+			72e: R_X86_64_PC32	_copy_from_user-0x4
+ 732:	test   eax,eax
+ 734:	jne    795 <vmsgIoctlConnect+0x85>
+ 736:	mov    edi,DWORD PTR [rbp-0x24]
+ 739:	xor    esi,esi
+ 73b:	call   740 <vmsgIoctlConnect+0x30>
+			73c: R_X86_64_PC32	vmsgConnect-0x4
+ 740:	cdqe
+ 742:	lea    rsi,[rbp-0x24]
+ 746:	mov    rdi,rbx
+ 749:	mov    QWORD PTR [r12+0xc8],rax
+ 751:	lea    rax,[rax+rax*2]
+ 755:	mov    DWORD PTR [rbp-0x18],0x0
+ 75c:	shl    rax,0x5
+ 760:	add    rax,QWORD PTR [rip+0x0]        # 767 <vmsgIoctlConnect+0x57>
+			763: R_X86_64_PC32	.data+0x7c
+ 767:	mov    edx,DWORD PTR [rax+0x20]
+ 76a:	mov    DWORD PTR [rbp-0x20],edx
+ 76d:	mov    edx,DWORD PTR [rax+0x24]
+ 770:	mov    DWORD PTR [rbp-0x1c],edx
+ 773:	mov    edx,DWORD PTR [rax+0x1c]
+ 776:	sub    edx,DWORD PTR [rax+0x18]
+ 779:	mov    DWORD PTR [rbp-0x14],edx
+ 77c:	mov    edx,0x14
+ 781:	call   786 <vmsgIoctlConnect+0x76>
+			782: R_X86_64_PC32	_copy_to_user-0x4
+ 786:	test   eax,eax
+ 788:	jne    7bc <vmsgIoctlConnect+0xac>
+ 78a:	xor    eax,eax
+ 78c:	add    rsp,0x20
+ 790:	pop    rbx
+ 791:	pop    r12
+ 793:	pop    rbp
+ 794:	ret
+ 795:	mov    esi,DWORD PTR gs:[rip+0x0]        # 79c <vmsgIoctlConnect+0x8c>
+			798: R_X86_64_PC32	cpu_number-0x4
+ 79c:	mov    rdx,0x0
+			79f: R_X86_64_32S	.rodata+0x30
+ 7a3:	mov    ecx,eax
+ 7a5:	mov    rdi,0x0
+			7a8: R_X86_64_32S	.rodata.str1.8+0x1e8
+ 7ac:	xor    eax,eax
+ 7ae:	call   7b3 <vmsgIoctlConnect+0xa3>
+			7af: R_X86_64_PC32	printk-0x4
+ 7b3:	mov    rax,0xfffffffffffffff2
+ 7ba:	jmp    78c <vmsgIoctlConnect+0x7c>
+ 7bc:	mov    esi,DWORD PTR gs:[rip+0x0]        # 7c3 <vmsgIoctlConnect+0xb3>
+			7bf: R_X86_64_PC32	cpu_number-0x4
+ 7c3:	mov    rdx,0x0
+			7c6: R_X86_64_32S	.rodata+0x30
+ 7ca:	mov    ecx,eax
+ 7cc:	mov    rdi,0x0
+			7cf: R_X86_64_32S	.rodata.str1.8+0x220
+ 7d3:	xor    eax,eax
+ 7d5:	call   7da <vmsgIoctlConnect+0xca>
+			7d6: R_X86_64_PC32	printk-0x4
+ 7da:	mov    rax,0xfffffffffffffff2
+ 7e1:	jmp    78c <vmsgIoctlConnect+0x7c>
+ 7e3:	data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+00000000000007f0 <vmsgIoctlDisconnect>:
+ 7f0:	push   rbp
+ 7f1:	mov    rbp,rsp
+ 7f4:	sub    rsp,0x10
+ 7f8:	mov    QWORD PTR [rbp-0x8],r12
+ 7fc:	mov    QWORD PTR [rbp-0x10],rbx
+ 800:	mov    r12,rdi
+ 803:	mov    rbx,QWORD PTR [rdi+0xc8]
+ 80a:	test   ebx,ebx
+ 80c:	jns    81a <vmsgIoctlDisconnect+0x2a>
+ 80e:	xor    eax,eax
+ 810:	mov    rbx,QWORD PTR [rbp-0x10]
+ 814:	mov    r12,QWORD PTR [rbp-0x8]
+ 818:	leave
+ 819:	ret
+ 81a:	mov    esi,DWORD PTR gs:[rip+0x0]        # 821 <vmsgIoctlDisconnect+0x31>
+			81d: R_X86_64_PC32	cpu_number-0x4
+ 821:	mov    rdx,0x0
+			824: R_X86_64_32S	.rodata+0x50
+ 828:	mov    ecx,ebx
+ 82a:	mov    rdi,0x0
+			82d: R_X86_64_32S	.rodata.str1.8
+ 831:	xor    eax,eax
+ 833:	call   838 <vmsgIoctlDisconnect+0x48>
+			834: R_X86_64_PC32	printk-0x4
+ 838:	mfence
+ 83b:	mov    rax,QWORD PTR [rip+0x0]        # 842 <vmsgIoctlDisconnect+0x52>
+			83e: R_X86_64_PC32	.data+0x44
+ 842:	mov    DWORD PTR [rax+0x20],ebx
+ 845:	mov    QWORD PTR [r12+0xc8],0xffffffffffffffff
+ 851:	jmp    80e <vmsgIoctlDisconnect+0x1e>
+ 853:	data16 data16 data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+0000000000000860 <vmsgIoctlProcessRequest>:
+ 860:	push   rbp
+ 861:	mov    rbp,rsp
+ 864:	push   r15
+ 866:	push   r14
+ 868:	push   r13
+ 86a:	push   r12
+ 86c:	push   rbx
+ 86d:	sub    rsp,0x38
+ 871:	mov    rax,QWORD PTR [rdi+0xc8]
+ 878:	test   eax,eax
+ 87a:	mov    ecx,eax
+ 87c:	js     9bd <vmsgIoctlProcessRequest+0x15d>
+ 882:	mov    rdx,QWORD PTR [rip+0x0]        # 889 <vmsgIoctlProcessRequest+0x29>
+			885: R_X86_64_PC32	.data+0x54
+ 889:	mov    edx,DWORD PTR [rdx]
+ 88b:	cmp    eax,edx
+ 88d:	jge    9bd <vmsgIoctlProcessRequest+0x15d>
+ 893:	mfence
+ 896:	mov    rdx,QWORD PTR [rip+0x0]        # 89d <vmsgIoctlProcessRequest+0x3d>
+			899: R_X86_64_PC32	.data+0x44
+ 89d:	movsxd rcx,eax
+ 8a0:	lea    rbx,[rcx+rcx*2]
+ 8a4:	mov    DWORD PTR [rdx+0x30],eax
+ 8a7:	shl    rbx,0x5
+ 8ab:	add    rbx,QWORD PTR [rip+0x0]        # 8b2 <vmsgIoctlProcessRequest+0x52>
+			8ae: R_X86_64_PC32	.data+0x7c
+ 8b2:	mov    rdx,QWORD PTR [rbx+0x40]
+ 8b6:	mov    ecx,DWORD PTR [rdx]
+ 8b8:	cmp    ecx,0x2
+ 8bb:	je     993 <vmsgIoctlProcessRequest+0x133>
+ 8c1:	mov    ecx,DWORD PTR [rdx]
+ 8c3:	xor    eax,eax
+ 8c5:	test   ecx,ecx
+ 8c7:	je     8f7 <vmsgIoctlProcessRequest+0x97>
+ 8c9:	lea    r12,[rbx+0x48]
+ 8cd:	xor    r15d,r15d
+ 8d0:	mov    r13,QWORD PTR gs:0x0
+			8d5: R_X86_64_32S	current_task
+ 8d9:	mov    r14,r13
+ 8dc:	mov    eax,DWORD PTR [rdx]
+ 8de:	cmp    eax,0x1
+ 8e1:	je     906 <vmsgIoctlProcessRequest+0xa6>
+ 8e3:	xor    eax,eax
+ 8e5:	test   r15b,r15b
+ 8e8:	je     8f7 <vmsgIoctlProcessRequest+0x97>
+ 8ea:	mov    rdx,QWORD PTR gs:0x0
+			8ef: R_X86_64_32S	current_task
+ 8f3:	lock or BYTE PTR [rdx],0x4
+ 8f7:	add    rsp,0x38
+ 8fb:	pop    rbx
+ 8fc:	pop    r12
+ 8fe:	pop    r13
+ 900:	pop    r14
+ 902:	pop    r15
+ 904:	pop    rbp
+ 905:	ret
+ 906:	lea    rdi,[rbp-0x58]
+ 90a:	xor    esi,esi
+ 90c:	call   911 <vmsgIoctlProcessRequest+0xb1>
+			90d: R_X86_64_PC32	init_wait_entry-0x4
+ 911:	jmp    925 <vmsgIoctlProcessRequest+0xc5>
+ 913:	test   rax,rax
+ 916:	jne    94f <vmsgIoctlProcessRequest+0xef>
+ 918:	nop    DWORD PTR [rax+rax*1+0x0]
+ 920:	call   925 <vmsgIoctlProcessRequest+0xc5>
+			921: R_X86_64_PC32	schedule-0x4
+ 925:	lea    rsi,[rbp-0x58]
+ 929:	mov    edx,0x1
+ 92e:	mov    rdi,r12
+ 931:	call   936 <vmsgIoctlProcessRequest+0xd6>
+			932: R_X86_64_PC32	prepare_to_wait_event-0x4
+ 936:	mov    rdx,QWORD PTR [rbx+0x40]
+ 93a:	mov    ecx,DWORD PTR [rdx]
+ 93c:	cmp    ecx,0x1
+ 93f:	je     913 <vmsgIoctlProcessRequest+0xb3>
+ 941:	lea    rsi,[rbp-0x58]
+ 945:	mov    rdi,r12
+ 948:	call   94d <vmsgIoctlProcessRequest+0xed>
+			949: R_X86_64_PC32	finish_wait-0x4
+ 94d:	jmp    8e3 <vmsgIoctlProcessRequest+0x83>
+ 94f:	cmp    eax,0xfffffe00
+ 954:	jne    8e3 <vmsgIoctlProcessRequest+0x83>
+ 956:	mov    rax,QWORD PTR [r13+0x0]
+ 95a:	test   al,0x4
+ 95c:	jne    97d <vmsgIoctlProcessRequest+0x11d>
+ 95e:	mov    rax,QWORD PTR [r14]
+ 961:	test   al,0x4
+ 963:	je     8dc <vmsgIoctlProcessRequest+0x7c>
+ 969:	lock and BYTE PTR [r14],0xfb
+ 96e:	mov    r15d,0x1
+ 974:	mov    rdx,QWORD PTR [rbx+0x40]
+ 978:	jmp    8dc <vmsgIoctlProcessRequest+0x7c>
+ 97d:	test   BYTE PTR [r13+0x789],0x1
+ 985:	je     95e <vmsgIoctlProcessRequest+0xfe>
+ 987:	mov    rax,0xfffffffffffffe00
+ 98e:	jmp    8f7 <vmsgIoctlProcessRequest+0x97>
+ 993:	mov    esi,DWORD PTR gs:[rip+0x0]        # 99a <vmsgIoctlProcessRequest+0x13a>
+			996: R_X86_64_PC32	cpu_number-0x4
+ 99a:	mov    rdx,0x0
+			99d: R_X86_64_32S	.rodata+0x70
+ 9a1:	mov    ecx,eax
+ 9a3:	mov    rdi,0x0
+			9a6: R_X86_64_32S	.rodata.str1.8+0x278
+ 9aa:	xor    eax,eax
+ 9ac:	call   9b1 <vmsgIoctlProcessRequest+0x151>
+			9ad: R_X86_64_PC32	printk-0x4
+ 9b1:	mov    rax,0xffffffffffffffea
+ 9b8:	jmp    8f7 <vmsgIoctlProcessRequest+0x97>
+ 9bd:	mov    esi,DWORD PTR gs:[rip+0x0]        # 9c4 <vmsgIoctlProcessRequest+0x164>
+			9c0: R_X86_64_PC32	cpu_number-0x4
+ 9c4:	mov    rdx,0x0
+			9c7: R_X86_64_32S	.rodata+0x70
+ 9cb:	mov    rdi,0x0
+			9ce: R_X86_64_32S	.rodata.str1.8+0x250
+ 9d2:	xor    eax,eax
+ 9d4:	call   9d9 <vmsgIoctlProcessRequest+0x179>
+			9d5: R_X86_64_PC32	printk-0x4
+ 9d9:	mov    rax,0xffffffffffffffea
+ 9e0:	jmp    8f7 <vmsgIoctlProcessRequest+0x97>
+ 9e5:	data16 cs nop WORD PTR [rax+rax*1+0x0]
+
+00000000000009f0 <vmsgFopsIoctl>:
+ 9f0:	cmp    QWORD PTR [rip+0x0],0x0        # 9f8 <vmsgFopsIoctl+0x8>
+			9f3: R_X86_64_PC32	.data+0x3b
+ 9f8:	push   rbp
+ 9f9:	mov    rbp,rsp
+ 9fc:	je     a5e <vmsgFopsIoctl+0x6e>
+ 9fe:	cmp    esi,0x7603
+ a04:	je     a52 <vmsgFopsIoctl+0x62>
+ a06:	cmp    esi,0xc0147601
+ a0c:	je     a4b <vmsgFopsIoctl+0x5b>
+ a0e:	cmp    esi,0x7602
+ a14:	je     a3f <vmsgFopsIoctl+0x4f>
+ a16:	mov    eax,DWORD PTR gs:[rip+0x0]        # a1d <vmsgFopsIoctl+0x2d>
+			a19: R_X86_64_PC32	cpu_number-0x4
+ a1d:	mov    rdx,0x0
+			a20: R_X86_64_32S	.rodata+0x88
+ a24:	mov    ecx,esi
+ a26:	mov    rdi,0x0
+			a29: R_X86_64_32S	.rodata.str1.8+0x2e8
+ a2d:	mov    esi,eax
+ a2f:	xor    eax,eax
+ a31:	call   a36 <vmsgFopsIoctl+0x46>
+			a32: R_X86_64_PC32	printk-0x4
+ a36:	mov    rax,0xffffffffffffffea
+ a3d:	pop    rbp
+ a3e:	ret
+ a3f:	mov    esi,0x7602
+ a44:	call   a49 <vmsgFopsIoctl+0x59>
+			a45: R_X86_64_PC32	vmsgIoctlDisconnect-0x4
+ a49:	pop    rbp
+ a4a:	ret
+ a4b:	call   a50 <vmsgFopsIoctl+0x60>
+			a4c: R_X86_64_PC32	vmsgIoctlConnect-0x4
+ a50:	pop    rbp
+ a51:	ret
+ a52:	mov    esi,0x7603
+ a57:	call   a5c <vmsgFopsIoctl+0x6c>
+			a58: R_X86_64_PC32	vmsgIoctlProcessRequest-0x4
+ a5c:	pop    rbp
+ a5d:	ret
+ a5e:	mov    esi,DWORD PTR gs:[rip+0x0]        # a65 <vmsgFopsIoctl+0x75>
+			a61: R_X86_64_PC32	cpu_number-0x4
+ a65:	mov    rdx,0x0
+			a68: R_X86_64_32S	.rodata+0x88
+ a6c:	mov    rdi,0x0
+			a6f: R_X86_64_32S	.rodata.str1.8+0x2b0
+ a73:	xor    eax,eax
+ a75:	call   a7a <vmsgFopsIoctl+0x8a>
+			a76: R_X86_64_PC32	printk-0x4
+ a7a:	mov    rax,0xfffffffffffffffe
+ a81:	pop    rbp
+ a82:	ret
+ a83:	nop
+
+Disassembly of section .init.text:
+
+0000000000000000 <init_module>:
+   0:	push   rbp
+   1:	mov    rbp,rsp
+   4:	push   rbx
+   5:	push   rsi
+   6:	mov    esi,DWORD PTR gs:[rip+0x0]        # d <init_module+0xd>
+			9: R_X86_64_PC32	cpu_number-0x4
+   d:	mov    rdx,0x0
+			10: R_X86_64_32S	.rodata
+  14:	mov    rdi,0x0
+			17: R_X86_64_32S	.rodata.str1.1
+  1b:	xor    eax,eax
+  1d:	call   22 <init_module+0x22>
+			1e: R_X86_64_PC32	printk-0x4
+  22:	mov    rdx,0x0
+			25: R_X86_64_32S	.bss
+  29:	mov    rsi,0x0
+			2c: R_X86_64_32S	.rodata.str1.1+0xdb
+  30:	mov    rdi,0x0
+			33: R_X86_64_32S	.data+0x60
+  37:	call   3c <init_module+0x3c>
+			38: R_X86_64_PC32	__mutex_init-0x4
+  3c:	mov    rdi,0x0
+			3f: R_X86_64_32S	.data+0xa0
+  43:	mov    QWORD PTR [rip+0x0],0x0        # 4e <init_module+0x4e>
+			46: R_X86_64_PC32	.data+0x80
+			4a: R_X86_64_32S	.data+0x88
+  4e:	mov    QWORD PTR [rip+0x0],0x0        # 59 <init_module+0x59>
+			51: R_X86_64_PC32	.data+0x88
+			55: R_X86_64_32S	.data+0x88
+  59:	mov    DWORD PTR [rip+0x0],0x0        # 63 <init_module+0x63>
+			5b: R_X86_64_PC32	.data+0x90
+  63:	call   68 <init_module+0x68>
+			64: R_X86_64_PC32	misc_register-0x4
+  68:	test   eax,eax
+  6a:	mov    ebx,eax
+  6c:	jns    8e <init_module+0x8e>
+  6e:	mov    esi,DWORD PTR gs:[rip+0x0]        # 75 <init_module+0x75>
+			71: R_X86_64_PC32	cpu_number-0x4
+  75:	mov    rdx,0x0
+			78: R_X86_64_32S	.rodata
+  7c:	mov    ecx,eax
+  7e:	mov    rdi,0x0
+			81: R_X86_64_32S	.rodata.str1.8+0x1b8
+  85:	xor    eax,eax
+  87:	call   8c <init_module+0x8c>
+			88: R_X86_64_PC32	printk-0x4
+  8c:	jmp    aa <init_module+0xaa>
+  8e:	mov    rdx,0x0
+			91: R_X86_64_32S	.rodata.str1.1+0x3c
+  95:	mov    rsi,0x0
+			98: R_X86_64_32S	__this_module
+  9c:	mov    rdi,0x0
+			9f: R_X86_64_32S	.data+0x100
+  a3:	call   a8 <init_module+0xa8>
+			a4: R_X86_64_PC32	__pci_register_driver-0x4
+  a8:	mov    ebx,eax
+  aa:	pop    rcx
+  ab:	mov    eax,ebx
+  ad:	pop    rbx
+  ae:	pop    rbp
+  af:	ret
+
+Disassembly of section .exit.text:
+
+0000000000000000 <cleanup_module>:
+   0:	push   rbp
+   1:	mov    rdi,0x0
+			4: R_X86_64_32S	.data+0xa0
+   8:	mov    rbp,rsp
+   b:	call   10 <cleanup_module+0x10>
+			c: R_X86_64_PC32	misc_deregister-0x4
+  10:	mov    rdi,0x0
+			13: R_X86_64_32S	.data+0x100
+  17:	call   1c <cleanup_module+0x1c>
+			18: R_X86_64_PC32	pci_unregister_driver-0x4
+  1c:	pop    rbp
+  1d:	ret

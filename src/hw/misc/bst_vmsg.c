@@ -47,6 +47,8 @@
 #include "hw/pci/pci_device.h"
 #include "qom/object.h"
 #include "system/memory.h"
+#include "ui/input.h"
+#include "system/system.h"
 
 #define TYPE_BST_VMSG "bstvmsg"
 OBJECT_DECLARE_SIMPLE_TYPE(BstVmsgState, BST_VMSG)
@@ -84,6 +86,16 @@ typedef struct BstVmsgConn {
     uint8_t in_use;
 } BstVmsgConn;
 
+/* Phase-68 host->guest push (bstinput "inp" session), dev/NOTES.md 10e:
+ * guest ISR reads the cid at shm+0x1c, clears the line via BAR0+0x28,
+ * runs cb(cid, shm+host_off) and acks with BAR0+0x38 = cid. One message
+ * in flight at a time (a second IRQ before the ack corrupts its list). */
+#define VMSG_INP_SID            0x00706e69u     /* "inp" */
+#define VMSG_PUSH_SLOTS         64
+#define VMSG_PUSH_MAX           132             /* touch frame = largest */
+#define VMSG_TOUCH_SLOTS        16
+#define VMSG_TOUCH_NONE         0x7fffffffu
+
 typedef struct BstVmsgState {
     PCIDevice parent_obj;
 
@@ -94,6 +106,17 @@ typedef struct BstVmsgState {
     uint32_t max_connections;
     BstVmsgConn conn[VMSG_MAX_CONNECTIONS];
     uint8_t *shm;
+
+    /* Phase-68 push queue + touch state */
+    uint8_t pushq[VMSG_PUSH_SLOTS][VMSG_PUSH_MAX];
+    uint32_t pushlen[VMSG_PUSH_SLOTS];
+    bool pushmove[VMSG_PUSH_SLOTS];
+    unsigned qh, qt, pushes, drops;
+    bool push_busy;
+    QemuInputHandlerState *ihs;
+    Notifier init_done;
+    int tx, ty;
+    bool tdown, tdirty;
 } BstVmsgState;
 
 /* identity/config text bstconf serves (REA_BSTCONF.md 6). No spaces around
@@ -161,6 +184,148 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
     stl_le_p(s->shm + c->poll_off, 0);
 }
 
+static int bst_vmsg_find_sid(BstVmsgState *s, uint32_t sid)
+{
+    for (uint32_t i = 0; i < s->max_connections; i++) {
+        if (s->conn[i].in_use && s->conn[i].service_id == sid) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* deliver the next queued message if the channel is idle */
+static void bst_vmsg_push_kick(BstVmsgState *s)
+{
+    if (s->push_busy || s->qh == s->qt) {
+        return;
+    }
+    int cid = bst_vmsg_find_sid(s, VMSG_INP_SID);
+    if (cid < 0) {
+        return;                         /* bstinput not attached yet: keep */
+    }
+    unsigned k = s->qh++ % VMSG_PUSH_SLOTS;
+    uint8_t *dst = s->shm + s->conn[cid].host_off;
+    memset(dst, 0, 0x100);
+    memcpy(dst, s->pushq[k], s->pushlen[k]);
+    stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, (uint32_t)cid);
+    s->push_busy = true;
+    s->pushes++;
+    if (s->pushes <= 20 || (s->pushes & 0xff) == 0) {
+        fprintf(stderr, "[bstvmsg] push #%u cid=%d type=%u x=%u y=%u (q=%u)\n",
+                s->pushes, cid, ldl_le_p(dst), ldl_le_p(dst + 4),
+                ldl_le_p(dst + 8), s->qt - s->qh);
+    }
+    pci_set_irq(PCI_DEVICE(s), 1);
+}
+
+static void bst_vmsg_push(BstVmsgState *s, const uint8_t *msg, uint32_t len,
+                          bool is_move)
+{
+    /* coalesce consecutive touch moves still waiting in the queue */
+    if (is_move && s->qt != s->qh &&
+        s->pushmove[(s->qt - 1) % VMSG_PUSH_SLOTS]) {
+        unsigned k = (s->qt - 1) % VMSG_PUSH_SLOTS;
+        memcpy(s->pushq[k], msg, len);
+        s->pushlen[k] = len;
+    } else if (s->qt - s->qh >= VMSG_PUSH_SLOTS) {
+        s->drops++;
+        return;
+    } else {
+        unsigned k = s->qt++ % VMSG_PUSH_SLOTS;
+        memcpy(s->pushq[k], msg, len);
+        s->pushlen[k] = len;
+        s->pushmove[k] = is_move;
+    }
+    bst_vmsg_push_kick(s);
+}
+
+/* QEMU absolute pointer -> "BlueStacks Virtual Touch" frames.
+ * QEMU's abs range (0..0x7fff) equals the device's ABS_MT range. */
+static void bst_vmsg_input_event(DeviceState *dev, QemuConsole *src,
+                                 QemuInputEvent *evt)
+{
+    BstVmsgState *s = BST_VMSG(dev);
+    static unsigned nlog;
+
+    if (nlog < 12) {
+        nlog++;
+        fprintf(stderr, "[bstvmsg] touch: input event kind=%d\n", (int)evt->type);
+    }
+    switch (evt->type) {
+    case INPUT_EVENT_KIND_ABS: {
+        InputMoveEvent *m = &evt->abs;
+        if (m->axis == INPUT_AXIS_X) {
+            s->tx = m->value;
+        } else if (m->axis == INPUT_AXIS_Y) {
+            s->ty = m->value;
+        }
+        if (s->tdown) {
+            s->tdirty = true;
+        }
+        break;
+    }
+    case INPUT_EVENT_KIND_BTN: {
+        InputBtnEvent *b = &evt->btn;
+        if (b->button == INPUT_BUTTON_LEFT && b->down != s->tdown) {
+            s->tdown = b->down;
+            s->tdirty = true;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void bst_vmsg_input_sync(DeviceState *dev)
+{
+    BstVmsgState *s = BST_VMSG(dev);
+    uint8_t m[VMSG_PUSH_MAX];
+    static bool was_down;
+
+    if (!s->tdirty) {
+        return;
+    }
+    s->tdirty = false;
+    stl_le_p(m, 2);                                  /* type 2 = touch */
+    for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
+        stl_le_p(m + 4 + 8 * i, VMSG_TOUCH_NONE);
+        stl_le_p(m + 8 + 8 * i, VMSG_TOUCH_NONE);
+    }
+    if (s->tdown) {
+        stl_le_p(m + 4, (uint32_t)s->tx);
+        stl_le_p(m + 8, (uint32_t)s->ty);
+    }
+    /* only a move while already down may be coalesced */
+    bst_vmsg_push(s, m, sizeof(m), s->tdown && was_down);
+    was_down = s->tdown;
+}
+
+static const QemuInputHandler bst_vmsg_touch_handler = {
+    .name  = "BlueStacks Virtual Touch",
+    .mask  = INPUT_EVENT_MASK_BTN | INPUT_EVENT_MASK_ABS,
+    .event = bst_vmsg_input_event,
+    .sync  = bst_vmsg_input_sync,
+};
+
+/* Bind the touch handler to the renderer console (bstpgaipc0) once every
+ * device exists: otherwise button events go to the most recently
+ * activated BTN handler (the PS/2 mouse) and touches never start.     */
+static void bst_vmsg_init_done(Notifier *n, void *data)
+{
+    BstVmsgState *s = container_of(n, BstVmsgState, init_done);
+
+    /* Re-activate once every device exists, so this unbound abs+btn handler
+     * is first in QEMU's list: the VNC server then runs in absolute mode
+     * and both positions and clicks come here (not to the PS/2 mouse).
+     * (Binding to a console hides the handler from the unbound absolute-mode
+     * check and VNC falls back to relative motion.)                      */
+    qemu_input_handler_activate(s->ihs);
+    fprintf(stderr, "[bstvmsg] touch: handler activated (abs=%d)\n",
+            qemu_input_is_absolute(NULL));
+}
+
 static void bst_vmsg_bar0_write(void *opaque, hwaddr addr, uint64_t val,
                                 unsigned size)
 {
@@ -213,6 +378,17 @@ static void bst_vmsg_bar0_write(void *opaque, hwaddr addr, uint64_t val,
         break;
     }
     case 0x28:
+        /* guest hard ISR consumed shm+0x1c: drop the line, mark idle cid */
+        pci_set_irq(PCI_DEVICE(s), 0);
+        stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, 0xffffffffu);
+        break;
+    case 0x38:
+        /* guest callback done (val = cid): channel free for the next push */
+        if (s->pushes <= 20) {
+            fprintf(stderr, "[bstvmsg] push ack cid=%u\n", cid);
+        }
+        s->push_busy = false;
+        bst_vmsg_push_kick(s);
         break;
     case 0x30: {
         BstVmsgConn *c = bst_vmsg_get_conn(s, cid);
@@ -277,8 +453,15 @@ static void bst_vmsg_realize(PCIDevice *pdev, Error **errp)
 
     s->max_connections = VMSG_MAX_CONNECTIONS;
     stl_le_p(s->shm + VMSG_SHM_MAX, s->max_connections);
-    stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, 0);
+    /* Phase-68: 0 here read as "cid 0 pending" by the guest ISR on every
+     * shared-line interrupt (spurious bstkbd scancode 0 / list corruption). */
+    stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, 0xffffffffu);
     stl_le_p(s->shm + VMSG_SHM_CID, 0xffffffffu);
+
+    s->ihs = qemu_input_handler_register(DEVICE(s), &bst_vmsg_touch_handler);
+    qemu_input_handler_activate(s->ihs);
+    s->init_done.notify = bst_vmsg_init_done;
+    qemu_add_machine_init_done_notifier(&s->init_done);
 }
 
 static void bst_vmsg_class_init(ObjectClass *klass, const void *data)

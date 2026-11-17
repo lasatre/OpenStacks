@@ -5,3 +5,6 @@ runs/**
 !runs/*/grade.txt
 !runs/*/meta.txt
 guestlibs/
+re_scratch/*.dll
+re_scratch/*.exe
+re_scratch/*.so

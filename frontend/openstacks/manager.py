@@ -387,11 +387,10 @@ class ManagerWindow(QMainWindow):
         from .player import PlayerWindow            # late import avoids the cycle
         if self._player is None:
             self._player = PlayerWindow(self.store)
-        # a popped-out instance is raised in its own window; otherwise the
-        # main player window shows it
-        if self._player.find_pane(name) is None or                 self._player.find_pane(name)[0] is self._player:
-            self._player.show()
+        if self._player.isVisible():
             self._player.raise_()
+        else:
+            self._player.show()
         self._player.open_instance(self.store.get_instance(name))
 
     # -- async plumbing -------------------------------------------------------------------------

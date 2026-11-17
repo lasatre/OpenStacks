@@ -582,9 +582,11 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
   letterbox at the rotated aspect (GR_SHOW windows resize themselves). Verified: the Dinosaur
   game launches -> hcal 7 rotation=1 -> upright portrait in the player. Rotate button toggles
   user_rotation 0 <-> 1 (accelerometer off).
-- Player: Pop Out (side bar, tab context menu, Ctrl+Shift+P) moves an instance tab into its
-  own player window; Dock / closing that window moves it back (the instance keeps running).
-  The native display releases the renderer window before the move and re-embeds after.
+- Player: Pop Out (side bar / Ctrl+Shift+P) moves just the Android screen into its own bare
+  window sized to the screen's aspect (it follows rotation); the Screen tab shows a "bring it
+  back" placeholder, closing the window docks the screen again. The native display releases the
+  renderer window before each move and re-embeds after. (A first version moved the whole tab
+  into a second player window; that is not what was wanted and was reverted.)
 - Front-end refuses to start an instance whose ports are busy (another QEMU), and reports
   QEMU's own error if it exits within 1.5 s.
 

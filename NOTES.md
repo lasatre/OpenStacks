@@ -286,6 +286,17 @@ All legacy shims stay intact for GR_PURE=0.
   dev/tools/shot.py makes PNGs (--rgba for older captures). Screens:
   dev/shots/phase66_home_pristine_root.png (correct colours).
 
+## 10c. Phase 66: interaction over ADB works; BlueStacks adbd allow-list
+
+- BlueStacks' adbd only allows certain FIRST words in `adb shell` commands (getprop,
+  dumpsys, ... are allowed; echo/id/uptime/am/toybox get an immediate CLSE = "error: closed").
+  Workaround: start every command with an allowed word, e.g.
+  `adb -s 127.0.0.1:25556 shell "getprop ro.serialno >/dev/null; am start -a android.settings.SETTINGS"`.
+  (Not fd exhaustion: the raw CNXN/OPEN probe shows CLSE on the first OPEN of a fresh connection.)
+- Use one adb only: the system adb (C:\Path\platform-tools, v41) and refs/HD-Adb.exe (v36)
+  kill each other's server.
+- Settings opened via am start renders correctly (dev/shots/phase66_settings.png).
+
 ## 11. Next
 
 - Make the good path the default: PGA_SLOTSHIFT=1, GR_PURE=1, GR_HPP=0, pristine initramfs.

@@ -373,6 +373,12 @@ standby/resume works (op 5 / op 4). adbd blocks `adb push` (sync protocol fault)
 shell user cannot open /dev/snd, so test via Android sounds (tap a clickable view).
 Front-end: qemu_engine adds -audiodev dsound,id=snd0 + bstaudio audiodev=snd0.
 
+- Front-end VNC client (openstacks/vnc.py, outside git) had both input messages wrong:
+  send_pointer packed type 4 with a 5-field format (struct.error on every mouse event) and
+  send_keysym packed type 5 with a u16 key. Fixed to RFB PointerEvent (5,mask,x,y) and
+  KeyEvent (4,down,pad,u32 keysym). Verified: the RfbClient receives 1600x900 frames and
+  its click opens App Center (dev/shots/phase69_fe_click.png).
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

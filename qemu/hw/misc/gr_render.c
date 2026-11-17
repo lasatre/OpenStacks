@@ -201,9 +201,26 @@ static int gr_renderer_mode(void)
     return mode;
 }
 
-#define GR_W 1600
-#define GR_H  900
-#define GR_FB_BYTES (GR_W * GR_H * 4)
+/* Phase-77: renderer framebuffer = the guest display size. Env GR_FB_W /
+ * GR_FB_H (the front-end passes the instance resolution); default 1600x900. */
+static int gr_fb_dim(int which)
+{
+    static int w, h;
+    if (!w) {
+        char b[16] = {0};
+        w = GetEnvironmentVariableA("GR_FB_W", b, sizeof(b)) > 0 ? atoi(b) : 0;
+        memset(b, 0, sizeof(b));
+        h = GetEnvironmentVariableA("GR_FB_H", b, sizeof(b)) > 0 ? atoi(b) : 0;
+        if (w < 64 || w > 8192 || h < 64 || h > 8192) {
+            w = 1600;
+            h = 900;
+        }
+    }
+    return which ? h : w;
+}
+#define GR_W (gr_fb_dim(0))
+#define GR_H (gr_fb_dim(1))
+#define GR_FB_BYTES ((size_t)GR_W * GR_H * 4)
 
 #define GR_QSZ     128
 #define GR_MAX_CID 0x87
@@ -2908,7 +2925,7 @@ static bool gr_init_dll_and_host(void)
     int rc2 = ((PgaServerInit_t)TAB(0x00))(g.hwnd, 0, 0,
                                            GR_W, GR_H,
                                            mode1 ? 1 : 2, 0, "plus");
-    gr_log("PgaServerInit(1600x900, mode%s) -> %d", mode1 ? "1" : "2", rc2);
+    gr_log("PgaServerInit(%dx%d, mode%s) -> %d", GR_W, GR_H, mode1 ? "1" : "2", rc2);
     if (rc2 != 0) { g.failed = true; return false; }
 
     {   /* Phase-75: GR_READBACK=0 = native display only (no 30 fps GPU->CPU

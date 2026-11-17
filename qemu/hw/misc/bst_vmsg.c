@@ -220,6 +220,16 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
         stl_le_p(out + buf_len, 0);
         stl_le_p(out + buf_len + 4, 0xffffffffu);
         fprintf(stderr, "[bstvmsg] rejected method=%u -> result=-1\n", method);
+        {   /* Phase-77: payload dump (printable) to identify host calls */
+            char txt[161];
+            uint32_t ml = ldl_le_p(in + 0x04), i, n = 0;
+            for (i = 0x14; i < 0x14 + ml && i < VMSG_IN_SIZE && n < 160; i++, n++) {
+                uint8_t ch = in[i];
+                txt[n] = (ch >= 0x20 && ch < 0x7f) ? (char)ch : '.';
+            }
+            txt[n] = 0;
+            fprintf(stderr, "[bstvmsg]   method=%u payload: %s\n", method, txt);
+        }
     }
     /* unblock the waiting guest ioctl */
     stl_le_p(s->shm + c->poll_off, 0);

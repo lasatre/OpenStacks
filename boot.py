@@ -59,6 +59,7 @@ def main():
                     help="bstaudio backend: host speakers, runs/<name>/audio.wav, or silent")
     ap.add_argument("--persist", action="store_true")
     ap.add_argument("--smp", type=int, default=4)
+    ap.add_argument("--res", default="1600x900", help="guest display WxH (renderer framebuffer + props)")
     ap.add_argument("--accel", default="whpx,hyperv=off",
                     help="hyperv=off: QEMU reports VMware + the TSC frequency (fast tsc clocksource)")
     ap.add_argument("--append", default="", help="extra kernel cmdline tokens")
@@ -93,6 +94,8 @@ def main():
     env = dict(os.environ)
     env["PATH"] = r"C:\msys64\ucrt64\bin;" + env.get("PATH", "")
     env.update(BASE_ENV)
+    rw, rh = a.res.lower().split("x")
+    env["GR_FB_W"], env["GR_FB_H"] = rw, rh
     for kv in a.env:
         k, _, v = kv.partition("=")
         env[k] = v
@@ -102,7 +105,7 @@ def main():
     if a.props == "host":
         sys.path.insert(0, os.path.join(DEV, "tools"))
         import bstprops
-        ov = {"android_id": "bfd0e87474aa4028", "fb_width": "1600", "fb_height": "900",
+        ov = {"android_id": "bfd0e87474aa4028", "fb_width": rw, "fb_height": rh,
               "dpi": "240", "cpus": "2", "ram": "4096", "status.adb_port": "25556"}
         ov.update(kv.split("=", 1) for kv in a.prop)
         pf = bstprops.write_props_file(os.path.join(run, "bst.props"), "Pie64", ov)

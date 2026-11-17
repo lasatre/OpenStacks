@@ -242,7 +242,8 @@ class PlayerPane(QWidget):
 
     # -- status --------------------------------------------------------------------
     def _emit_status(self) -> None:
-        mode = "adb" if self.input_bridge is self.adb_input else "vnc"
+        mode = ("direct" if self.native else
+                "adb" if self.input_bridge is self.adb_input else "vnc")
         text = (f"{self.inst.name}  |  {self._vnc_state}  |  {self._adb_state}"
                 f"  |  input:{mode}  |  {self.inst.resolution}@{self.inst.dpi}dpi")
         self._status = text
@@ -454,6 +455,10 @@ class PlayerWindow(QMainWindow):
 
     def _on_current_tab(self, idx: int) -> None:
         self._with_pane("refresh_adb")
+        pane = self.current_pane()
+        # the VNC/ADB input toggle only applies to the VNC display
+        if pane is not None:
+            self.act_input_mode.setVisible(not pane.native)
 
     def _close_tab(self, idx: int) -> None:
         w = self.tabs.widget(idx)

@@ -8,8 +8,6 @@ NOTES.md (section numbers in brackets). Move an item to NOTES when it lands.
 - **Mouse wheel and multi-touch on the native display** - the embedded renderer window only
   forwards left-button drags as one finger and keys [10m]. BlueStacks maps the wheel to
   scroll/zoom and has a multi-touch mode.
-- **Status bar says `input:vnc` in native mode**; the Input: VNC/ADB toggle only applies to
-  the VNC display (hide or relabel it when display=native).
 - **Keymap editor** (game controls overlay, BlueStacks' signature feature) - stub only.
 - **Player window sizing** - follow the guest resolution / orientation like BlueStacks (fit
   window to 16:9 or 9:16, remember size per instance).

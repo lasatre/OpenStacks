@@ -324,6 +324,9 @@ class QemuEngine:
             # Phase-75: native = the player embeds the renderer window (GPU
             # present); the 30 fps pixel readback only feeds the VNC console.
             env["GR_READBACK"] = "0" if inst.display == "native" else "1"
+            # Phase-77: the renderer framebuffer = the instance resolution
+            fbw, fbh = inst.res_wh()
+            env["GR_FB_W"], env["GR_FB_H"] = str(fbw), str(fbh)
         try:
             logf = open(self.qemu_log_path(inst.name), "ab")
         except OSError as e:

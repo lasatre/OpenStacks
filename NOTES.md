@@ -561,6 +561,18 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
    longer run the bstaudio ISR (which printk()s on every foreign IRQ).
 - boot.py gained --smp (default 4), --mem, --accel, --append.
 
+## 10o. Phase 77 (part): custom resolutions, nav buttons, host-call payload log
+
+- The renderer framebuffer was hard-coded 1600x900 (gr_render GR_W/GR_H), so a 720x1280
+  instance rendered a landscape Android squashed into a portrait frame. GR_W/GR_H now come
+  from env GR_FB_W/GR_FB_H (front-end: instance resolution; boot.py --res). Verified:
+  PgaServerInit(720x1280), `wm size` 720x1280 @160 dpi, portrait home layout.
+- Player side bar: Back / Home / Recents = PS/2 keys via the QEMU monitor `sendkey`
+  (ac_back -> KEY_BACK 158, ac_home -> KEY_HOMEPAGE 172, audionext -> KEY_NEXTSONG 163 =
+  APP_SWITCH in Generic.kl). Verified Settings -> Back -> launcher, Recents, Home.
+- bstvmsg logs a printable payload for rejected hcal methods: 10 = activity displayed
+  (package, activity, JSON), 22 = per-app config, 62 / 7 = package-scoped (unknown).
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

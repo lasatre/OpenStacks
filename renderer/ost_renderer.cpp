@@ -102,6 +102,11 @@ struct Puller {
     int width = 0, height = 0;
     gfxstream::Renderer::ReadPixelsCallback read = nullptr;
     std::thread thread;
+    // the host process may exit without ost_renderer_shutdown (QEMU does): a joinable
+    // std::thread destroyed at static destruction would std::terminate (abort)
+    ~Puller() {
+        if (thread.joinable()) thread.detach();
+    }
 } gp;
 
 void pullerMain() {

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import time
 from typing import Callable, Optional
 
 from PySide6.QtCore import QRect, Qt, QTimer
@@ -78,6 +79,8 @@ class NativeDisplay(QWidget):
         self._pid_provider = pid_provider
         self._aspect = aspect
         self._rotation = 0
+        self._lost = False             # our embedded window died while QEMU kept running
+        self._pid_since = 0.0
         self._pid = 0
         self._hwnd = 0
         self._win: Optional[QWindow] = None
@@ -93,6 +96,12 @@ class NativeDisplay(QWidget):
     def state(self) -> str:
         if self._container is not None:
             return "native (GPU)"
+        if self._lost and self._pid:
+            return ("The screen window was lost (the player closed while it was embedded).\n"
+                    "Stop and start this instance to get it back.")
+        if self._pid and time.monotonic() - self._pid_since > 30:
+            return ("Waiting for the screen...\nIf this instance was running when the player "
+                    "closed unexpectedly, stop and start it.")
         return "native: waiting for renderer" if self._pid else "native: QEMU not running"
 
     def set_aspect(self, w: int, h: int) -> None:
@@ -105,14 +114,20 @@ class NativeDisplay(QWidget):
         if pid != self._pid:
             self.release()
             self._pid = pid
+            self._pid_since = time.monotonic()
+            self._lost = False
         if not pid:
             return
         if self._hwnd and not _user32.IsWindow(self._hwnd):
             self.release()
+            self._lost = True
+            self.update()
         if self._container is None:
             hwnd = find_display_hwnd(pid)
             if hwnd:
                 self._embed(hwnd)
+            else:
+                self.update()              # keep the waiting text current
         if self._hwnd:
             rot = display_rotation(self._hwnd)
             if rot != self._rotation:      # portrait <-> landscape: re-letterbox

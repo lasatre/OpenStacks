@@ -187,6 +187,12 @@ class ScreenWindow(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self._returning = False
+        # the player's pop-out shortcut also brings the screen back from here
+        dock = QAction(self)
+        dock.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        dock.setShortcutContext(Qt.WindowShortcut)
+        dock.triggered.connect(lambda: self.pane.dock_screen())
+        self.addAction(dock)
 
     def fit(self, w: int, h: int) -> None:
         """Size the window to the screen's aspect (max ~85% of the desktop)."""
@@ -197,14 +203,18 @@ class ScreenWindow(QWidget):
         self.resize(int(w * scale), int(h * scale))
 
     def nativeEvent(self, event_type, message):
+        # Only look at our two messages, and never touch winId() here: this also runs
+        # while the native window is being created, and winId() would re-enter creation.
         msg = _win_msg(message)
-        paths = _dropped_paths(msg)
-        if paths:
-            self.pane.drop_files(paths)
-            return True, 1
-        # always proportional, like BlueStacks (maximized: letterboxed in the window colour)
-        if _keep_aspect(msg, int(self.winId()), *self.pane._screen_size()):
-            return True, 1
+        if msg is not None and msg.message == _WM_COPYDATA:
+            paths = _dropped_paths(msg)
+            if paths:
+                self.pane.drop_files(paths)
+                return True, 1
+        elif msg is not None and msg.message == _WM_SIZING:
+            # always proportional, like BlueStacks (maximized: letterboxed in the window colour)
+            if _keep_aspect(msg, int(msg.hWnd), *self.pane._screen_size()):
+                return True, 1
         return super().nativeEvent(event_type, message)
 
     def closeEvent(self, ev) -> None:
@@ -847,9 +857,10 @@ class PlayerWindow(QMainWindow):
         self.tabs.removeTab(idx)
 
     def nativeEvent(self, event_type, message):
-        paths = _dropped_paths(_win_msg(message))
+        msg = _win_msg(message)
+        paths = _dropped_paths(msg) if msg is not None and msg.message == _WM_COPYDATA else None
         if paths:                     # dropped on a native screen: its pane, else the current
-            sender = int(_win_msg(message).wParam or 0)
+            sender = int(msg.wParam or 0)
             target = self.current_pane()
             for pane in self._panes():
                 host = getattr(pane.display, "_hwnd", 0) if pane.native else 0

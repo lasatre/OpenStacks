@@ -1,5 +1,6 @@
-# ost_renderer.dll: OpenStacks' renderer plugin (gfxstream host renderer behind a C API).
-# Configured by renderer\build_gfxstream.cmd (VS 2022, ClangCL). docs/renderer_plan.md.
+# ost_renderer: OpenStacks' renderer plugin (gfxstream host renderer behind a C API):
+# ost_renderer.dll on Windows (renderer\build_gfxstream.cmd, VS 2022 ClangCL),
+# libost_renderer.so on Linux (renderer/build_gfxstream.sh). docs/renderer_plan.md.
 cmake_minimum_required(VERSION 3.20)
 project(ost_renderer C CXX)
 
@@ -20,8 +21,16 @@ add_library(ost_renderer SHARED
     ost_renderer.cpp
     "${GFXSTREAM_SRC}/host/render_api.cpp")   # initLibrary(), outside the static lib
 target_compile_definitions(ost_renderer PRIVATE
-    OST_RENDERER_BUILD=1 GFXSTREAM_ENABLE_HOST_GLES=1
-    UNICODE _UNICODE NOMINMAX EMUGL_BUILD VK_USE_PLATFORM_WIN32_KHR)
+    OST_RENDERER_BUILD=1 GFXSTREAM_ENABLE_HOST_GLES=1 EMUGL_BUILD)
+if(WIN32)
+    target_compile_definitions(ost_renderer PRIVATE
+        UNICODE _UNICODE NOMINMAX VK_USE_PLATFORM_WIN32_KHR)
+else()
+    # QEMU dlopens it: only the ost_* C API is exported
+    set_target_properties(ost_renderer PROPERTIES CXX_VISIBILITY_PRESET hidden
+                          VISIBILITY_INLINES_HIDDEN ON)
+    target_link_options(ost_renderer PRIVATE -Wl,--exclude-libs,ALL -Wl,-Bsymbolic)
+endif()
 target_compile_options(ost_renderer PRIVATE -Wno-unused-parameter -Wno-return-type-c-linkage)
 target_link_libraries(ost_renderer PRIVATE
     gfxstream_common_build_info
@@ -33,12 +42,18 @@ target_link_libraries(ost_renderer PRIVATE
 
 # PDB (function names; gfxstream itself has no /Zi): resolves the crash offsets gr_render
 # logs, e.g. llvm-symbolizer --obj=ost_renderer.dll 0x<offset> (VS Clang's llvm tools)
-target_compile_options(ost_renderer PRIVATE /Zi)
-target_link_options(ost_renderer PRIVATE /DEBUG:FULL)
+if(MSVC)
+    target_compile_options(ost_renderer PRIVATE /Zi)
+    target_link_options(ost_renderer PRIVATE /DEBUG:FULL)
+endif()
 
 # Smoke test: one channel, rcGetRendererVersion
 add_executable(ost_renderer_smoke smoke.c)
 target_link_libraries(ost_renderer_smoke PRIVATE ost_renderer)
 
-# st_probe: checks the vendored ShaderTranslator.h against libshadertranslator.dll
+# st_probe: checks the vendored ShaderTranslator.h against libshadertranslator.dll/.so
 add_executable(st_probe st_probe.cpp)
+if(NOT WIN32)
+    target_link_libraries(st_probe PRIVATE ${CMAKE_DL_LIBS})
+    set_target_properties(ost_renderer_smoke st_probe PROPERTIES BUILD_RPATH "$ORIGIN")
+endif()

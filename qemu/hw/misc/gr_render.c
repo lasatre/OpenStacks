@@ -3566,7 +3566,14 @@ static bool gx_init_host(void)
 #ifdef _WIN32
         strcpy(path, "ost_renderer.dll");    /* next to qemu (DLL search path) */
 #else
-        strcpy(path, "libost_renderer.so");  /* next to qemu (rpath $ORIGIN) or LD_LIBRARY_PATH */
+        /* next to qemu (dlopen only searches LD_LIBRARY_PATH and the system dirs) */
+        ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 32);
+        char *slash = n > 0 ? memrchr(path, '/', n) : NULL;
+        if (slash) {
+            strcpy(slash + 1, "libost_renderer.so");
+        } else {
+            strcpy(path, "libost_renderer.so");
+        }
 #endif
     }
     gx.dll = gr_dlopen(path);

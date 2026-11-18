@@ -33,6 +33,21 @@ def _draw(name: str, p: QPainter) -> None:
         p.drawEllipse(QRectF(6, 6, 12, 12))
     elif name == "recents":                 # Android recents: rounded square
         p.drawRoundedRect(QRectF(6, 6, 12, 12), 2, 2)
+    elif name in ("volume", "volume_muted"):  # speaker (+ waves, or a cross)
+        path = QPainterPath(QPointF(4, 9.5))
+        path.lineTo(8, 9.5)
+        path.lineTo(12.5, 5.5)
+        path.lineTo(12.5, 18.5)
+        path.lineTo(8, 14.5)
+        path.lineTo(4, 14.5)
+        path.closeSubpath()
+        p.drawPath(path)
+        if name == "volume":
+            p.drawArc(QRectF(11, 8.5, 6, 7), -50 * 16, 100 * 16)
+            p.drawArc(QRectF(11, 5.5, 10, 13), -50 * 16, 100 * 16)
+        else:
+            p.drawLine(QPointF(15.5, 9.5), QPointF(20.5, 14.5))
+            p.drawLine(QPointF(20.5, 9.5), QPointF(15.5, 14.5))
     elif name == "rotate":                  # circular arrow
         p.drawArc(QRectF(5, 5, 14, 14), 60 * 16, 280 * 16)
         _arrow_head(p, QPointF(15.6, 6.0), -30)

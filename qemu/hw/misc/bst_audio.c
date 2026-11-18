@@ -43,6 +43,7 @@
 #include "hw/core/qdev-properties.h"
 #include "qom/object.h"
 #include "system/memory.h"
+#include "qapi/visitor.h"
 
 #define TYPE_BST_AUDIO "bstaudio"
 OBJECT_DECLARE_SIMPLE_TYPE(BstAudioState, BST_AUDIO)
@@ -86,6 +87,8 @@ struct BstAudioState {
     SWVoiceOut *voice;
 
     BstAudStream play, cap;
+    uint8_t volume;            /* 0..100, front-end slider (qom-set ... volume N) */
+    bool muted;                /* front-end mute button   (qom-set ... muted on)  */
     bool irq_busy;
     unsigned events, cmds;
 };
@@ -174,6 +177,8 @@ static AudioFormat bst_audio_fmt(uint32_t bits)
     }
 }
 
+static void bst_audio_apply_volume(BstAudioState *s);
+
 static void bst_audio_open_voice(BstAudioState *s)
 {
     BstAudStream *st = &s->play;
@@ -189,8 +194,50 @@ static void bst_audio_open_voice(BstAudioState *s)
     }
     s->voice = audio_be_open_out(s->audio_be, s->voice, "bstaudio", s,
                                  bst_audio_out_cb, &as);
+    bst_audio_apply_volume(s);
     fprintf(stderr, "[bstaudio] playback voice %s: %u Hz, %u ch, %u bit\n",
             s->voice ? "open" : "FAILED", st->rate, st->channels, st->bits);
+}
+
+/* ------------------------------------------- host volume (front-end) */
+
+static void bst_audio_apply_volume(BstAudioState *s)
+{
+    uint8_t v = (uint8_t)((MIN(s->volume, 100u) * 255u + 50u) / 100u);
+    if (s->audio_be && s->voice) {
+        audio_be_set_volume_out_lr(s->audio_be, s->voice, s->muted, v, v);
+    }
+}
+
+static void bst_audio_get_volume(Object *obj, Visitor *v, const char *name,
+                                 void *opaque, Error **errp)
+{
+    BstAudioState *s = BST_AUDIO(obj);
+    visit_type_uint8(v, name, &s->volume, errp);
+}
+
+static void bst_audio_set_volume(Object *obj, Visitor *v, const char *name,
+                                 void *opaque, Error **errp)
+{
+    BstAudioState *s = BST_AUDIO(obj);
+    uint8_t val;
+    if (!visit_type_uint8(v, name, &val, errp)) {
+        return;
+    }
+    s->volume = MIN(val, 100);
+    bst_audio_apply_volume(s);
+}
+
+static bool bst_audio_get_muted(Object *obj, Error **errp)
+{
+    return BST_AUDIO(obj)->muted;
+}
+
+static void bst_audio_set_muted(Object *obj, bool val, Error **errp)
+{
+    BstAudioState *s = BST_AUDIO(obj);
+    s->muted = val;
+    bst_audio_apply_volume(s);
 }
 
 /* --------------------------------------------- real-time pacing timer */
@@ -385,6 +432,7 @@ static void bst_audio_realize(PCIDevice *pdev, Error **errp)
     s->shm = memory_region_get_ram_ptr(&s->bar1);
     memset(s->shm, 0, BST_AUDIO_BAR1_SIZE);
 
+    s->volume = 100;
     s->play.timer = timer_new_ns(QEMU_CLOCK_REALTIME, bst_audio_play_tick, s);
     s->cap.timer = timer_new_ns(QEMU_CLOCK_REALTIME, bst_audio_cap_tick, s);
 
@@ -405,6 +453,10 @@ static void bst_audio_class_init(ObjectClass *klass, const void *data)
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
     k->realize = bst_audio_realize;
+    object_class_property_add(klass, "volume", "uint8", bst_audio_get_volume,
+                              bst_audio_set_volume, NULL, NULL);
+    object_class_property_add_bool(klass, "muted", bst_audio_get_muted,
+                                   bst_audio_set_muted);
     k->vendor_id = 0xb574;
     k->device_id = 0x100d;
     k->revision = 0;

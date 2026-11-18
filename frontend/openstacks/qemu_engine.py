@@ -39,7 +39,7 @@ from pathlib import Path
 
 from .config import GlobalSettings, Instance, REPO_ROOT
 
-from . import paths
+from . import paths, procs
 
 LOGS_DIR = paths.LOGS_DIR
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -155,6 +155,7 @@ class QemuEngine:
     def __init__(self, logs_dir: str | Path | None = None):
         self.logs_dir = Path(logs_dir) if logs_dir else LOGS_DIR
         self.instances: dict[str, "QemuInstance"] = {}
+        self.stopping: set[str] = set()   # names being shut down (manager: STOPPING)
 
     # -- argv ----------------------------------------------------------------
     def build_argv(self, inst: Instance, g: GlobalSettings) -> tuple[list[str], list[str]]:
@@ -415,7 +416,13 @@ class QemuEngine:
         obj = self.instances.get(name)
         if obj is None:
             return False
-        ok = obj.stop(timeout=timeout, force=force)
+        mine = name not in self.stopping       # shutdown() may have marked it already
+        self.stopping.add(name)
+        try:
+            ok = obj.stop(timeout=timeout, force=force)
+        finally:
+            if mine:
+                self.stopping.discard(name)
         if ok:
             self.instances.pop(name, None)
             try:
@@ -428,10 +435,22 @@ class QemuEngine:
         """QEMU pid of a running instance (None when stopped)."""
         name = inst.name if isinstance(inst, Instance) else inst
         obj = self.instances.get(name)
-        if obj is not None:
-            return obj.proc.pid if obj.is_running() else None
+        if obj is not None and obj.is_running():
+            return obj.proc.pid
+        # Not launched by this process (or its handle is gone): every OpenStacks QEMU
+        # carries "-name openstacks-<instance>" (procs.py), so ask the processes. The pid
+        # file is only trusted when that process carries the same tag.
         pid = self._read_pidfile(name)
-        return pid if pid is not None and _pid_alive(pid) else None
+        if pid is not None and _pid_alive(pid) and name in procs.tags_of(pid):
+            return pid
+        found = procs.instance_pids(name)
+        return found[0] if found else None
+
+    def state(self, name: str) -> str:
+        """'stopping' | 'running' | 'stopped' (manager list, player status)."""
+        if self.pid(name) is None:
+            return "stopped"
+        return "stopping" if name in self.stopping else "running"
 
     def monitor(self, inst: Instance, command: str, timeout: float = 3.0) -> str:
         """Run one HMP command on the instance's telnet monitor."""
@@ -467,10 +486,25 @@ class QemuEngine:
         launched here is stopped via its handle; otherwise the pid file's
         process (verified to be qemu-system-x86_64) gets the monitor `quit`,
         then a kill."""
+        self.stopping.add(inst.name)
+        try:
+            ok = self._shutdown(inst, timeout)
+        finally:
+            self.stopping.discard(inst.name)
+        # leftovers: any other QEMU still tagged with this instance (crashed players,
+        # double launches) would hold its ports and disks
+        for extra in procs.instance_pids(inst.name):
+            try:
+                os.kill(extra, 9)
+            except OSError:
+                pass
+        return ok
+
+    def _shutdown(self, inst: Instance, timeout: float) -> bool:
         if inst.name in self.instances:
             return self.stop(inst.name, timeout=timeout)
-        pid = self._read_pidfile(inst.name)
-        if pid is None or not _pid_alive(pid) or not _is_qemu(pid):
+        pid = self.pid(inst.name)
+        if pid is None or not _is_qemu(pid):
             return True
         try:
             self.monitor(inst, "quit", timeout=2.0)
@@ -493,11 +527,7 @@ class QemuEngine:
 
     def is_running(self, inst: Instance | str) -> bool:
         name = inst.name if isinstance(inst, Instance) else inst
-        obj = self.instances.get(name)
-        if obj is not None:
-            return obj.is_running()
-        pid = self._read_pidfile(name)
-        return pid is not None and _pid_alive(pid)
+        return self.pid(name) is not None
 
     def _read_pidfile(self, name: str) -> int | None:
         try:

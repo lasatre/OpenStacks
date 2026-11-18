@@ -32,13 +32,15 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
-from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
+                               QMessageBox, QSlider,
                                QPushButton, QTabWidget, QToolButton,
                                QToolBar, QVBoxLayout, QWidget)
 
@@ -275,6 +277,15 @@ class PlayerPane(QWidget):
             title_hint=f"QEMU log: logs/{self.inst.name}.qemu.log "
                        "[gr_render]/[bstvmsg]/[vmmdev] counters")
         self.tabs.addTab(self.diagnostics.start(), "Diagnostics")
+        # Activity: what the player did for this instance (installs, root, file copies,
+        # screenshots, boot state), kept in logs/<name>.activity.log; flash() writes it
+        from . import activity
+        self._activity_path = activity.path(self.inst.name)
+        self.activity = ConsolePane(
+            self._activity_path,
+            title_hint=f"Activity: logs/{self.inst.name}.activity.log "
+                       "(installs, root, file transfer, screenshots)")
+        self.tabs.addTab(self.activity.start(), "Activity")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.tabs)
@@ -283,6 +294,7 @@ class PlayerPane(QWidget):
         self._adb_state = f"adb {inst.adb_port}: probing"
         self._vnc_state = f"vnc 127.0.0.1:{inst.vnc_port}: idle"
         self._adb_threads: list[_CallThread] = []
+        self._vol_pid = 0                 # QEMU process the saved volume was applied to
 
         # control-plane watchdog: stopped -> starting -> adb-online -> ready
         self.boot_watch = BootStateWatch(
@@ -330,6 +342,11 @@ class PlayerPane(QWidget):
     # -- boot-state ----------------------------------------------------------------
     def _on_boot_state(self, state: str, detail: str) -> None:
         port = self.inst.adb_port
+        if state != "stopped":
+            pid = qemu_engine.pid(self.inst) or 0
+            if pid and pid != self._vol_pid:
+                self._vol_pid = pid
+                self.apply_volume()
         icon = {"stopped": "○", "starting": "◍", "offline": "◌",
                 "unauthorized": "⊙", "adb-online": "◐", "ready": "●"
                 }.get(state, "○")
@@ -392,6 +409,20 @@ class PlayerPane(QWidget):
         thread.start()
         self._adb_threads = [t for t in self._adb_threads if t.isRunning()]
         self._adb_threads.append(thread)
+
+    def apply_volume(self) -> None:
+        """Host-side volume/mute of this instance's audio (bstaudio's QOM properties,
+        over the HMP monitor; a background thread so the UI never waits on QEMU)."""
+        inst, vol, muted = self.inst, max(0, min(100, int(self.inst.volume))), bool(self.inst.muted)
+
+        def job():
+            dev = "/machine/peripheral/bstaudio0"
+            try:
+                qemu_engine.monitor(inst, f"qom-set {dev} volume {vol}")
+                qemu_engine.monitor(inst, f"qom-set {dev} muted {'on' if muted else 'off'}")
+            except OSError:
+                pass                         # not up yet: applied again on boot
+        threading.Thread(target=job, daemon=True).start()
 
     def _set_adb_state(self, text: str) -> None:
         self._adb_state = text
@@ -671,6 +702,8 @@ class PlayerPane(QWidget):
 
     def flash(self, text: str) -> None:
         self.statusChanged.emit(text)
+        from . import activity
+        activity.append(self.inst.name, text)
         QTimer.singleShot(4000, self._emit_status)   # fade back to standard text
 
 
@@ -780,6 +813,8 @@ class PlayerWindow(QMainWindow):
 
         for method, ic, tip, key in self._TOOLS:
             button(method, ic, tip, key)
+        self._vol_btn = button("volume", "volume", "Volume / mute", "",
+                               lambda _=False: self._volume_popup())
         # VNC display only: switch input between VNC and adb
         b = button("input_mode", "input", "Input: VNC (click to switch to ADB)", "",
                    lambda _=False: self._toggle_input_mode())
@@ -810,6 +845,72 @@ class PlayerWindow(QMainWindow):
             return
         getattr(pane, method)()
 
+    def _volume_popup(self) -> None:
+        """BlueStacks-style: the speaker button opens a slider with a mute toggle."""
+        from .icons import icon
+        pane = self.current_pane()
+        if pane is None:
+            self.statusBar().showMessage("No instance tab focused.", 3000)
+            return
+        inst = pane.inst
+        pop = QFrame(self, Qt.Popup)
+        pop.setFrameShape(QFrame.StyledPanel)
+        lay = QVBoxLayout(pop)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
+        pct = QLabel(f"{inst.volume}%", pop)
+        pct.setAlignment(Qt.AlignHCenter)
+        slider = QSlider(Qt.Vertical, pop)
+        slider.setRange(0, 100)
+        slider.setValue(int(inst.volume))
+        slider.setFixedHeight(140)
+        mute = QToolButton(pop)
+        mute.setCheckable(True)
+        mute.setChecked(bool(inst.muted))
+        mute.setAutoRaise(True)
+        mute.setIconSize(QSize(20, 20))
+
+        def show_mute():
+            mute.setIcon(icon("volume_muted" if inst.muted else "volume"))
+            mute.setToolTip("Unmute" if inst.muted else "Mute")
+            self._vol_btn.defaultAction().setIcon(
+                icon("volume_muted" if inst.muted else "volume"))
+
+        def save():
+            self.store.update(inst)
+            pane.apply_volume()
+
+        apply_later = QTimer(pop)
+        apply_later.setSingleShot(True)
+        apply_later.setInterval(120)          # a drag sends a few updates, not hundreds
+        apply_later.timeout.connect(save)
+
+        def on_value(v: int):
+            inst.volume = v
+            pct.setText(f"{v}%")
+            if inst.muted and v > 0:          # moving the slider unmutes
+                inst.muted = False
+                mute.setChecked(False)
+                show_mute()
+            apply_later.start()
+
+        def on_mute(on: bool):
+            inst.muted = on
+            show_mute()
+            save()
+
+        slider.valueChanged.connect(on_value)
+        mute.toggled.connect(on_mute)
+        show_mute()
+        lay.addWidget(pct)
+        lay.addWidget(slider, 0, Qt.AlignHCenter)
+        lay.addWidget(mute, 0, Qt.AlignHCenter)
+        pop.adjustSize()
+        b = self._vol_btn
+        pos = b.mapToGlobal(b.rect().topLeft())
+        pop.move(pos.x() - pop.width() - 4, pos.y() - pop.height() // 2 + b.height() // 2)
+        pop.show()
+
     def _toggle_input_mode(self) -> None:
         pane = self.current_pane()
         if pane is None:
@@ -825,7 +926,10 @@ class PlayerWindow(QMainWindow):
         pane = self.current_pane()
         # the VNC/ADB input toggle only applies to the VNC display
         if pane is not None:
+            from .icons import icon
             self._rail_buttons["input_mode"].setVisible(not pane.native)
+            self._vol_btn.defaultAction().setIcon(
+                icon("volume_muted" if pane.inst.muted else "volume"))
             QTimer.singleShot(0, lambda: self.fit_to_screen(pane))
 
     def _close_tab(self, idx: int) -> None:

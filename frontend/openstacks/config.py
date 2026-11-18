@@ -153,6 +153,8 @@ class Instance:
     extra_append: str = ""             # extra KEY=VALUE / kernel args for -append
     display: str = "native"            # native (GPU window embed) | vnc (readback)
     renderer: str = "gfxstream"        # gfxstream (open) | bluestacks (libOpenglRender.dll)
+    volume: int = 100                  # host-side volume 0..100 (player side bar)
+    muted: bool = False
     image: str = "Pie64"               # engine image: Pie64 (Android 9), Rvc64 (11), Nougat*
     magisk: bool = False               # rooted with Magisk (player Root button; magisk.py)
     is_default: bool = False

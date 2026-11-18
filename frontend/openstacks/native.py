@@ -49,6 +49,48 @@ def display_rotation(hwnd: int) -> int:
     return int(t[-1]) if len(t) > 2 and t[-2] == "r" and t[-1] in "0123" else 0
 
 
+def describe_display(pid: int) -> str:
+    """Why the display isn't embedded yet, for the waiting text: does QEMU `pid` own a
+    renderer window at all, and if so, is it top-level or already inside some window?"""
+    if sys.platform != "win32" or not pid:
+        return ""
+    _user32.EnumChildWindows.argtypes = [wintypes.HWND, _EnumProc, wintypes.LPARAM]
+    _user32.GetParent.argtypes = [wintypes.HWND]
+    _user32.GetParent.restype = wintypes.HWND
+    top, nested = [], []
+
+    def owner(hwnd) -> int:
+        p = wintypes.DWORD()
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+        return p.value
+
+    def is_host(hwnd) -> bool:
+        buf = ctypes.create_unicode_buffer(64)
+        _user32.GetClassNameW(hwnd, buf, 64)
+        return buf.value == HOST_CLASS
+
+    def child_cb(hwnd, _l):
+        if is_host(hwnd) and owner(hwnd) == pid:
+            par = _user32.GetParent(hwnd)
+            nested.append((int(hwnd), owner(par) if par else 0))
+        return True
+
+    def top_cb(hwnd, _l):
+        if is_host(hwnd) and owner(hwnd) == pid:
+            top.append(int(hwnd))
+        _user32.EnumChildWindows(hwnd, _EnumProc(child_cb), 0)
+        return True
+
+    _user32.EnumWindows(_EnumProc(top_cb), 0)
+    if top:
+        return f"QEMU pid {pid}: screen window {top[0]:#x} is top-level (not embedded yet)"
+    if nested:
+        h, ppid = nested[0]
+        return (f"QEMU pid {pid}: screen window {h:#x} is inside a window of process "
+                f"{ppid} (not this player)")
+    return f"QEMU pid {pid}: no screen window yet (renderer not started?)"
+
+
 def find_display_hwnd(pid: int) -> int:
     """HWND of the renderer host window owned by QEMU process `pid` (0 = none)."""
     if sys.platform != "win32" or not pid:
@@ -101,7 +143,7 @@ class NativeDisplay(QWidget):
                     "Stop and start this instance to get it back.")
         if self._pid and time.monotonic() - self._pid_since > 30:
             return ("Waiting for the screen...\nIf this instance was running when the player "
-                    "closed unexpectedly, stop and start it.")
+                    "closed unexpectedly, stop and start it.\n\n" + describe_display(self._pid))
         return "native: waiting for renderer" if self._pid else "native: QEMU not running"
 
     def set_aspect(self, w: int, h: int) -> None:

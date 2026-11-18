@@ -339,12 +339,13 @@ class ManagerWindow(QMainWindow):
         if not same:
             self.list.clear()
         for row, inst in enumerate(insts):
-            running = self._is_running(inst.name)
+            state = qemu_engine.state(inst.name)        # stopped | running | stopping
+            running = state != "stopped"
             err = "; ".join(inst.validate())
             line1 = f"{inst.name}{'  (default)' if inst.name == self.store.default_name() else ''}"
             line2 = (f"{inst.resolution}@{inst.dpi}dpi · {inst.cpus}vCPU · {inst.ram_mb}MB"
                      f" · adb {inst.adb_port} · vnc {inst.vnc_port}"
-                     + (" · RUNNING" if running else "")
+                     + (f" · {state.upper()}" if running else "")
                      + (f" · {err}" if err else ""))
             pm = self._thumbs.get(inst.name)
             if pm is None:
@@ -359,7 +360,8 @@ class ManagerWindow(QMainWindow):
                 item.setData(Qt.UserRole + 1, (running, pm.cacheKey()))
             item.setData(Qt.UserRole, inst.name)
             item.setToolTip(err or f"{inst.name}: adb 127.0.0.1:{inst.adb_port}")
-            item.setForeground(QColor("#2ecc71") if running
+            item.setForeground(QColor("#f5a524") if state == "stopping"
+                               else QColor("#2ecc71") if running
                                else self.list.palette().text().color())
             if not same:
                 self.list.addItem(item)
@@ -426,9 +428,13 @@ class ManagerWindow(QMainWindow):
         if not name or not self._is_running(name):
             return
         def job():
-            return qemu_engine.stop(name, timeout=10)
-        self._run_async(job, lambda ok: self.statusBar().showMessage(
-            "stopped" if ok else "still running (check QEMU)", 5000))
+            return qemu_engine.shutdown(self.store.get_instance(name), timeout=10)
+
+        def done(ok):
+            self.statusBar().showMessage("stopped" if ok else "still running (check QEMU)", 5000)
+            self.refresh()
+        self._run_async(job, done)
+        QTimer.singleShot(150, self.refresh)      # show STOPPING right away
 
     def _clone(self) -> None:
         name = self._selected_name()
@@ -474,7 +480,7 @@ class ManagerWindow(QMainWindow):
             return
         from . import images
         if inst.image not in images.installed_images():
-            if not self._install_image(inst.image):
+            if not self._install_image(inst.image, inst.name):
                 return
         try:
             self.store.create(inst.name, cpus=inst.cpus, ram_mb=inst.ram_mb,
@@ -486,9 +492,14 @@ class ManagerWindow(QMainWindow):
             QMessageBox.critical(self, "Create failed", str(e))
         self.refresh()
 
-    def _install_image(self, image: str) -> bool:
-        """Download + prepare an engine image with a progress dialog. True = ready."""
-        from . import images
+    def _install_image(self, image: str, instance: str = "") -> bool:
+        """Download + prepare an engine image with a progress dialog. True = ready.
+        Stages and the outcome also go to the instance's Activity log."""
+        from . import activity, images
+
+        def log(text: str) -> None:
+            if instance:
+                activity.append(instance, f"image {image}: {text}")
         info = images.image_info(image)
         if QMessageBox.question(
                 self, "Download Android image",
@@ -508,7 +519,12 @@ class ManagerWindow(QMainWindow):
         labels = {"download": "Downloading", "verify": "Verifying", "unpack": "Unpacking",
                   "assets": "Preparing kernel and disks"}
 
+        last_stage = {"s": ""}
+
         def on_progress(stage, done, total):
+            if stage != last_stage["s"]:
+                last_stage["s"] = stage
+                log(labels.get(stage, stage))
             name = labels.get(stage, stage.capitalize())
             if stage == "download" and total:
                 name += f" {done / 2**20:,.0f} / {total / 2**20:,.0f} MB"
@@ -527,9 +543,11 @@ class ManagerWindow(QMainWindow):
         th.finished_ok.connect(on_ok)
         th.failed.connect(on_fail)
         dlg.canceled.connect(th.cancel)
+        log(f"download from BlueStacks' servers ({info.size / 2**20:,.0f} MB)")
         th.start()
         dlg.exec()
         th.wait()
+        log("ready" if result["ok"] else f"FAILED: {result['err'] or 'cancelled'}")
         if not result["ok"]:
             QMessageBox.warning(self, "Image not ready",
                                 f"{image}: {result['err'] or 'cancelled'}")

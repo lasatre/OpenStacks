@@ -133,9 +133,12 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
     reader. Both are sent as 0.
 - **Desktop GL boot (Pie64):** boots to the home screen, stable across the boot, native
   display window shows it (checked by capturing the hidden window off-screen with PrintWindow).
-- **Open:** the post-callback readback (VNC console, host screenshots) stays black on desktop GL;
-  `renderer/gfxstream-patches/0003` (GLES-valid readback type) is needed but not enough. Then
-  apps and games, rotation, the native player embedding, Android 11/13, front-end switch, CI.
+- **Readback (VNC console, host screenshots):** on GLES 3 hosts gfxstream reads back
+  asynchronously: the post callback only signals a frame, the pixels come from its
+  ReadPixelsCallback (which waits on gfxstream's readback thread). The adapter pulls them on its
+  own thread. Patch 0003 keeps the readback type GLES-valid for the translator.
+- **Open:** apps and games, rotation, the native player embedding, Android 11/13, front-end
+  switch, CI.
 - Crash locator: gr_render's gfxstream path logs the faulting module+offset and stack return
   addresses on an access violation; `ost_renderer.pdb` + llvm-symbolizer resolve ours.
 

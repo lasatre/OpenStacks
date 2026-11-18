@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <thread>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -64,12 +66,8 @@ void gfxLog(gfxstream_logging_level level, const char* file, int line, const cha
     logf(l, "gfxstream %s: %s", fn ? fn : "", msg ? msg : "");
 }
 
-void onPost(void* ctx, uint32_t displayId, int width, int height, int ydir, int format,
-            int type, unsigned char* pixels) {
-    (void)ctx;
-    (void)displayId;
-    (void)format;
-    (void)type;
+// gfxstream reads back bottom row first; the C API promises top row first
+void deliverFrame(int width, int height, const uint8_t* pixels, bool bottomUp) {
     ost_frame_fn fn;
     void* user;
     {
@@ -78,11 +76,10 @@ void onPost(void* ctx, uint32_t displayId, int width, int height, int ydir, int 
         user = g.frameUser;
     }
     if (!fn || !pixels || width <= 0 || height <= 0) return;
-    if (ydir >= 0) {
+    if (!bottomUp) {
         fn(user, width, height, pixels);
         return;
     }
-    // gfxstream reads back bottom row first; the C API promises top row first
     static thread_local std::vector<uint8_t> flipped;
     const size_t row = (size_t)width * 4;
     flipped.resize(row * (size_t)height);
@@ -90,6 +87,55 @@ void onPost(void* ctx, uint32_t displayId, int width, int height, int ydir, int 
         memcpy(flipped.data() + (size_t)y * row, pixels + (size_t)(height - 1 - y) * row, row);
     }
     fn(user, width, height, flipped.data());
+}
+
+// Async readback (GLES 3 hosts): gfxstream's post callback only says "a frame is ready";
+// the pixels have to be pulled with its ReadPixelsCallback, which waits for gfxstream's
+// readback thread, so not from inside the callback. A puller thread does it.
+struct Puller {
+    std::mutex mu;
+    std::condition_variable cv;
+    bool pending = false, quit = false;
+    int width = 0, height = 0;
+    gfxstream::Renderer::ReadPixelsCallback read = nullptr;
+    std::thread thread;
+} gp;
+
+void pullerMain() {
+    std::vector<uint8_t> buf;
+    for (;;) {
+        int w, h;
+        {
+            std::unique_lock<std::mutex> lk(gp.mu);
+            gp.cv.wait(lk, [] { return gp.pending || gp.quit; });
+            if (gp.quit) return;
+            gp.pending = false;
+            w = gp.width;
+            h = gp.height;
+        }
+        buf.resize((size_t)w * h * 4);
+        gp.read(buf.data(), (uint32_t)buf.size(), 0);
+        deliverFrame(w, h, buf.data(), false);   // getPixels rows are top-down already
+    }
+}
+
+void onPost(void* ctx, uint32_t displayId, int width, int height, int ydir, int format,
+            int type, unsigned char* pixels) {
+    (void)ctx;
+    (void)displayId;
+    (void)format;
+    (void)type;
+    if (gp.read) {                       // async: hand off to the puller (coalesces)
+        {
+            std::lock_guard<std::mutex> lk(gp.mu);
+            gp.pending = true;
+            gp.width = width;
+            gp.height = height;
+        }
+        gp.cv.notify_one();
+        return;
+    }
+    deliverFrame(width, height, pixels, ydir < 0);
 }
 
 // The guest is the goldfish-opengl-pie generation (Android emulator stack, BlueStacks fork):
@@ -220,6 +266,10 @@ OST_API void ost_renderer_set_frame_callback(ost_frame_fn fn, void* user) {
     }
     if (r) {
         if (fn) {
+            if (r->asyncReadbackSupported() && !gp.thread.joinable()) {
+                gp.read = r->getReadPixelsCallback();
+                gp.thread = std::thread(pullerMain);
+            }
             r->setPostCallback(onPost, nullptr, false /* RGBA */, 0);
         } else {
             r->setPostCallback(nullptr, nullptr, false, 0);
@@ -326,6 +376,14 @@ OST_API void ost_renderer_shutdown(void) {
         std::lock_guard<std::mutex> lk(g.mu);
         r = std::move(g.renderer);
         g.frame = nullptr;
+    }
+    if (gp.thread.joinable()) {
+        {
+            std::lock_guard<std::mutex> lk(gp.mu);
+            gp.quit = true;
+        }
+        gp.cv.notify_one();
+        gp.thread.join();
     }
     if (r) r->stop(true);
 }

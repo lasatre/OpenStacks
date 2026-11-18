@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import sys
 import urllib.request
@@ -11,12 +12,13 @@ from pathlib import Path
 
 from . import paths
 
-PLATFORM_TOOLS_URL = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+PLATFORM_TOOLS_URL = ("https://dl.google.com/android/repository/platform-tools-latest-"
+                      + ("windows" if paths.WINDOWS else "linux") + ".zip")
 
 
 @dataclass
 class Problem:
-    key: str          # "qemu" | "renderer" | "whpx" | "adb"
+    key: str          # "qemu" | "renderer" | "whpx" | "kvm" | "adb"
     title: str
     detail: str
     fixable: bool = False   # an automatic fix exists (download)
@@ -41,23 +43,44 @@ def whpx_available() -> bool | None:
         return None
 
 
+def kvm_problem() -> Problem | None:
+    """Linux: /dev/kvm must exist and be read/writable by us (usually: the kvm group)."""
+    if paths.WINDOWS:
+        return None
+    kvm = Path("/dev/kvm")
+    if not kvm.exists():
+        return Problem("kvm", "KVM is not available",
+                       "/dev/kvm does not exist. Enable virtualization (VT-x / AMD-V) in the "
+                       "firmware settings and make sure the kvm_intel or kvm_amd module is "
+                       "loaded. Without it QEMU falls back to software emulation, which is "
+                       "far too slow for Android.")
+    if not os.access(kvm, os.R_OK | os.W_OK):
+        return Problem("kvm", "No permission to use KVM",
+                       "/dev/kvm is not accessible to your user. Add yourself to its group "
+                       "(usually: sudo usermod -aG kvm $USER) and log in again.")
+    return None
+
+
 def run(global_settings, instances=()) -> list[Problem]:
     """Problems that stop instances from starting. With `instances`, the renderer check
     covers only the renderers they use (BlueStacks' DLL vs the open gfxstream one)."""
     out: list[Problem] = []
     qemu = global_settings.resolved_qemu_path()
+    build = r"qemu\build.cmd" if paths.WINDOWS else "qemu/build.sh"
     if not qemu or not Path(qemu).exists():
         out.append(Problem("qemu", "QEMU not found",
-                           f"Expected {paths.QEMU_EXE}. In a source checkout run "
-                           "qemu\\build.cmd; the release ZIP ships it in qemu\\."))
+                           f"Expected {paths.QEMU_EXE}. In a source checkout run {build}; "
+                           "the release ships it in qemu" + os.sep + "."))
     used = {getattr(i, "renderer", "gfxstream") for i in instances} or {"gfxstream"}
     if "gfxstream" in used and qemu:
         missing = [f for f in paths.GFXSTREAM_FILES if not (Path(qemu).parent / f).exists()]
         if missing:
+            script = (r"renderer\build_gfxstream.cmd" if paths.WINDOWS
+                      else "renderer/build_gfxstream.sh")
             out.append(Problem("renderer", "The open renderer is missing",
                                f"{', '.join(missing)} not found next to QEMU. In a source "
-                               "checkout run renderer\\build_gfxstream.cmd."))
-    if "bluestacks" in used and not paths.RENDERER_DLL.exists():
+                               f"checkout run {script}."))
+    if "bluestacks" in used and paths.WINDOWS and not paths.RENDERER_DLL.exists():
         out.append(Problem("renderer", "BlueStacks 5 is not installed",
                            "An instance is set to BlueStacks' GPU renderer "
                            f"({paths.RENDERER_DLL.name}), which cannot be redistributed. "
@@ -68,6 +91,9 @@ def run(global_settings, instances=()) -> list[Problem]:
                            "Enable it in 'Turn Windows features on or off' (Windows "
                            "Hypervisor Platform) and reboot. Without it QEMU falls back to "
                            "software emulation, which is far too slow for Android."))
+    kvm = kvm_problem()
+    if kvm:
+        out.append(kvm)
     adb = global_settings.resolved_adb_path()
     if not adb or not Path(adb).exists():
         out.append(Problem("adb", "adb not found",
@@ -82,7 +108,7 @@ def run(global_settings, instances=()) -> list[Problem]:
 
 
 def download_platform_tools(progress=None) -> Path:
-    """Google's platform-tools zip -> <data>/deps/platform-tools/adb.exe."""
+    """Google's platform-tools zip -> <data>/deps/platform-tools/adb[.exe]."""
     dest = paths.DEPS_DIR
     dest.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(PLATFORM_TOOLS_URL, headers={"User-Agent": "OpenStacks"})
@@ -99,7 +125,11 @@ def download_platform_tools(progress=None) -> Path:
     shutil.rmtree(dest / "platform-tools", ignore_errors=True)
     with zipfile.ZipFile(buf) as z:
         z.extractall(dest)
-    adb = dest / "platform-tools" / "adb.exe"
+    adb = dest / "platform-tools" / f"adb{paths.EXE}"
     if not adb.exists():
-        raise RuntimeError("platform-tools zip had no adb.exe")
+        raise RuntimeError(f"platform-tools zip had no {adb.name}")
+    if not paths.WINDOWS:                 # zipfile drops the execute bits
+        for f in (dest / "platform-tools").iterdir():
+            if f.is_file() and (f.suffix == "" or f.suffix == ".so"):
+                f.chmod(f.stat().st_mode | 0o755)
     return adb

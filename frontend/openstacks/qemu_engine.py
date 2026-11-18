@@ -37,7 +37,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import GlobalSettings, Instance, REPO_ROOT
+from .config import DEFAULT_ACCEL, GlobalSettings, Instance, REPO_ROOT
 
 from . import paths, procs
 
@@ -164,8 +164,9 @@ class QemuEngine:
         qemu = g.resolved_qemu_path()
         if not qemu or not Path(qemu).exists():
             raise QemuNotFoundError(
-                "qemu-system-x86_64.exe not found; set global 'qemu_path' in "
-                "instances.conf (patched build needs C:\\msys64\\ucrt64\\bin on PATH)."
+                f"{paths.QEMU_EXE.name} not found; set global 'qemu_path' in "
+                "instances.conf" + (" (patched build needs C:\\msys64\\ucrt64\\bin on PATH)."
+                                    if paths.WINDOWS else " or run qemu/build.sh.")
             )
         assets = Path(g.resolved_assets_dir(inst.image) or ".")
         kernel = assets / inst.kernel
@@ -196,7 +197,9 @@ class QemuEngine:
         if Path(bios).exists():
             argv += ["-L", bios]
 
-        accel = g.acceleration or "whpx"
+        accel = g.acceleration or DEFAULT_ACCEL
+        if accel in ("whpx", "kvm"):     # a config from the other OS: its hypervisor
+            accel = DEFAULT_ACCEL
         if accel == "whpx":
             accel = "whpx,hyperv=off"   # Phase-76: VMware leaf + TSC freq
         argv += ["-machine", "pc", "-accel", accel]
@@ -255,8 +258,13 @@ class QemuEngine:
                 except OSError as e:
                     warnings.append(f"bst props not written ({e}); using built-ins")
             if dev == "bstaudio":
-                # Phase-69: real playback through the host's DirectSound
-                argv += ["-audiodev", "dsound,id=snd0"]
+                # Phase-69: real playback through the host's DirectSound / PulseAudio
+                # (PipeWire desktops serve the latter through pipewire-pulse). QEMU
+                # refuses to start when its PulseAudio server is unreachable: none then.
+                drv = "dsound" if paths.WINDOWS else "pa" if _pulse_available() else "none"
+                if drv == "none":
+                    warnings.append("no PulseAudio server found: the instance has no sound")
+                argv += ["-audiodev", drv + ",id=snd0"]
                 opts += ",audiodev=snd0"
             argv += ["-device", f"{dev}{opts}"]
 
@@ -349,8 +357,8 @@ class QemuEngine:
                 f.unlink()
             except OSError:
                 pass
-        env["TMP"] = env["TEMP"] = str(qtmp)
-        if "qemu_bst" in argv[0] or Path(argv[0]).parent.name == "build":
+        env["TMP"] = env["TEMP"] = env["TMPDIR"] = str(qtmp)
+        if paths.WINDOWS and ("qemu_bst" in argv[0] or Path(argv[0]).parent.name == "build"):
             env["PATH"] = MSYS2_BIN + os.pathsep + env.get("PATH", "")
             env.setdefault("QEMU_AUDIO_DRV", "none")
         # GR_* knobs: the grbridge render path reads env at QEMU startup; the
@@ -383,7 +391,8 @@ class QemuEngine:
                     argv, stdout=logf, stderr=subprocess.STDOUT, cwd=cwd,
                     env=env,
                     creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                    | NO_WINDOW)          # windowed .exe: no console window for QEMU
+                    | NO_WINDOW,          # windowed .exe: no console window for QEMU
+                    start_new_session=not paths.WINDOWS)   # a terminal's ^C is not QEMU's
             except OSError as e:
                 return LaunchResult(False, argv, warnings, f"failed to spawn QEMU: {e}")
             for w in warnings:
@@ -558,6 +567,23 @@ def _is_qemu(pid: int) -> bool:
         return Path(buf.value).name.lower().startswith("qemu-system")
     finally:
         k32.CloseHandle(h)
+
+
+def _pulse_available() -> bool:
+    """A PulseAudio server QEMU can reach ($PULSE_SERVER, or the session's native socket;
+    pipewire-pulse provides the same socket)."""
+    srv = os.environ.get("PULSE_SERVER", "")
+    if srv and not srv.startswith("unix:"):
+        return True                                    # tcp: etc., trust it
+    rt = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    sock = srv[5:] if srv else str(Path(rt, "pulse", "native"))
+    try:                                               # a stale socket file is not enough
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            s.connect(sock)
+        return True
+    except OSError:
+        return False
 
 
 def _port_in_use(port: int) -> bool:

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBo
                                QMainWindow, QMessageBox, QPushButton,
                                QSpinBox, QVBoxLayout, QWidget)
 
-from . import __version__
+from . import __version__, paths
 from .adb import Adb, AdbError
 from .config import Instance, KNOWN_DEVICES, Store
 from .qemu_engine import ENGINE as qemu_engine
@@ -144,10 +144,14 @@ class InstanceEditDialog(QDialog):
 
         self.cb_renderer = QComboBox()
         self.cb_renderer.addItem("Open renderer (gfxstream)", "gfxstream")
-        self.cb_renderer.addItem("BlueStacks (needs BlueStacks 5 installed)", "bluestacks")
+        if "bluestacks" in paths.RENDERERS:     # Windows only
+            self.cb_renderer.addItem("BlueStacks (needs BlueStacks 5 installed)", "bluestacks")
         k = self.cb_renderer.findData(getattr(i, "renderer", "gfxstream"))
         self.cb_renderer.setCurrentIndex(max(k, 0))
-        form.addRow("GPU renderer", self.cb_renderer)
+        if len(paths.RENDERERS) > 1:
+            form.addRow("GPU renderer", self.cb_renderer)
+        else:
+            self.cb_renderer.hide()
 
         self.ed_append = QLineEdit(i.extra_append)
         self.ed_append.setPlaceholderText("extra kernel args / KEY=VALUE props for -append")

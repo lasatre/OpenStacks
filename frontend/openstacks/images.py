@@ -199,7 +199,7 @@ def find_7z() -> Optional[str]:
         p = shutil.which(name)
         if p:
             return p
-    for p in (str(paths.TOOLS_DIR / "7zr.exe"),
+    for p in (str(paths.TOOLS_DIR / "7zr.exe"), str(paths.TOOLS_DIR / "7zz"),
               r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe",
               r"C:\Program Files\BlueStacks_nxt\7zr.exe"):
         if Path(p).exists():

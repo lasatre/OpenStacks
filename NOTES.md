@@ -751,6 +751,26 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
 - boot.py `--persist` now copies the data template into the run dir (it used to write
   assets/<Image>/Data_template.vhdx in place); `--reuse` reboots the same run.
 
+## 10u. Wallpaper
+
+- BlueStacks' wallpaper is the framework default (`/data/system/users/0` only holds
+  wallpaper_info.xml), so `patches/all/15_wallpaper.py` writes Android's per-user files
+  (`wallpaper_orig`, `wallpaper`, info xml) from stage2 when no wallpaper is set, or when the
+  current one is a previous OpenStacks one (md5 in `.ost_wallpaper`). A wallpaper the user
+  picked is never overwritten. Nougat gets SELinux labels via toybox chcon before init, which
+  works.
+- Sizing differs by version:
+  - **Android 7/9:** Launcher3 (Lawnchair) requests 2M x M (M = longer side; 3200x1600 at
+    1600x900), and ImageWallpaper draws the stored `wallpaper` file 1:1 once it's larger than
+    the screen. Android's boot-time crop generation produced a 2x1 px JPEG here. So 2:1
+    images per M (1280/1600/1920) are shipped and the closest is chosen from BST_FB_*; that
+    works in both orientations.
+  - **Android 10+:** scales the wallpaper to the screen, so a 16:9 and a 9:16 image are
+    shipped and picked by orientation.
+- Images: `brand/openstacks_wallpaper.py --android` (the brand wallpaper generator; dithered
+  PNG). JPEG brought the gradient banding back, so the files stay PNG and the boot script
+  deletes them from the RAM-resident ramdisk once used.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

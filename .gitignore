@@ -5,7 +5,7 @@ __pycache__/
 *.pyc
 
 # BlueStacks-derived runtime files (made locally by tools/prepare_assets.py)
-assets/
+/assets/
 instances/
 
 # local scratch: guest/host binaries pulled for reverse engineering

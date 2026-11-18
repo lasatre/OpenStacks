@@ -22,5 +22,7 @@ Current patches:
   4.9 kernel has no ata_piix).
 - `all/10_debloat_lawnchair.py` - remove BlueStacks' launcher, store, rewards, now.gg
   accounts/ads/billing; install Lawnchair as the only launcher (version per image).
+- `all/15_wallpaper.py` - OpenStacks wallpaper (images in `assets/`, made by
+  `brand/openstacks_wallpaper.py --android`), set per instance unless the user picked their own.
 - `all/20_magisk.py` - start Magisk at boot for instances rooted with the player's Root
   button (opt-in per instance via /data/adb/.ost_magisk; no-op otherwise).

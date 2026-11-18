@@ -243,10 +243,7 @@ class ManagerWindow(QMainWindow):
         text.setText(
             f"<p align=center><b>OpenStacks {__version__}</b><br>"
             "Licensed under the GNU GPL v2.0 or later</p>"
-            "<p>Runs BlueStacks 5 Android images (Android 7, 9, 11 and 13) on QEMU, with "
-            "re-implemented BlueStacks paravirtual devices and BlueStacks 5's own GPU "
-            "renderer. Images are downloaded from BlueStacks' servers and cleaned up "
-            "locally (no BlueStacks launcher, store or ads; Lawnchair as the home screen).</p>"
+            "<p>Runs de-bloated BlueStacks 5 Android images through QEMU"
             "<p>Not affiliated with or endorsed by BlueStacks or now.gg. BlueStacks 5 must "
             "be installed for its renderer.</p>"
             "<p><b>Third-party software</b>: QEMU (GPL-2.0), Qt / PySide6 (LGPL-3.0), "

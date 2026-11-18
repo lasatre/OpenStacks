@@ -209,6 +209,13 @@ jobs:
             libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1
 
+      # the front-end needs Python 3.12+ (see packaging/build_linux.sh: PySide6's
+      # Signal.emit leaks references to True, fatal before 3.12's immortal objects)
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Cache QEMU source tarball
         uses: actions/cache@v4
         with:
@@ -235,7 +242,7 @@ jobs:
           key: packaging-tools-${{ hashFiles('packaging/build_linux.sh') }}
 
       - name: Build QEMU, the open renderer, the front-end, the AppImage
-        run: STAMP_VERSION=1 bash packaging/build_linux.sh "$VERSION"
+        run: STAMP_VERSION=1 PYTHON="${{ steps.py.outputs.python-path }}" bash packaging/build_linux.sh "$VERSION"
 
       - name: ccache stats
         run: ccache -s

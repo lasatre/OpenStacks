@@ -57,6 +57,19 @@ def smoke(report: str = "") -> int:
     except ImportError as e:
         ok = False
         lines.append(f"FAIL truststore: {e!r}")
+    # PySide6 6.12 drops a reference to True on every Signal.emit(); only Python 3.12+
+    # (immortal True) survives that. A 3.10 build ran out of True and aborted at exit.
+    from PySide6.QtCore import QObject, Signal
+
+    class _Probe(QObject):
+        sig = Signal(int)
+    probe, before = _Probe(), sys.getrefcount(True)
+    for _ in range(200):
+        probe.sig.emit(1)
+    leaked = before - sys.getrefcount(True) >= 100
+    ok &= not leaked
+    lines.append(f"{'FAIL' if leaked else 'ok  '} Signal.emit keeps True alive "
+                 f"(Python {sys.version.split()[0]})")
     seven = find_7z()
     lines.append(f"{'ok  ' if seven else 'FAIL'} 7-Zip: {seven}")
     ok &= bool(seven)

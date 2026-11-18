@@ -11,8 +11,11 @@
 #  RENDERER_BUILD (deps/ost-renderer-build-linux/), GFX_SRC (deps/gfxstream), VENV
 #  (.venv-linux/), WORK_DIR (dist/, build-pyi/, release/: the repo). Tool downloads (pinned, sha256-checked) are cached in DL_DIR
 #  (deps/packaging/). Output: release/OpenStacks-<version>-x86_64.AppImage.
-#  Needs what qemu/build.sh and renderer/build_gfxstream.sh need, plus python3-venv,
-#  patchelf, file, curl.
+#  Needs what qemu/build.sh and renderer/build_gfxstream.sh need, plus Python >= 3.12
+#  with venv and a shared libpython (PYTHON, default python3.12), patchelf, file, curl.
+#  Not 3.10/3.11: PySide6 6.12's Signal.emit() drops a reference to True on every call,
+#  harmless only where True is immortal (3.12+); on 3.10 True ran out and the app
+#  aborted ("free(): invalid size", usually at exit).
 # ==========================================================================
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,6 +27,7 @@ VERSION="${VERSION#v}"
 QEMU_BUILD="${QEMU_BUILD:-$ROOT/build-linux}"
 RENDERER_BUILD="${RENDERER_BUILD:-$ROOT/deps/ost-renderer-build-linux}"
 VENV="${VENV:-$ROOT/.venv-linux}"
+PYTHON="${PYTHON:-python3.12}"
 WORK="${WORK_DIR:-$ROOT}"          # dist/, build-pyi/, release/ go here
 DL="${DL_DIR:-$ROOT/deps/packaging}"
 
@@ -56,7 +60,12 @@ done
   || { echo "QEMU lacks the OpenStacks devices"; exit 1; }
 
 # front-end
-[ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
+"$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 12))'   || { echo "$PYTHON: Python 3.12+ needed (see the header)"; exit 1; }
+# a venv made by another Python (the old 3.10 one) is rebuilt
+if [ -x "$VENV/bin/python" ] && [ "$("$VENV/bin/python" -c 'import sys; print(sys.version_info[:2])')"      != "$("$PYTHON" -c 'import sys; print(sys.version_info[:2])')" ]; then
+  rm -rf "$VENV"
+fi
+[ -x "$VENV/bin/python" ] || "$PYTHON" -m venv "$VENV"
 "$VENV/bin/python" -m pip install -q --upgrade pip
 "$VENV/bin/python" -m pip install -q -r frontend/requirements.txt pyinstaller
 "$VENV/bin/python" -m PyInstaller --noconfirm --log-level WARN --distpath "$WORK/dist" \

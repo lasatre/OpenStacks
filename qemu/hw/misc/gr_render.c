@@ -47,6 +47,7 @@
 #include "qemu/main-loop.h"
 #include "qemu/aio.h"
 #include "ui/input.h"
+#include <ole2.h>          /* IDropTarget: files dragged onto the native screen */
 
 /* windows.h comes in via qemu/osdep.h on win32 */
 
@@ -2586,6 +2587,132 @@ static bool gr_input_msg(HWND h, UINT m, WPARAM w, LPARAM l)
     return false;
 }
 
+/* Files dropped from Explorer onto the screen. The screen is our window
+ * (QEMU process) embedded into the front-end, so the front-end's own drop
+ * handling never sees them. Explorer drags are OLE: a registered drop target
+ * on our host window (found by OLE walking up from the DLL's child window)
+ * accepts files and hands the paths to the front-end window that hosts us:
+ * WM_COPYDATA, dwData 'OSTD', UTF-16 paths joined by '\n', wParam = our HWND.
+ * ole32/shell32 are loaded on demand so QEMU's link line stays unchanged. */
+#define GR_DROP_MAGIC 0x4F535444u          /* 'OSTD' */
+typedef UINT (WINAPI *DragQueryFileW_t)(HANDLE, UINT, LPWSTR, UINT);
+typedef HRESULT (WINAPI *OleInitialize_t)(LPVOID);
+typedef HRESULT (WINAPI *RegisterDragDrop_t)(HWND, IDropTarget *);
+typedef void (WINAPI *ReleaseStgMedium_t)(STGMEDIUM *);
+static DragQueryFileW_t p_DragQueryFileW;
+static ReleaseStgMedium_t p_ReleaseStgMedium;
+static bool g_dragFiles;
+
+static void gr_forward_drop(HWND h, HANDLE drop)
+{
+    UINT n = p_DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0), i;
+    GString *s = g_string_new(NULL);
+    static wchar_t path[32768];
+    for (i = 0; i < n; i++) {
+        UINT len = p_DragQueryFileW(drop, i, path, G_N_ELEMENTS(path));
+        if (len) {
+            if (s->len) {
+                g_string_append_len(s, (const char *)L"\n", sizeof(wchar_t));
+            }
+            g_string_append_len(s, (const char *)path, len * sizeof(wchar_t));
+        }
+    }
+    HWND root = GetAncestor(h, GA_ROOT);
+    if (s->len && root && root != h) {          /* root == h: not embedded */
+        COPYDATASTRUCT cds = { .dwData = GR_DROP_MAGIC, .cbData = (DWORD)s->len,
+                               .lpData = s->str };
+        SendMessageTimeoutW(root, WM_COPYDATA, (WPARAM)h, (LPARAM)&cds,
+                            SMTO_ABORTIFHUNG, 3000, NULL);
+        gr_log("native display: %u dropped file(s) -> front-end", n);
+    }
+    g_string_free(s, TRUE);
+}
+
+static FORMATETC g_fmtFiles = { CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+static const GUID k_IID_IUnknown =
+    { 0x00000000, 0x0000, 0x0000, { 0xC0, 0, 0, 0, 0, 0, 0, 0x46 } };
+static const GUID k_IID_IDropTarget =
+    { 0x00000122, 0x0000, 0x0000, { 0xC0, 0, 0, 0, 0, 0, 0, 0x46 } };
+
+static HRESULT STDMETHODCALLTYPE dt_QueryInterface(IDropTarget *t, REFIID riid, void **pp)
+{
+    if (!memcmp(riid, &k_IID_IUnknown, sizeof(GUID)) ||
+        !memcmp(riid, &k_IID_IDropTarget, sizeof(GUID))) {
+        *pp = t;
+        return S_OK;
+    }
+    *pp = NULL;
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE dt_AddRef(IDropTarget *t) { (void)t; return 1; }
+static ULONG STDMETHODCALLTYPE dt_Release(IDropTarget *t) { (void)t; return 1; }
+
+static HRESULT STDMETHODCALLTYPE dt_DragEnter(IDropTarget *t, IDataObject *d, DWORD keys,
+                                              POINTL pt, DWORD *effect)
+{
+    (void)t; (void)keys; (void)pt;
+    g_dragFiles = d && d->lpVtbl->QueryGetData(d, &g_fmtFiles) == S_OK;
+    *effect = g_dragFiles ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE dt_DragOver(IDropTarget *t, DWORD keys, POINTL pt,
+                                             DWORD *effect)
+{
+    (void)t; (void)keys; (void)pt;
+    *effect = g_dragFiles ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE dt_DragLeave(IDropTarget *t)
+{
+    (void)t;
+    g_dragFiles = false;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *t, IDataObject *d, DWORD keys,
+                                         POINTL pt, DWORD *effect)
+{
+    STGMEDIUM stg;
+    (void)t; (void)keys; (void)pt;
+    *effect = DROPEFFECT_NONE;
+    if (d && g_dragFiles && d->lpVtbl->GetData(d, &g_fmtFiles, &stg) == S_OK) {
+        gr_forward_drop(g.hwnd, (HANDLE)stg.hGlobal);
+        p_ReleaseStgMedium(&stg);
+        *effect = DROPEFFECT_COPY;
+    }
+    g_dragFiles = false;
+    return S_OK;
+}
+
+static IDropTargetVtbl g_dtVtbl = {
+    dt_QueryInterface, dt_AddRef, dt_Release,
+    dt_DragEnter, dt_DragOver, dt_DragLeave, dt_Drop,
+};
+static IDropTarget g_dropTarget = { &g_dtVtbl };
+
+/* on the UI thread (it owns the window and pumps messages, as OLE needs) */
+static void gr_register_drop(HWND h)
+{
+    HMODULE ole = LoadLibraryA("ole32.dll"), sh = LoadLibraryA("shell32.dll");
+    OleInitialize_t p_OleInitialize = NULL;
+    RegisterDragDrop_t p_RegisterDragDrop = NULL;
+    if (ole && sh) {
+        p_OleInitialize = (OleInitialize_t)(void *)GetProcAddress(ole, "OleInitialize");
+        p_RegisterDragDrop = (RegisterDragDrop_t)(void *)GetProcAddress(ole, "RegisterDragDrop");
+        p_ReleaseStgMedium = (ReleaseStgMedium_t)(void *)GetProcAddress(ole, "ReleaseStgMedium");
+        p_DragQueryFileW = (DragQueryFileW_t)(void *)GetProcAddress(sh, "DragQueryFileW");
+    }
+    if (!p_OleInitialize || !p_RegisterDragDrop || !p_ReleaseStgMedium || !p_DragQueryFileW) {
+        gr_log("native display: drag & drop unavailable (ole32/shell32)");
+        return;
+    }
+    HRESULT hr = p_OleInitialize(NULL);
+    if (SUCCEEDED(hr)) {
+        hr = p_RegisterDragDrop(h, &g_dropTarget);
+    }
+    gr_log("native display: file drop target %s (hr=0x%08lx)",
+           SUCCEEDED(hr) ? "registered" : "FAILED", (unsigned long)hr);
+}
+
 static LRESULT CALLBACK gr_child_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (gr_input_msg(h, m, w, l)) return 0;
@@ -2718,6 +2845,9 @@ static DWORD WINAPI gr_ui_thread(LPVOID arg)
     MSG m;
     (void)arg;
     g.hwnd = gr_make_window(GR_W, GR_H);
+    if (g.hwnd) {
+        gr_register_drop(g.hwnd);      /* files dragged onto the screen */
+    }
     SetEvent(g_uiReady);
     while (GetMessageW(&m, NULL, 0, 0) > 0) {
         TranslateMessage(&m);

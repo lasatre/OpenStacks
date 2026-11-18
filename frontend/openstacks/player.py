@@ -30,6 +30,8 @@ Run via:
 
 from __future__ import annotations
 
+import ctypes
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -101,6 +103,79 @@ class BootStateWatch(QThread):
             self.wait(3000)
 
 
+# -- Windows messages from/for the native screen ------------------------------------------
+# Files dropped on the native screen arrive from QEMU (gr_render.c) as WM_COPYDATA
+# (dwData 'OSTD', UTF-16 paths joined by '\n'); WM_SIZING keeps the pop-out proportional.
+_WM_COPYDATA, _WM_SIZING = 0x004A, 0x0214
+_DROP_MAGIC = 0x4F535444
+
+
+def _win_msg(message):
+    if sys.platform != "win32":
+        return None
+    from ctypes import wintypes
+    return wintypes.MSG.from_address(int(message))
+
+
+def _dropped_paths(msg) -> Optional[list[str]]:
+    """Paths from a QEMU drop message, else None."""
+    if msg is None or msg.message != _WM_COPYDATA or not msg.lParam:
+        return None
+
+    class COPYDATA(ctypes.Structure):
+        _fields_ = [("dwData", ctypes.c_size_t), ("cbData", ctypes.c_uint32),
+                    ("lpData", ctypes.c_void_p)]
+    cds = COPYDATA.from_address(msg.lParam)
+    if cds.dwData != _DROP_MAGIC or not cds.lpData:
+        return None
+    return [p for p in ctypes.wstring_at(cds.lpData, cds.cbData // 2).split("\n") if p]
+
+
+def _keep_aspect(msg, hwnd: int, aw: int, ah: int) -> bool:
+    """WM_SIZING: adjust the dragged window rect so its client area stays aw:ah."""
+    if msg is None or msg.message != _WM_SIZING or aw <= 0 or ah <= 0:
+        return False
+    from ctypes import wintypes
+    u32 = ctypes.windll.user32
+    wr, cr = wintypes.RECT(), wintypes.RECT()
+    u32.GetWindowRect(hwnd, ctypes.byref(wr))
+    u32.GetClientRect(hwnd, ctypes.byref(cr))
+    fw = (wr.right - wr.left) - cr.right               # frame + caption, physical px
+    fh = (wr.bottom - wr.top) - cr.bottom
+    r = wintypes.RECT.from_address(msg.lParam)
+    cw, ch = (r.right - r.left) - fw, (r.bottom - r.top) - fh
+    edge = msg.wParam                                  # WMSZ_LEFT=1 .. BOTTOMRIGHT=8
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+    mi = MONITORINFO(ctypes.sizeof(MONITORINFO))
+    u32.MonitorFromWindow.restype = ctypes.c_void_p
+    u32.GetMonitorInfoW(ctypes.c_void_p(u32.MonitorFromWindow(hwnd, 2)), ctypes.byref(mi))
+    max_ch = (mi.rcWork.bottom - mi.rcWork.top) - fh   # client may not outgrow the desktop
+    capped = edge not in (3, 6) and max_ch > 0 and round(cw * ah / aw) > max_ch
+    if edge in (3, 6) or capped:
+        # height-driven: top/bottom edges, or a width that would outgrow the desktop
+        ch = max_ch if capped else (min(ch, max_ch) if max_ch > 0 else ch)
+        nw = round(ch * aw / ah) + fw
+        if edge in (1, 4, 7):                          # dragging a left edge: keep the right
+            r.left = r.right - nw
+        else:
+            r.right = r.left + nw
+        if edge not in (3, 6):
+            if edge in (4, 5):
+                r.top = r.bottom - (ch + fh)
+            else:
+                r.bottom = r.top + ch + fh
+    else:                                              # sides and corners: height follows
+        nh = round(cw * ah / aw) + fh
+        if edge in (4, 5):                             # top corners move the top edge
+            r.top = r.bottom - nh
+        else:
+            r.bottom = r.top + nh
+    return True
+
+
 class ScreenWindow(QWidget):
     """The Android screen alone in its own window (Pop Out). Closing it puts
     the screen back into the player's Screen tab; the instance keeps running."""
@@ -120,6 +195,17 @@ class ScreenWindow(QWidget):
         mh = int(avail.height() * 0.85) if avail else 860
         scale = min(1.0, mw / max(w, 1), mh / max(h, 1))
         self.resize(int(w * scale), int(h * scale))
+
+    def nativeEvent(self, event_type, message):
+        msg = _win_msg(message)
+        paths = _dropped_paths(msg)
+        if paths:
+            self.pane.drop_files(paths)
+            return True, 1
+        # always proportional, like BlueStacks (maximized: letterboxed in the window colour)
+        if _keep_aspect(msg, int(self.winId()), *self.pane._screen_size()):
+            return True, 1
+        return super().nativeEvent(event_type, message)
 
     def closeEvent(self, ev) -> None:
         if not self._returning:
@@ -759,6 +845,22 @@ class PlayerWindow(QMainWindow):
                 th.start()
                 self._bg_threads.append(th)
         self.tabs.removeTab(idx)
+
+    def nativeEvent(self, event_type, message):
+        paths = _dropped_paths(_win_msg(message))
+        if paths:                     # dropped on a native screen: its pane, else the current
+            sender = int(_win_msg(message).wParam or 0)
+            target = self.current_pane()
+            for pane in self._panes():
+                host = getattr(pane.display, "_hwnd", 0) if pane.native else 0
+                if host and sender and (host == sender
+                                        or ctypes.windll.user32.IsChild(host, sender)):
+                    target = pane
+                    break
+            if target is not None:
+                target.drop_files(paths)
+            return True, 1
+        return super().nativeEvent(event_type, message)
 
     def fit_to_screen(self, pane: Optional["PlayerPane"] = None) -> None:
         """Resize the window so the Screen tab has exactly the guest's aspect ratio (no

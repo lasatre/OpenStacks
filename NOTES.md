@@ -771,6 +771,21 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
   PNG). JPEG brought the gradient banding back, so the files stay PNG and the boot script
   deletes them from the RAM-resident ramdisk once used.
 
+## 10v. Drag & drop onto the native screen; proportional pop-out
+
+- The Android screen is QEMU's window embedded into the player, so Qt's drop handling never
+  saw drags over it. `WS_EX_ACCEPTFILES` alone was not enough: OLE ignored it across the
+  embedding.
+- gr_render.c now registers an OLE `IDropTarget` (ole32/shell32 loaded at runtime) on its
+  host window, on the UI thread that owns it and pumps its messages. It accepts `CF_HDROP`
+  with the copy effect and sends the paths to the embedding front-end window as
+  `WM_COPYDATA` (dwData 'OSTD', UTF-16, '\n'-separated, wParam = host HWND).
+  `PlayerWindow`/`ScreenWindow.nativeEvent` route them to `PlayerPane.drop_files`: APKs are
+  installed, everything else goes to Download. Confirmed with a real Explorer drag.
+- The popped-out screen keeps the guest's aspect while it's resized (`WM_SIZING`, edge-aware,
+  capped at the monitor's work area, height-driven when capped). Maximized, it letterboxes in
+  the window colour.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

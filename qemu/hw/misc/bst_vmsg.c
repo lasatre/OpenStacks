@@ -1,4 +1,6 @@
 /*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
  * bstvmsg - BlueStacks HvA virtual 'vmessage' PCI device.
  *
  * Guest kernel driver: initramfs_x/boot/bstmods/bstvmsg.ko

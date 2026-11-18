@@ -241,7 +241,8 @@ class ManagerWindow(QMainWindow):
         text.setWordWrap(True)
         text.setOpenExternalLinks(True)
         text.setText(
-            f"<p align=center><b>OpenStacks {__version__}</b></p>"
+            f"<p align=center><b>OpenStacks {__version__}</b><br>"
+            "Licensed under the GNU GPL v2.0 or later</p>"
             "<p>Runs BlueStacks 5 Android images (Android 7, 9, 11 and 13) on QEMU, with "
             "re-implemented BlueStacks paravirtual devices and BlueStacks 5's own GPU "
             "renderer. Images are downloaded from BlueStacks' servers and cleaned up "

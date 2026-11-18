@@ -1,4 +1,6 @@
 /*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
  * gr_render.h — Phase-2 render-bridge API for bstpgaipc.
  *
  * Encapsulates ALL work against BlueStacks' own libOpenglRender.dll:

@@ -168,6 +168,11 @@ Developer tools (from a source checkout):
 | `docs/` | Reverse-engineering specs and milestone screenshots |
 | `NOTES.md`, `BACKLOG.md` | Engineering log, planned work |
 
+## License
+
+OpenStacks is licensed under the [GNU General Public License v2.0 or later](LICENSE)
+(GPL-2.0-or-later).
+
 ## Third-party software
 
 The QEMU-based parts are GPL-2.0. The release bundles Qt/PySide6 (LGPL-3.0), 7-Zip

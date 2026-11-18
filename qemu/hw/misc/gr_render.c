@@ -316,6 +316,15 @@ typedef struct GrSock {
     uint32_t hKicks, hRaises, hSlots, hFlushes;
     uint32_t hOps[48][2];      /* opcode census (op, count) for the log   */
     uint32_t hOpN, hLastOps[8], hLastPos;
+    /* --- stream tracer (GR_TRACE=1, docs/renderer_plan.md): follows the
+     * [u32 opcode][u32 total size] framing of the guest stream on its own */
+    uint32_t trSkip;           /* handshake bytes still to skip            */
+    uint32_t trLeft;           /* bytes left in the current packet         */
+    uint8_t  trHdr[8];
+    uint32_t trHdrN;
+    bool     trBroken;         /* framing lost: stop tracing this cid      */
+    struct GrTraceOp *trOps;   /* census, open addressing (GR_TRACE_SLOTS)  */
+    uint64_t trLastDump;
 } GrSock;
 
 typedef struct GrState {
@@ -463,9 +472,13 @@ static void syn_producer_thread(void *obj, unsigned long long a2,
 
 static void pure_reset(GrSock *s);   /* Phase-64 GR_PURE lane */
 
+static void gr_trace_reset(GrSock *s);
+static void gr_trace_feed(GrSock *s, const uint8_t *p, uint32_t n);
+
 static void sock_prepare(GrSock *s, uint32_t cid)
 {
     pure_reset(s);
+    gr_trace_reset(s);
     if (s->wrapper != NULL) {
         /* RECONNECT on a live sock (exe refcounts it at +0x208): only
          * reset the ring cursors and the disconnect flag; the SRWLock
@@ -1511,6 +1524,7 @@ static uint8_t *hpp_take(GrSock *s, uint32_t need, bool advance, bool atPeek)
             }
             if (!pure_ensure(&s->hRx, &s->hRxCap, s->hRxValid + len)) return NULL;
             memcpy(s->hRx + s->hRxValid, W + HPP_HDR + slot * HPP_SLOT, len);
+            gr_trace_feed(s, W + HPP_HDR + slot * HPP_SLOT, len);
             s->hRxValid += len;
             head++;
             hpp_st(W, 4, head);
@@ -1783,6 +1797,127 @@ static void vt_pure_table_init(void)
     g_vt_pure[10] = (void *)pvt_createfinish;
 }
 
+/* ================================================================== */
+/* Stream tracer (GR_TRACE=1): which renderControl / GLES / Vulkan     */
+/* calls the guest really sends, per connection. Needed to map the     */
+/* BlueStacks protocol onto gfxstream (docs/renderer_plan.md). Parses  */
+/* the packet framing independently of how the renderer consumes it.  */
+#define GR_TRACE_SLOTS 1024
+
+typedef struct GrTraceOp { uint32_t op, count; uint64_t bytes; } GrTraceOp;
+
+static bool gr_trace_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        char b[4] = {0};
+        on = GetEnvironmentVariableA("GR_TRACE", b, sizeof(b)) > 0 && b[0] == '1';
+    }
+    return on == 1;
+}
+
+static void gr_trace_reset(GrSock *s)
+{
+    s->trSkip = 0x100;                   /* BlueStacks' handshake record   */
+    s->trLeft = s->trHdrN = 0;
+    s->trBroken = false;
+    s->trLastDump = GetTickCount64();
+    if (s->trOps) {
+        memset(s->trOps, 0, GR_TRACE_SLOTS * sizeof(GrTraceOp));
+    }
+}
+
+static const char *gr_trace_api(uint32_t op)
+{
+    return op >= 20000 ? "vk" : op >= 10000 ? "rc" : op >= 2048 ? "gl2" :
+           op >= 1024 ? "gl1" : "?";
+}
+
+static void gr_trace_dump(GrSock *s, const char *why)
+{
+    GrTraceOp top[GR_TRACE_SLOTS];
+    unsigned n = 0, i, j;
+    uint64_t total = 0;
+    char line[1024];
+    int o = 0;
+    if (!s->trOps) return;
+    for (i = 0; i < GR_TRACE_SLOTS; i++) {
+        if (s->trOps[i].count) top[n++] = s->trOps[i];
+    }
+    for (i = 1; i < n; i++) {            /* sort by opcode */
+        GrTraceOp t = top[i];
+        for (j = i; j > 0 && top[j - 1].op > t.op; j--) top[j] = top[j - 1];
+        top[j] = t;
+    }
+    for (i = 0; i < n; i++) total += top[i].count;
+    gr_log("trace %s cid=%u '%.48s' %u opcodes, %llu packets%s", why, s->cid,
+           (char *)s->raw + 0x30, n, (unsigned long long)total,
+           s->trBroken ? " (framing lost)" : "");
+    for (i = 0; i < n; i++) {            /* api:op:count:bytes, wrapped */
+        o += snprintf(line + o, sizeof(line) - o, "%s%u:%u:%llu ",
+                      gr_trace_api(top[i].op), top[i].op, top[i].count,
+                      (unsigned long long)top[i].bytes);
+        if (o > (int)sizeof(line) - 64 || i + 1 == n) {
+            gr_log("trace cid=%u %s", s->cid, line);
+            o = 0;
+        }
+    }
+}
+
+static void gr_trace_count(GrSock *s, uint32_t op, uint32_t size)
+{
+    unsigned h = (op * 2654435761u) & (GR_TRACE_SLOTS - 1), k;
+    for (k = 0; k < GR_TRACE_SLOTS; k++, h = (h + 1) & (GR_TRACE_SLOTS - 1)) {
+        GrTraceOp *e = &s->trOps[h];
+        if (e->count == 0 || e->op == op) {
+            e->op = op;
+            e->count++;
+            e->bytes += size;
+            return;
+        }
+    }
+}
+
+static void gr_trace_feed(GrSock *s, const uint8_t *p, uint32_t n)
+{
+    if (!gr_trace_on() || s->trBroken || !p) return;
+    if (!s->trOps) {
+        s->trOps = (GrTraceOp *)calloc(GR_TRACE_SLOTS, sizeof(GrTraceOp));
+        if (!s->trOps) return;
+    }
+    while (n) {
+        if (s->trSkip) {                 /* handshake */
+            uint32_t k = n < s->trSkip ? n : s->trSkip;
+            s->trSkip -= k; p += k; n -= k;
+            continue;
+        }
+        if (s->trLeft) {                 /* rest of the current packet */
+            uint32_t k = n < s->trLeft ? n : s->trLeft;
+            s->trLeft -= k; p += k; n -= k;
+            continue;
+        }
+        while (s->trHdrN < 8 && n) {     /* next header */
+            s->trHdr[s->trHdrN++] = *p++;
+            n--;
+        }
+        if (s->trHdrN < 8) break;
+        uint32_t op = ldl_le_p(s->trHdr), size = ldl_le_p(s->trHdr + 4);
+        s->trHdrN = 0;
+        if (size < 8 || size > (256u << 20) || op < 1024) {
+            s->trBroken = true;
+            gr_log("trace cid=%u: framing lost at op=%u size=%u", s->cid, op, size);
+            gr_trace_dump(s, "partial");
+            return;
+        }
+        gr_trace_count(s, op, size);
+        s->trLeft = size - 8;
+    }
+    if (GetTickCount64() - s->trLastDump > 30000) {   /* long-lived clients */
+        s->trLastDump = GetTickCount64();
+        gr_trace_dump(s, "periodic");
+    }
+}
+
 static void pure_write(GrSock *s, uint8_t *mb, uint32_t len)
 {
     uint8_t *win = GR_WIN(s->cid);
@@ -1794,6 +1929,7 @@ static void pure_write(GrSock *s, uint8_t *mb, uint32_t len)
     }
     S_WCNT(s) = len;
     S_RPOS(s) = 0;
+    gr_trace_feed(s, win, len);
     s->pWritePending = true;
     s->pWriteLen = len;
     s->pWrites++;
@@ -3200,6 +3336,7 @@ static void worker_dispatch_op(const GrOp *op)
         S_DISC(s) = 1;
         S_UNLOCK(s);
         WakeAllConditionVariable(S_CNDP(s));   /* HPP waiters exit (0x68) */
+        if (gr_trace_on()) gr_trace_dump(s, "close");
         if (s->hpp) {
             char ob[48 * 20 + 1];
             unsigned k, o = 0;

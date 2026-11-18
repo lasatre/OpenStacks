@@ -57,6 +57,26 @@ gr_render.c                                   adapter: C API -> gfxstream C++
 Selected with `OST_RENDERER=bluestacks|gfxstream` (default stays `bluestacks` until gfxstream
 is good enough).
 
+## What real traffic uses (GR_TRACE=1, `tools/re/trace_summary.py`)
+
+Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFlinger:
+112 distinct opcodes over 21 connections. gfxstream decodes **all but one**:
+
+- **GLES2 2488 = `glGetProgramStateInfoCustom`** (BlueStacks): `GL2Encoder::s_glLinkProgram`
+  calls it after **every** successful link, with no extension check (the stock goldfish loop of
+  `glGetActiveUniform` calls is gone from this guest; `goldfish-opengl-pie` fork). Required.
+  - request `[2488][12][program]`; reply `u32 L`, then `L` bytes:
+    `{u32 nU, u32 uStride, u32 nA, u32 aStride, u32 x10, u32 x14}` + nU records of
+    `uStride + 20` bytes + nA records of `aStride + 20` bytes, with
+    `L == nU*(uStride+20) + nA*(aStride+20) + 24`.
+  - record: `{u32 ?, u32 size, u32 type, u32 location, char name[stride]}`, fed to
+    `GLSharedGroup::setProgramUniformInfo` / `setProgramAttributeInfo(program, index,
+    location, size, type, name)`; the header goes to `initProgramData(program, nU, uStride, nA,
+    aStride, x10, x14)`. x10/x14 unknown: capture the DLL's replies to pin them.
+  - `s_glGetShaderProgramStateInfoCustom` (separable programs) emits the same opcode.
+- renderControl stayed within 10000-10032 (10064/10065 never seen); GLES 3.2 extras
+  (2496+) and the texture-cache calls (2478-2480) never seen. A game workload is still to trace.
+
 ## Status
 
 - **M1 (in progress):** renderControl, GLES1 and GLES2 mapped (above). Open: the Vulkan

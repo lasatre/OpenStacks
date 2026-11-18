@@ -322,7 +322,7 @@ class PlayerPane(QWidget):
                          self.console, self.diagnostics)
         self.vnc_thread, self.input_worker, self.boot_watch = None, None, None
         if self.native:
-            self.display.release()   # hand the renderer window back first
+            self.display.stop()      # stop polling + hand the renderer window back first
         if self.screen_window is not None:
             self.screen_window._returning = True
             self.screen_window.close()

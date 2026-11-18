@@ -13,6 +13,7 @@ Windows only (falls back gracefully elsewhere).
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 import time
 from typing import Callable, Optional
@@ -86,8 +87,9 @@ def describe_display(pid: int) -> str:
         return f"QEMU pid {pid}: screen window {top[0]:#x} is top-level (not embedded yet)"
     if nested:
         h, ppid = nested[0]
-        return (f"QEMU pid {pid}: screen window {h:#x} is inside a window of process "
-                f"{ppid} (not this player)")
+        where = ("another window of this player" if ppid == os.getpid()
+                 else f"a window of process {ppid}")
+        return f"QEMU pid {pid}: screen window {h:#x} is held by {where}"
     return f"QEMU pid {pid}: no screen window yet (renderer not started?)"
 
 
@@ -188,6 +190,13 @@ class NativeDisplay(QWidget):
         self._layout()
         self._container.show()
         _user32.ShowWindow(hwnd, 5)          # SW_SHOW (QEMU creates it hidden)
+
+    def stop(self) -> None:
+        """This display is done (its tab closed): stop polling and hand the window back.
+        A removed tab's display that kept polling grabbed the next QEMU's screen window
+        into a hidden widget, and the new tab waited forever."""
+        self._timer.stop()
+        self.release()
 
     def release(self) -> None:
         """Hand the window back to the desktop BEFORE our container dies:

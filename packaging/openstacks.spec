@@ -12,7 +12,7 @@ a = Analysis(
     pathex=[FRONTEND],
     datas=[(os.path.join(BRAND, d), os.path.join("brand", d)) for d in ("png", "ico", "svg")],
     # image patches (patches/*.py) are loaded from disk at install time and import these
-    hiddenimports=["gzip", "hashlib", "urllib.request", "zipfile", "importlib.util"],
+    hiddenimports=["gzip", "hashlib", "urllib.request", "zipfile", "importlib.util", "truststore"],
     excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
               "PySide6.Qt3DCore", "PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtMultimedia",
               "PySide6.QtCharts", "PySide6.QtDataVisualization", "PySide6.QtPdf"],

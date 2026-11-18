@@ -18,6 +18,18 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 
+def _use_os_trust_store() -> None:
+    """Verify HTTPS with the Windows certificate verifier instead of Python's snapshot of
+    the root store. A fresh Windows install only ships a few roots and fetches the rest on
+    demand, which only the OS verifier does; without this, downloads from BlueStacks' CDN
+    or GitHub fail with CERTIFICATE_VERIFY_FAILED on new machines/VMs."""
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:          # missing package or unsupported platform: Python's defaults
+        pass
+
+
 def smoke(report: str = "") -> int:
     """--smoke [report.txt]: import everything and check the bundled files (CI, no GUI)."""
     import importlib
@@ -39,6 +51,12 @@ def smoke(report: str = "") -> int:
     for k, p in need.items():
         ok &= p.exists()
         lines.append(f"{'ok  ' if p.exists() else 'FAIL'} {k}: {p}")
+    try:
+        import truststore
+        lines.append(f"ok   truststore {truststore.__version__} (OS certificate verification)")
+    except ImportError as e:
+        ok = False
+        lines.append(f"FAIL truststore: {e!r}")
     seven = find_7z()
     lines.append(f"{'ok  ' if seven else 'FAIL'} 7-Zip: {seven}")
     ok &= bool(seven)
@@ -53,6 +71,7 @@ def smoke(report: str = "") -> int:
 
 
 def main() -> int:
+    _use_os_trust_store()
     if len(sys.argv) > 1 and sys.argv[1] == "--smoke":
         return smoke(sys.argv[2] if len(sys.argv) > 2 else "")
     if len(sys.argv) > 2 and sys.argv[1] == "--install-image":

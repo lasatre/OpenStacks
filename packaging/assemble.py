@@ -53,7 +53,7 @@ def main() -> int:
     q.mkdir()
     shutil.copy2(exe, q)
     strip = a.strip or next((str(p) for p in (
-        Path(os.environ.get("MSYS2_ROOT", r"C:\msys64")) / "ucrt64" / "bin" / "strip.exe",)
+        Path(os.environ.get("MSYS2_ROOT") or r"C:\msys64") / "ucrt64" / "bin" / "strip.exe",)
         if p.exists()), "")
     if strip:
         subprocess.run([strip, "--strip-debug", str(q / exe.name)], check=True)

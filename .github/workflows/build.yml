@@ -41,12 +41,16 @@ jobs:
           "version=$v" >> $env:GITHUB_OUTPUT
           Write-Host "version $v"
 
+      # (skipped under nektos/act on a Windows host: these installers do not run there;
+      #  act uses the machine's Python and C:\msys64 instead)
       - uses: actions/setup-python@v5
+        if: ${{ !env.ACT }}
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: MSYS2 (ucrt64 toolchain for QEMU)
         id: msys2
+        if: ${{ !env.ACT }}
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -86,10 +90,13 @@ jobs:
 
       - name: Front-end (PyInstaller)
         run: |
-          python packaging/set_version.py "${{ steps.ver.outputs.version }}"
-          python -m pip install --upgrade pip
-          python -m pip install -r frontend/requirements.txt pyinstaller
-          pyinstaller --noconfirm --distpath dist --workpath build-pyi packaging/openstacks.spec
+          python -m venv .venv-build
+          $py = ".venv-build\Scripts\python.exe"
+          & $py packaging/set_version.py "${{ steps.ver.outputs.version }}"
+          & $py -m pip install --upgrade pip
+          & $py -m pip install -r frontend/requirements.txt pyinstaller
+          & $py -m PyInstaller --noconfirm --distpath dist --workpath build-pyi packaging/openstacks.spec
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
       - name: 7-Zip (7zr.exe, pinned)
         run: |

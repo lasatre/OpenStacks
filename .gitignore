@@ -30,3 +30,4 @@ release/
 packaging/version_info.txt
 *.spec.bak
 
+.venv-build/

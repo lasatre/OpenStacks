@@ -1,7 +1,7 @@
 @echo off
 rem ==========================================================================
 rem  ost_renderer.dll: gfxstream host renderer for OpenStacks (Windows, VS ClangCL).
-rem   1. clone gfxstream at the pinned commit into deps\gfxstream (once)
+rem   1. fetch gfxstream at the pinned commit into deps\gfxstream (shallow, once)
 rem   2. apply renderer\gfxstream-patches\*.patch (once per patch)
 rem   3. configure deps\ost-renderer-build (renderer\CMakeLists.txt + gfxstream, VS 2022,
 rem      ClangCL) and build ost_renderer.dll + ost_renderer_smoke.exe
@@ -20,12 +20,18 @@ set "BLD=%ROOT%deps\ost-renderer-build"
 set "CMAKE=cmake"
 where cmake >nul 2>&1 || set "CMAKE=%ProgramFiles%\CMake\bin\cmake.exe"
 
-if not exist "%SRC%\CMakeLists.txt" (
-  echo [gfxstream] cloning %GFX_COMMIT%
-  git clone -q https://github.com/google/gfxstream "%SRC%" || goto :fail
+rem shallow fetch of the pinned commit only (the full history is large)
+if not exist "%SRC%\.git" (
+  echo [gfxstream] fetching %GFX_COMMIT%
+  git init -q "%SRC%" || goto :fail
+  git -C "%SRC%" remote add origin https://github.com/google/gfxstream || goto :fail
 )
 git -C "%SRC%" cat-file -e %GFX_COMMIT% 2>nul || git -C "%SRC%" fetch -q --depth 1 origin %GFX_COMMIT% || goto :fail
-git -C "%SRC%" diff --quiet HEAD || echo [gfxstream] note: source tree has local changes
+for /f %%h in ('git -C "%SRC%" rev-parse HEAD 2^>nul') do set "HEADC=%%h"
+if /i not "%HEADC%"=="%GFX_COMMIT%" (
+  git -C "%SRC%" -c advice.detachedHead=false checkout -q %GFX_COMMIT% || goto :fail
+)
+git -C "%SRC%" diff --quiet HEAD || echo [gfxstream] note: source tree has local changes (patches applied)
 for %%p in ("%RDIR%gfxstream-patches\*.patch") do (
   git -C "%SRC%" apply --check "%%~fp" >nul 2>&1 && (
     echo [gfxstream] applying %%~nxp

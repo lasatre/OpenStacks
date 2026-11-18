@@ -6,6 +6,7 @@ Layout of release/OpenStacks/:
     OpenStacks.exe, _internal/      front-end (PyInstaller, dist/OpenStacks)
     qemu/                           qemu-system-x86_64.exe + runtime DLLs + pc-bios/
     patches/                        image patches (run when an image is installed)
+    licenses/                       license texts of the open renderer (gfxstream, ANGLE)
     tools/7zr.exe                   7-Zip, unpacks downloaded images
     README.md, THIRD-PARTY.md, VERSION
 data/ (images, instances, logs) is created next to the exe on first run.
@@ -63,6 +64,19 @@ def main() -> int:
     for dll in qbuild.glob("*.dll"):
         shutil.copy2(dll, q)
     copytree(qbuild / "pc-bios", q / "pc-bios")
+
+    # the open renderer's licenses, when its DLLs came along from build\
+    lic = app / "licenses"
+    for dll, text, name in (
+            ("ost_renderer.dll", ROOT / "deps" / "gfxstream" / "LICENSE", "gfxstream-LICENSE.txt"),
+            ("libshadertranslator.dll", ROOT / "renderer" / "ANGLE-LICENSE.txt",
+             "ANGLE-LICENSE.txt")):
+        if (q / dll).exists():
+            if not text.exists():
+                print(f"missing {text} (license for {dll})", file=sys.stderr)
+                return 1
+            lic.mkdir(exist_ok=True)
+            shutil.copy2(text, lic / name)
 
     copytree(ROOT / "patches", app / "patches")
     if a.sevenzip:

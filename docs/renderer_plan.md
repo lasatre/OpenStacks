@@ -144,8 +144,13 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
   renderer"); the engine sets `OST_RENDERER`; the setup check asks for BlueStacks only when an
   instance uses its renderer, and for `ost_renderer.dll` + `libshadertranslator.dll` next to QEMU
   when one uses gfxstream.
-- **Open:** the player (embedding, pop-out, resize) on gfxstream, Android 11/13, CI + release
-  packaging, then the default switch.
+- **Android 11 and 13:** both boot to the home screen on gfxstream as they are (Android 11 also
+  runs the separate gralloc allocator process; it connects like the others).
+- **CI + release:** build.yml builds the renderer after QEMU (shallow fetch of the pinned
+  gfxstream commit, patches, ClangCL) with the shader translator download cached; assemble.py
+  ships both DLLs (they are in build\) plus their licenses in `licenses/`.
+- **Open:** the player (embedding, pop-out, resize) on gfxstream, a first CI run, then the
+  default switch.
 - Crash locator: gr_render's gfxstream path logs the faulting module+offset and stack return
   addresses on an access violation; `ost_renderer.pdb` + llvm-symbolizer resolve ours.
 

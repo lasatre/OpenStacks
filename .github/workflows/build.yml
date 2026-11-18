@@ -88,6 +88,22 @@ jobs:
           findstr /c:"bstpgaipc" devices.txt || (type devices.txt & exit /b 1)
           findstr /c:"bstvmsg" devices.txt || exit /b 1
 
+      # The open GPU renderer (instance renderer = gfxstream): ost_renderer.dll + the
+      # shader translator, installed into build\ so assemble.py ships them with QEMU.
+      - name: Cache shader translator (from the Android emulator package, ~455 MB)
+        uses: actions/cache@v4
+        with:
+          path: deps/shadertranslator
+          key: shadertranslator-${{ hashFiles('renderer/fetch_shadertranslator.py') }}
+
+      - name: Build the open renderer (gfxstream, VS 2022 ClangCL)
+        run: |
+          cmd /c renderer\build_gfxstream.cmd
+          if ($LASTEXITCODE -ne 0) { throw "renderer build failed" }
+          foreach ($f in "ost_renderer.dll", "libshadertranslator.dll") {
+            if (-not (Test-Path "build/$f")) { throw "build/$f missing" }
+          }
+
       - name: Front-end (PyInstaller)
         run: |
           python -m venv .venv-build

@@ -142,6 +142,13 @@ class InstanceEditDialog(QDialog):
         self.ed_devices.setToolTip(f"CSV of PCI device set flags; known: {', '.join(KNOWN_DEVICES)}")
         form.addRow("PCI devices", self.ed_devices)
 
+        self.cb_renderer = QComboBox()
+        self.cb_renderer.addItem("BlueStacks (needs BlueStacks 5 installed)", "bluestacks")
+        self.cb_renderer.addItem("Open renderer (gfxstream, experimental)", "gfxstream")
+        k = self.cb_renderer.findData(getattr(i, "renderer", "bluestacks"))
+        self.cb_renderer.setCurrentIndex(max(k, 0))
+        form.addRow("GPU renderer", self.cb_renderer)
+
         self.ed_append = QLineEdit(i.extra_append)
         self.ed_append.setPlaceholderText("extra kernel args / KEY=VALUE props for -append")
         form.addRow("Extra -append", self.ed_append)
@@ -163,6 +170,7 @@ class InstanceEditDialog(QDialog):
             pass
         inst.devices = self.ed_devices.text().strip()
         inst.extra_append = self.ed_append.text().strip()
+        inst.renderer = self.cb_renderer.currentData()
         if self.cb_image.isEnabled():
             inst.image = self.cb_image.currentData()
 
@@ -261,7 +269,7 @@ class ManagerWindow(QMainWindow):
     # -- first-run prerequisite check ------------------------------------------------------
     def _preflight(self) -> None:
         from . import checks
-        problems = checks.run(self.store.global_settings)
+        problems = checks.run(self.store.global_settings, self.store.instances())
         if not problems:
             return
         box = QMessageBox(self)

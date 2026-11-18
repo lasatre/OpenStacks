@@ -137,8 +137,15 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
   asynchronously: the post callback only signals a frame, the pixels come from its
   ReadPixelsCallback (which waits on gfxstream's readback thread). The adapter pulls them on its
   own thread. Patch 0003 keeps the readback type GLES-valid for the translator.
-- **Open:** apps and games, rotation, the native player embedding, Android 11/13, front-end
-  switch, CI.
+- **Apps and games (Pie64):** a Unity 3D game (Dinosaur Evolution) launches, renders and plays
+  (input via the display window, a posted click started a level); a minute of gameplay without
+  errors. Portrait rotation: gfxstream's angle runs opposite to BlueStacks', so o -> 360 - 90o.
+- **Front-end switch:** per-instance `renderer = bluestacks | gfxstream` (instance dialog "GPU
+  renderer"); the engine sets `OST_RENDERER`; the setup check asks for BlueStacks only when an
+  instance uses its renderer, and for `ost_renderer.dll` + `libshadertranslator.dll` next to QEMU
+  when one uses gfxstream.
+- **Open:** the player (embedding, pop-out, resize) on gfxstream, Android 11/13, CI + release
+  packaging, then the default switch.
 - Crash locator: gr_render's gfxstream path logs the faulting module+offset and stack return
   addresses on an access violation; `ost_renderer.pdb` + llvm-symbolizer resolve ours.
 

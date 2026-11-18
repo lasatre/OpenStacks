@@ -52,6 +52,10 @@ CONF_FILE = CONF_DIR / "instances.conf"
 RENDERER_DLL = Path(os.environ.get("OST_RENDERER_DLL")
                     or r"C:\Program Files\BlueStacks_nxt\libOpenglRender.dll")
 
+# The open renderer (instance renderer = gfxstream): built by renderer/build_gfxstream.cmd,
+# loaded by QEMU from its own folder.
+GFXSTREAM_FILES = ("ost_renderer.dll", "libshadertranslator.dll")
+
 
 def brand(*parts: str) -> Path:
     return BRAND_DIR.joinpath(*parts)

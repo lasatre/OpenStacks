@@ -41,14 +41,23 @@ def whpx_available() -> bool | None:
         return None
 
 
-def run(global_settings) -> list[Problem]:
+def run(global_settings, instances=()) -> list[Problem]:
+    """Problems that stop instances from starting. With `instances`, the renderer check
+    covers only the renderers they use (BlueStacks' DLL vs the open gfxstream one)."""
     out: list[Problem] = []
     qemu = global_settings.resolved_qemu_path()
     if not qemu or not Path(qemu).exists():
         out.append(Problem("qemu", "QEMU not found",
                            f"Expected {paths.QEMU_EXE}. In a source checkout run "
                            "qemu\\build.cmd; the release ZIP ships it in qemu\\."))
-    if not paths.RENDERER_DLL.exists():
+    used = {getattr(i, "renderer", "bluestacks") for i in instances} or {"bluestacks"}
+    if "gfxstream" in used and qemu:
+        missing = [f for f in paths.GFXSTREAM_FILES if not (Path(qemu).parent / f).exists()]
+        if missing:
+            out.append(Problem("renderer", "The open renderer is missing",
+                               f"{', '.join(missing)} not found next to QEMU. In a source "
+                               "checkout run renderer\\build_gfxstream.cmd."))
+    if "bluestacks" in used and not paths.RENDERER_DLL.exists():
         out.append(Problem("renderer", "BlueStacks 5 is not installed",
                            "OpenStacks uses BlueStacks 5's GPU renderer "
                            f"({paths.RENDERER_DLL.name}), which cannot be redistributed. "

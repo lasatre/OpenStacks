@@ -6,22 +6,24 @@ it is, independent of pid files or of what the user clicked.
 
 Windows: Toolhelp snapshot for the qemu-system-* processes, then each one's
 command line via NtQueryInformationProcess(ProcessCommandLineInformation),
-which needs only PROCESS_QUERY_LIMITED_INFORMATION (Windows 8.1+).
+which needs only PROCESS_QUERY_LIMITED_INFORMATION (Windows 8.1+), split into
+arguments by CommandLineToArgvW. Linux: /proc/<pid>/exe and /proc/<pid>/cmdline.
 """
 from __future__ import annotations
 
-import re
-import shlex
 import sys
 from pathlib import Path
 
 TAG_PREFIX = "openstacks-"
-_NAME_RE = re.compile(r'(?:^|\s)-name\s+"?openstacks-([^",\s]+)')
 
 
-def _instance_from_cmdline(cmd: str) -> str | None:
-    m = _NAME_RE.search(cmd)
-    return m.group(1) if m else None
+def _instance_from_argv(argv: list[str]) -> str | None:
+    """The instance of a QEMU argv ("-name openstacks-<instance>"). Works on the argument
+    list, not a joined command line: instance names may contain spaces and quotes."""
+    for i, a in enumerate(argv[:-1]):
+        if a == "-name" and argv[i + 1].startswith(TAG_PREFIX):
+            return argv[i + 1][len(TAG_PREFIX):] or None
+    return None
 
 
 if sys.platform == "win32":
@@ -44,6 +46,10 @@ if sys.platform == "win32":
         _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT),
                     ("Buffer", ctypes.c_void_p)]
 
+    _shell32 = ctypes.WinDLL("shell32")
+    _shell32.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
+    _shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+    _k32.LocalFree.argtypes = [ctypes.c_void_p]
     _k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     _k32.OpenProcess.restype = wintypes.HANDLE
     _INVALID = wintypes.HANDLE(-1).value
@@ -83,6 +89,19 @@ if sys.platform == "win32":
             return ctypes.wstring_at(us.Buffer, us.Length // 2)
         finally:
             _k32.CloseHandle(h)
+
+    def argv_of(pid: int) -> list[str] | None:
+        cmd = cmdline(pid)
+        if not cmd:
+            return None
+        n = ctypes.c_int(0)
+        arr = _shell32.CommandLineToArgvW(cmd, ctypes.byref(n))
+        if not arr:
+            return None
+        try:
+            return [arr[i] for i in range(n.value)]
+        finally:
+            _k32.LocalFree(arr)
 else:
     def _qemu_pids() -> list[int]:
         out = []
@@ -95,20 +114,20 @@ else:
                     pass
         return out
 
-    def cmdline(pid: int) -> str | None:
+    def argv_of(pid: int) -> list[str] | None:
         try:
             raw = Path(f"/proc/{pid}/cmdline").read_bytes()
         except OSError:
             return None
-        return " ".join(shlex.quote(a) for a in raw.decode(errors="replace").split("\0") if a)
+        return raw.decode(errors="replace").split("\0")[:-1] or None
 
 
 def tagged_qemus() -> dict[str, list[int]]:
     """{instance name: [pids]} of every running QEMU started by OpenStacks."""
     out: dict[str, list[int]] = {}
     for pid in _qemu_pids():
-        cmd = cmdline(pid)
-        name = _instance_from_cmdline(cmd) if cmd else None
+        argv = argv_of(pid)
+        name = _instance_from_argv(argv) if argv else None
         if name:
             out.setdefault(name, []).append(pid)
     return out
@@ -116,8 +135,8 @@ def tagged_qemus() -> dict[str, list[int]]:
 
 def tags_of(pid: int) -> set[str]:
     """Instance names `pid` is tagged with (empty for foreign/unreadable processes)."""
-    cmd = cmdline(pid)
-    name = _instance_from_cmdline(cmd) if cmd else None
+    argv = argv_of(pid)
+    name = _instance_from_argv(argv) if argv else None
     return {name} if name else set()
 
 

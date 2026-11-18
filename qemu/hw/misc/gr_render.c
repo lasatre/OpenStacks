@@ -3412,6 +3412,7 @@ static struct {
     void (*ch_stop)(void *);
     void (*ch_close)(void *);
     void (*drop_window)(void);
+    void (*repaint)(void);           /* optional: re-present the last frame */
     bool shown;
 } gx;
 
@@ -3453,6 +3454,13 @@ static void gx_drop_window(void)
 {
     gx.shown = false;
     if (gx.drop_window) gx.drop_window();
+}
+
+/* the window was uncovered or mapped again: the guest only posts frames when its
+ * screen changes, so re-present the last one (else the old pixels stay on screen) */
+static void gx_repaint(void)
+{
+    if (gx.repaint && gx.shown && g.ready) gx.repaint();
 }
 #endif
 
@@ -3629,6 +3637,7 @@ static bool gx_init_host(void)
         g.failed = true;
         return false;
     }
+    GX_SYM(repaint, "ost_renderer_repaint");
     /* gfxstream only uses the API level for colour buffer ref counting: BlueStacks'
      * gralloc creates, opens and closes each buffer up front (in SurfaceFlinger)
      * and keeps using it, i.e. the pre-O rule "create holds a reference". With

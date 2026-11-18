@@ -25,6 +25,7 @@
 #include <poll.h>
 
 static void gx_drop_window(void);    /* gfxstream backend, below */
+static void gx_repaint(void);
 
 #define GRX_FUNCS(f) \
     f(XInitThreads) f(XOpenDisplay) f(XCreateWindow) f(XSelectInput) f(XStoreName) \
@@ -87,8 +88,9 @@ static Window grx_make_window(void)
     int scr = DefaultScreen(g_xdpy);
     XSetWindowAttributes wa = {
         .background_pixel = BlackPixel(g_xdpy, scr),       /* the letterbox bars */
-        .event_mask = StructureNotifyMask | ButtonPressMask | ButtonReleaseMask |
-                      PointerMotionMask | KeyPressMask | KeyReleaseMask,
+        .event_mask = StructureNotifyMask | ExposureMask | ButtonPressMask |
+                      ButtonReleaseMask | PointerMotionMask | KeyPressMask |
+                      KeyReleaseMask,
     };
     Window w = x11.XCreateWindow(g_xdpy, RootWindow(g_xdpy, scr), 0, 0, GR_W, GR_H, 0,
                                  CopyFromParent, InputOutput, CopyFromParent,
@@ -145,6 +147,12 @@ static void grx_event(XEvent *e)
             g_xh = e->xconfigure.height;
             grx_layout();
         }
+        break;
+    case Expose:
+        /* mapped again (the player's Screen tab shown after another tab: Qt unmaps
+         * the hidden container) or uncovered: the GL subwindow keeps stale pixels
+         * until the next guest frame, which an idle screen never sends */
+        if (e->xexpose.count == 0 && gr_gfx()) gx_repaint();
         break;
     case ButtonPress:
         if (e->xbutton.button == Button1) {

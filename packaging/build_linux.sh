@@ -17,7 +17,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-BASE_VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' frontend/openstacks/__init__.py)
+# tr: a CRLF checkout (core.autocrlf on Windows, built from WSL) left "\r" in the name
+BASE_VERSION=$(tr -d '\r' < frontend/openstacks/__init__.py | sed -n 's/^__version__ = "\(.*\)"/\1/p')
 VERSION="${1:-$BASE_VERSION-local}"
 VERSION="${VERSION#v}"
 QEMU_BUILD="${QEMU_BUILD:-$ROOT/build-linux}"

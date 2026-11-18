@@ -1488,6 +1488,20 @@ static bool hpp_lock(GrSock *s, uint8_t *W)
     }
 }
 
+/* The state bytes W[1..3] are read by the guest without the lock (it spins on W[3]
+ * and then reads W[2]), so every access is atomic: a plain `W[2] = fin; W[3] = 1;`
+ * may be emitted in either order (GCC 11 stored W[3] first, and a spinning guest
+ * read the stale status 1: "hppRecv: Invalid case! host status=1", app killed). */
+static inline uint8_t hpp_bld(uint8_t *W, int i)
+{
+    return __atomic_load_n(&W[i], __ATOMIC_ACQUIRE);
+}
+
+static inline void hpp_bst(uint8_t *W, int i, uint8_t v)
+{
+    __atomic_store_n(&W[i], v, __ATOMIC_RELEASE);
+}
+
 static inline void hpp_unlock(uint8_t *W)
 {
     __atomic_store_n(&W[0], 0x55, __ATOMIC_RELEASE);
@@ -1568,7 +1582,7 @@ static int hpp_flush(GrSock *s)
         uint32_t rem = total - pos, n, count, last;
         uint8_t fin, c;
         if (!hpp_lock(s, W)) return 0x68;
-        W[2] = 1;
+        hpp_bst(W, 2, 1);
         hpp_unlock(W);
         if (rem > cap) {
             n = cap; count = N; last = HPP_SLOT; fin = 3;
@@ -1582,10 +1596,10 @@ static int hpp_flush(GrSock *s)
         hpp_st(W, 8, count);
         S_LOCK(s); S_RUN(s) = 0; S_UNLOCK(s);   /* only kicks after this count */
         if (!hpp_lock(s, W)) return 0x68;
-        W[2] = fin;
-        c = W[1];
-        W[3] = 1;
-        if (c == 3) W[1] = 1;
+        hpp_bst(W, 2, fin);
+        c = hpp_bld(W, 1);
+        hpp_bst(W, 3, 1);
+        if (c == 3) hpp_bst(W, 1, 1);
         hpp_unlock(W);
         if (c == 3) hpp_raise(s);
         else if (c == 2) gr_once(0xc1, "hpp cid=%u: reply posted while guest "
@@ -1605,19 +1619,19 @@ static int hpp_flush(GrSock *s)
     while (__atomic_load_n(&W[3], __ATOMIC_ACQUIRE) != 0 && !S_DISC(s)) {
         uint8_t c;
         if (!hpp_lock(s, W)) return 0x68;
-        c = W[1];
-        if (c == 1 || c == 3) W[2] = 2;
-        if (c == 3) W[1] = 1;
+        c = hpp_bld(W, 1);
+        if (c == 1 || c == 3) hpp_bst(W, 2, 2);
+        if (c == 3) hpp_bst(W, 1, 1);
         hpp_unlock(W);
         if (c == 3) hpp_raise(s);
         if (__atomic_load_n(&W[3], __ATOMIC_ACQUIRE) == 0) {
-            if (hpp_lock(s, W)) { W[2] = 0; hpp_unlock(W); }
+            if (hpp_lock(s, W)) { hpp_bst(W, 2, 0); hpp_unlock(W); }
             break;
         }
         if (c == 1 || c == 3) hpp_wait_kick(s);
         else gr_yield();
         if (!hpp_lock(s, W)) return 0x68;
-        W[2] = 0;
+        hpp_bst(W, 2, 0);
         hpp_unlock(W);
     }
     return S_DISC(s) ? 0x68 : 0;
@@ -1644,20 +1658,20 @@ static uint8_t *hpp_take(GrSock *s, uint32_t need, bool advance, bool atPeek)
         if (head == tail) {
             uint8_t c;
             if (!hpp_lock(s, W)) return NULL;
-            c = W[1];
-            if (c != 3) W[2] = 2;                    /* asleep: kick me */
+            c = hpp_bld(W, 1);
+            if (c != 3) hpp_bst(W, 2, 2);     /* asleep: kick me */
             if (hpp_ld(W, 8) != head && c != 3) {    /* raced a publish */
-                W[2] = 0;
+                hpp_bst(W, 2, 0);
                 hpp_unlock(W);
                 continue;
             }
-            if (c == 2) W[1] = 0;
+            if (c == 2) hpp_bst(W, 1, 0);
             hpp_unlock(W);
             if (c == 2) hpp_raise(s);                /* ring-space / sync waiter */
             if (c != 3) hpp_wait_kick(s);
             else gr_yield();
             if (!hpp_lock(s, W)) return NULL;
-            W[2] = 0;
+            hpp_bst(W, 2, 0);
             hpp_unlock(W);
             continue;
         }
@@ -3734,8 +3748,8 @@ static uint32_t gx_take_hpp(GrSock *s, const uint8_t **out)
         tail = hpp_ld(W, 8);
     }
     if (n && head == hpp_ld(W, 8) && hpp_lock(s, W)) {
-        uint8_t c = W[1];                /* ring empty: wake a ring-space waiter */
-        if (c == 2) W[1] = 0;
+        uint8_t c = hpp_bld(W, 1);   /* ring empty: wake a ring-space waiter */
+        if (c == 2) hpp_bst(W, 1, 0);
         hpp_unlock(W);
         if (c == 2) hpp_raise(s);
     }
@@ -3749,14 +3763,14 @@ static void gx_idle(GrSock *s)
     if (s->hpp) {
         uint8_t *W = GR_WIN(s->cid), c;
         if (!W || !hpp_lock(s, W)) return;
-        c = W[1];
-        if (c != 3) W[2] = 2;                /* host asleep: kick me */
+        c = hpp_bld(W, 1);
+        if (c != 3) hpp_bst(W, 2, 2);    /* host asleep: kick me */
         if (hpp_ld(W, 8) != hpp_ld(W, 4)) {  /* raced a publish */
-            W[2] = 0;
+            hpp_bst(W, 2, 0);
             hpp_unlock(W);
             return;
         }
-        if (c == 2) W[1] = 0;
+        if (c == 2) hpp_bst(W, 1, 0);
         hpp_unlock(W);
         if (c == 2) hpp_raise(s);
         S_LOCK(s);
@@ -3766,7 +3780,7 @@ static void gx_idle(GrSock *s)
         S_RUN(s) = 0;
         S_UNLOCK(s);
         if (hpp_lock(s, W)) {
-            W[2] = 0;
+            hpp_bst(W, 2, 0);
             hpp_unlock(W);
         }
         return;

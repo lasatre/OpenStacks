@@ -3202,9 +3202,16 @@ static void gx_frame(void *user, int w, int h, const uint8_t *rgba)
     qatomic_inc(&g_frameSeq);
 }
 
+/* Surface.ROTATION_o -> gfxstream's display rotation: its angle runs the other way
+ * than BlueStacks' (o = 1 at +90 shows the guest upside down). */
+static float gx_rot_deg(int o)
+{
+    return (float)(((4 - (o & 3)) & 3) * 90);
+}
+
 static void gx_set_rotation(int o)
 {
-    if (gx.set_rotation && g.ready) gx.set_rotation((float)(o * 90));
+    if (gx.set_rotation && g.ready) gx.set_rotation(gx_rot_deg(o));
 }
 
 /* UI thread (WM_SIZE / WM_TIMER via gr_layout): gfxstream creates its
@@ -3216,7 +3223,7 @@ static void gx_layout(HWND parent)
     if (!g.ready || !gx.show) return;
     GetClientRect(parent, &rc);
     if (rc.right <= 0 || rc.bottom <= 0) return;
-    if (gx.show(parent, rc.right, rc.bottom, (float)(qatomic_read(&g_orient) * 90)) == 0) {
+    if (gx.show(parent, rc.right, rc.bottom, gx_rot_deg(qatomic_read(&g_orient))) == 0) {
         if (!gx.shown) {
             gr_log("gfxstream display in %p (%ldx%ld)", (void *)parent,
                    rc.right, rc.bottom);

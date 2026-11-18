@@ -119,10 +119,12 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "smoke test failed ($($p.ExitCode))" }
           if (Test-Path release/OpenStacks/data) { Remove-Item -Recurse -Force release/OpenStacks/data }
 
+      # upload the folder, not the ZIP: artifacts are always zipped on download, so a ZIP
+      # would arrive as a ZIP inside a ZIP (the release asset below is the ZIP itself)
       - uses: actions/upload-artifact@v4
         with:
           name: OpenStacks-${{ steps.ver.outputs.version }}-win64
-          path: release/OpenStacks-${{ steps.ver.outputs.version }}-win64.zip
+          path: release/OpenStacks/
           if-no-files-found: error
 
       - name: GitHub release (tags)

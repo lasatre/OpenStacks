@@ -242,7 +242,8 @@ class ManagerWindow(QMainWindow):
         text.setOpenExternalLinks(True)
         text.setText(
             f"<p align=center><b>OpenStacks {__version__}</b><br>"
-            "Licensed under the GNU GPL v2.0 or later</p>"
+            "Licensed under the GNU GPL v2.0 or later<br>"
+            "<a href='https://github.com/lasatre/OpenStacks'>github.com/lasatre/OpenStacks</a></p>"
             "<p>Runs de-bloated BlueStacks 5 Android images through QEMU"
             "<p>Not affiliated with or endorsed by BlueStacks or now.gg. BlueStacks 5 must "
             "be installed for its renderer.</p>"

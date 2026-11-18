@@ -4,9 +4,6 @@ Known gaps and ideas, roughly by area. NOTES.md has the background (section numb
 brackets). Move an item to NOTES when it lands.
 
 ## Release
-- **First GitHub Actions run** - the workflow passed under nektos/act on Windows (which skips
-  setup-python and setup-msys2), but hasn't run on a GitHub runner yet.
-- **Project URL** - the About dialog and README link nowhere until the repo has a remote.
 - **Installer and signing** - the release is a portable ZIP. An installer (Inno Setup / MSI)
   with Start menu shortcuts, per-instance shortcuts (`OpenStacks.exe --launch <name>`) and
   a signed exe would avoid SmartScreen warnings.

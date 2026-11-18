@@ -10,6 +10,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/lasatre/OpenStacks/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/lasatre/OpenStacks?include_prereleases&color=4F46E5"></a>
+  <a href="https://github.com/lasatre/OpenStacks/actions/workflows/build.yml"><img alt="Build" src="https://github.com/lasatre/OpenStacks/actions/workflows/build.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: GPL-2.0-or-later" src="https://img.shields.io/badge/license-GPL--2.0--or--later-0D9488"></a>
+  <img alt="Windows 10/11" src="https://img.shields.io/badge/platform-Windows%2010%2F11-1E1B4B">
+</p>
+
+<p align="center">
   <img alt="OpenStacks player" src="docs/screenshots/player.png" width="760">
 </p>
 

@@ -1,0 +1,55 @@
+name: Bug report
+description: Something doesn't work
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: android
+    attributes:
+      label: Android version of the instance
+      options:
+        - Android 13 (Tiramisu64)
+        - Android 11 (Rvc64)
+        - Android 9 (Pie64)
+        - Android 7 (Nougat64)
+        - Android 7 32-bit (Nougat32)
+        - Not instance-specific
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenStacks version
+      description: Shown in the manager's top right corner (or the VERSION file).
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and GPU
+      placeholder: Windows 11 24H2, NVIDIA RTX 3060
+  - type: input
+    id: bluestacks
+    attributes:
+      label: Installed BlueStacks 5 version
+      placeholder: 5.21.550
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Attach `data\logs\<instance>.qemu.log` and `<instance>.serial.log` from the OpenStacks
+        folder if the problem involves an instance. They can contain file paths from your PC,
+        so look them over first.
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, the app or game involved, steps to reproduce.

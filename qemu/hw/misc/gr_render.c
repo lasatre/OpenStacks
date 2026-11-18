@@ -2787,9 +2787,9 @@ static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win)
 /* input, rotation and frame state shared by every display backend    */
 
 typedef struct GrInputEv {
-    int kind;                        /* 0 = pointer, 1 = key           */
+    int kind;                        /* 0 = pointer, 1 = key (qnum), 2 = key (evdev) */
     int x, y, down;                  /* pointer: 0..0x7fff, button     */
-    int qnum;                        /* key: QEMU key number           */
+    int qnum;                        /* key: QEMU key number / Linux evdev code */
 } GrInputEv;
 
 static void gr_input_bh(void *opaque)
@@ -2802,6 +2802,8 @@ static void gr_input_bh(void *opaque)
             qemu_input_queue_btn(NULL, INPUT_BUTTON_LEFT, e->down != 0);
         }
         qemu_input_event_sync();
+    } else if (e->kind == 2) {
+        qemu_input_event_send_key_linux(NULL, (unsigned)e->qnum, e->down != 0);
     } else {
         qemu_input_event_send_key_number(NULL, e->qnum, e->down != 0);
     }
@@ -2816,6 +2818,28 @@ static void gr_input_post(GrInputEv ev)
 }
 
 static int g_orient;                 /* Phase-77: Surface.ROTATION_0..3 */
+/* where gx_show_in put the guest's picture inside the display window (letterbox) */
+static int g_cx, g_cy, g_cw, g_ch;
+
+/* pointer at (x, y) in a view of w x h pixels -> the guest's absolute pointer, in the
+ * UNROTATED panel frame (HD-Player inverts the rotation on the host, EXE 0x1402ec260) */
+static void gr_pointer_view(int x, int y, int w, int h, int down)
+{
+    int64_t px, py, rx, ry, M = INPUT_EVENT_ABS_MAX;
+    w = w > 1 ? w : 1;
+    h = h > 1 ? h : 1;
+    x = x < 0 ? 0 : x >= w ? w - 1 : x;
+    y = y < 0 ? 0 : y >= h ? h - 1 : y;
+    px = (int64_t)x * M / (w - 1 ? w - 1 : 1);       /* view fraction, 0..M */
+    py = (int64_t)y * M / (h - 1 ? h - 1 : 1);
+    switch (qatomic_read(&g_orient)) {
+    case 1:  rx = M - py; ry = px;     break;
+    case 2:  rx = M - px; ry = M - py; break;
+    case 3:  rx = py;     ry = M - px; break;
+    default: rx = px;     ry = py;     break;
+    }
+    gr_input_post((GrInputEv){ .kind = 0, .x = (int)rx, .y = (int)ry, .down = down });
+}
 
 static bool g_readback = true;
 static unsigned g_frameSeq;          /* Phase-67: bumps on every new frame */
@@ -2862,24 +2886,8 @@ static bool g_mouseDown;
 static void gr_pointer(HWND h, LPARAM l, int down)
 {
     RECT rc;
-    int w, hh, x = (short)LOWORD(l), y = (short)HIWORD(l);
-    int64_t px, py, rx, ry, M = INPUT_EVENT_ABS_MAX;
     GetClientRect(h, &rc);
-    w = rc.right > 1 ? rc.right : 1;
-    hh = rc.bottom > 1 ? rc.bottom : 1;
-    x = x < 0 ? 0 : x >= w ? w - 1 : x;
-    y = y < 0 ? 0 : y >= hh ? hh - 1 : y;
-    px = (int64_t)x * M / (w - 1 ? w - 1 : 1);       /* view fraction, 0..M */
-    py = (int64_t)y * M / (hh - 1 ? hh - 1 : 1);
-    /* Phase-77: the guest wants coordinates in the UNROTATED panel frame;
-     * HD-Player inverts the rotation on the host (EXE 0x1402ec260).     */
-    switch (qatomic_read(&g_orient)) {
-    case 1:  rx = M - py; ry = px;     break;
-    case 2:  rx = M - px; ry = M - py; break;
-    case 3:  rx = py;     ry = M - px; break;
-    default: rx = px;     ry = py;     break;
-    }
-    gr_input_post((GrInputEv){ .kind = 0, .x = (int)rx, .y = (int)ry, .down = down });
+    gr_pointer_view((short)LOWORD(l), (short)HIWORD(l), rc.right, rc.bottom, down);
 }
 
 /* returns true when the message was an input message we consumed */
@@ -3439,6 +3447,15 @@ static void gx_set_rotation(int o)
     if (gx.set_rotation && g.ready) gx.set_rotation(gx_rot_deg(o));
 }
 
+#ifndef _WIN32
+/* the display window died (and gfxstream's subwindow with it): forget the subwindow */
+static void gx_drop_window(void)
+{
+    gx.shown = false;
+    if (gx.drop_window) gx.drop_window();
+}
+#endif
+
 /* UI thread (WM_SIZE / WM_TIMER via gr_layout): gfxstream creates its
  * display as a child of our window on the calling thread, so this must
  * be the thread that pumps that window's messages.                    */
@@ -3464,8 +3481,11 @@ static void gx_show_in(void *native, int W, int H)
         ch = rc.bottom;
     }
     if (cw < 1 || ch < 1) return;
-    if (gx.show(native, (int)(rc.right - cw) / 2, (int)(rc.bottom - ch) / 2, cw, ch,
-                gx_rot_deg(o)) == 0) {
+    g_cx = (int)(rc.right - cw) / 2;
+    g_cy = (int)(rc.bottom - ch) / 2;
+    g_cw = cw;
+    g_ch = ch;
+    if (gx.show(native, g_cx, g_cy, cw, ch, gx_rot_deg(o)) == 0) {
         if (!gx.shown) {
             gr_log("gfxstream display in %p (%ldx%ld, content %dx%d)", native,
                    rc.right, rc.bottom, cw, ch);
@@ -3559,6 +3579,19 @@ static LONG CALLBACK gx_veh(struct _EXCEPTION_POINTERS *ep)
 #define GX_SYM(f, name) \
     ((*(void **)&gx.f = gr_dlsym(gx.dll, name)) != NULL)
 
+#ifndef _WIN32
+/* exit() after QEMU's cleanup: leave before the libraries' static destructors. They
+ * tear down Mesa/gfxstream state while gfxstream's render and post threads still run
+ * (Windows' ExitProcess stops the other threads first; Linux does not), which crashes
+ * or hangs the exit. Registered once the renderer is loaded, so it runs before them. */
+static void gx_fast_exit(int status, void *arg)
+{
+    (void)arg;
+    fflush(NULL);
+    _exit(status);
+}
+#endif
+
 static bool gx_init_host(void)
 {
     char path[1024] = {0}, api[8] = {0}, err[256];
@@ -3612,6 +3645,9 @@ static bool gx_init_host(void)
         g.failed = true;
         return false;
     }
+#ifndef _WIN32
+    on_exit(gx_fast_exit, NULL);             /* after init: Mesa etc. are loaded now */
+#endif
     g.fbBuf = (uint8_t *)calloc(1, GR_FB_BYTES);
     g.fbPrev = (uint8_t *)calloc(1, GR_FB_BYTES);
     {
@@ -3619,7 +3655,6 @@ static bool gx_init_host(void)
         g_readback = !(gr_getenv("GR_READBACK", rb, sizeof(rb)) > 0 &&
                        rb[0] == '0');
     }
-    if (g_readback) gx.set_frame_cb(gx_frame, NULL);
 #ifdef _WIN32
     vt_table_init();
     vt_pure_table_init();
@@ -3628,6 +3663,8 @@ static bool gx_init_host(void)
         g.failed = true;
         return false;
     }
+    /* after grd_start: a display without a window turns the readback on */
+    if (g_readback) gx.set_frame_cb(gx_frame, NULL);
     g.ready = true;
     grd_kick_layout();
     gr_log("READY: gfxstream backend (%s, %dx%d, guest API %d, readback %s)", path,

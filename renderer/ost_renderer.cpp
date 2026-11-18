@@ -102,12 +102,12 @@ struct Puller {
     int width = 0, height = 0;
     gfxstream::Renderer::ReadPixelsCallback read = nullptr;
     std::thread thread;
-    // the host process may exit without ost_renderer_shutdown (QEMU does): a joinable
-    // std::thread destroyed at static destruction would std::terminate (abort)
-    ~Puller() {
-        if (thread.joinable()) thread.detach();
-    }
-} gp;
+};
+// Never destroyed: the host process may exit without ost_renderer_shutdown (QEMU does),
+// and on Linux exit() runs static destructors while the puller still waits on cv. A
+// destroyed joinable std::thread would std::terminate, and glibc's pthread_cond_destroy
+// blocks until the waiter leaves, i.e. forever.
+Puller& gp = *new Puller();
 
 void pullerMain() {
     std::vector<uint8_t> buf;

@@ -35,6 +35,15 @@ The LGPL libraries are dynamically linked and can be replaced in place.
 | Kitsune Magisk v27.2-kitsune-4 | the player's Root button | GPL-3.0 | https://github.com/AndnixSH/KitsuneMagisk/releases (pinned SHA-256) |
 | Android SDK platform-tools (adb) | first-run setup, if no adb is found | Android SDK license | https://dl.google.com/android/repository/platform-tools-latest-windows.zip |
 
+## Open renderer (in development, not in releases yet)
+
+Built by `renderer/build_gfxstream.cmd` for the `OST_RENDERER=gfxstream` backend.
+
+| Component | Where | License | Source |
+|---|---|---|---|
+| gfxstream (with `renderer/gfxstream-patches/`) | `qemu/ost_renderer.dll` | Apache-2.0 | https://github.com/google/gfxstream (pinned commit) |
+| ANGLE shader translator (Android emulator build 16740729) | `qemu/libshadertranslator.dll` | BSD-3-Clause (`renderer/ANGLE-LICENSE.txt`) | https://dl.google.com/android/repository/emulator-windows_x64-16740729.zip (pinned SHA-1/SHA-256); header from AOSP `platform/external/angle` (`emu-master-dev`) |
+
 ## Required, not shipped
 
 BlueStacks 5's GPU renderer (`libOpenglRender.dll` and its folder) is proprietary and is loaded from

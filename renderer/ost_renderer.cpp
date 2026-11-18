@@ -15,6 +15,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "gfxstream/host/features.h"
@@ -94,12 +95,14 @@ void onPost(void* ctx, uint32_t displayId, int width, int height, int ydir, int 
 // The guest is the goldfish-opengl-pie generation (Android emulator stack, BlueStacks fork):
 // GLES only, classic rcOpenColorBuffer/rcCloseColorBuffer ref counting, no pipe checksums.
 // The caller's guest_api_level picks gfxstream's colour buffer ref counting rules.
-// Host GL: GLES on ANGLE (libEGL.dll + libGLESv2.dll next to us, D3D11), like the Android
-// emulator on Windows. OST_GL=wgl selects desktop GL instead, which also needs
-// libshadertranslator.dll (gfxstream built with USE_ANGLE_SHADER_PARSER).
+// Host GL: desktop OpenGL (WGL), the Android emulator's host-GPU path on Windows. Guest
+// GLSL ES goes through libshadertranslator.dll (ANGLE's translator, from the emulator
+// package; gfxstream built with USE_ANGLE_SHADER_PARSER). OST_GL=angle runs GLES on ANGLE
+// (libEGL.dll + libGLESv2.dll) instead: gfxstream's ANGLE_INDIRECT mode, which crashes inside
+// ANGLE's D3D11 backend under gfxstream's many-threaded use (docs/renderer_plan.md).
 bool useDesktopGl() {
     const char* v = getenv("OST_GL");
-    return v && strcmp(v, "wgl") == 0;
+    return !(v && strcmp(v, "angle") == 0);
 }
 
 gfxstream::host::FeatureSet guestFeatures() {
@@ -115,6 +118,29 @@ gfxstream::host::FeatureSet guestFeatures() {
     // emulator default: a buffer whose last reference goes away lives ~1 s longer
     GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(&f, NoDelayCloseColorBuffer, false);
     GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(&f, Vulkan, false);
+    // OST_GFX_FEATURES="Name:1,Name:0": override boolean features (experiments)
+    if (const char* ov = getenv("OST_GFX_FEATURES")) {
+        std::string all(ov);
+        size_t pos = 0;
+        while (pos < all.size()) {
+            size_t end = all.find(',', pos);
+            if (end == std::string::npos) end = all.size();
+            std::string item = all.substr(pos, end - pos);
+            size_t colon = item.find(':');
+            if (colon != std::string::npos) {
+                auto it = f.map.find(item.substr(0, colon));
+                auto* b = it == f.map.end() ? nullptr
+                                            : dynamic_cast<gfxstream::host::BoolFeatureInfo*>(it->second);
+                if (b) {
+                    b->setEnabled(item[colon + 1] == '1');
+                    logf(2, "feature %s = %d", it->first.c_str(), item[colon + 1] == '1');
+                } else {
+                    logf(1, "feature %s: unknown or not boolean", item.substr(0, colon).c_str());
+                }
+            }
+            pos = end + 1;
+        }
+    }
     return f;
 }
 
@@ -144,7 +170,9 @@ OST_API int ost_renderer_init(const OstRendererConfig* cfg) {
     const char* verbose = getenv("OST_RENDERER_VERBOSE");
     g.lib->setLogLevel(verbose && *verbose == '1' ? GFXSTREAM_LOGGING_LEVEL_INFO
                                                   : GFXSTREAM_LOGGING_LEVEL_WARNING);
-    g.lib->setRenderer(SELECTED_RENDERER_HOST);  // host GPU (gfxstream defaults to SwiftShader)
+    // Host GPU. On ANGLE this is gfxstream's ANGLE_INDIRECT: HOST means desktop GL to it
+    // (core-profile contexts, "#version 330 core" helper shaders, BGRA_REV readback).
+    g.lib->setRenderer(useDesktopGl() ? SELECTED_RENDERER_HOST : SELECTED_RENDERER_ANGLE_INDIRECT);
     if (cfg->guest_api_level > 0) g.lib->setGuestAndroidApiLevel(cfg->guest_api_level);
     g.renderer = g.lib->initRenderer(cfg->width, cfg->height, guestFeatures(),
                                      true /* sub-window */);

@@ -3225,6 +3225,57 @@ static void gx_layout(HWND parent)
     }
 }
 
+/* crash locator: module+offset of the fault and of return addresses on the stack */
+static void gx_addr(char *o, size_t n, DWORD64 a)
+{
+    HMODULE m = NULL;
+    char path[MAX_PATH] = "?";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)(uintptr_t)a, &m) && m) {
+        const char *b;
+        GetModuleFileNameA(m, path, sizeof(path));
+        b = strrchr(path, '\\');
+        snprintf(o, n, "%s+0x%llx", b ? b + 1 : path,
+                 (unsigned long long)(a - (DWORD64)(uintptr_t)m));
+    } else {
+        snprintf(o, n, "0x%llx", (unsigned long long)a);
+    }
+}
+
+static LONG CALLBACK gx_veh(struct _EXCEPTION_POINTERS *ep)
+{
+    static LONG once;
+    char w[160];
+    if (!ep || !ep->ExceptionRecord ||
+        ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION ||
+        InterlockedExchange(&once, 1)) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    gx_addr(w, sizeof(w), (DWORD64)(uintptr_t)ep->ExceptionRecord->ExceptionAddress);
+    gr_log("CRASH access violation at %s (%s 0x%llx) thread %lu", w,
+           ep->ExceptionRecord->ExceptionInformation[0] ? "write" : "read",
+           (unsigned long long)ep->ExceptionRecord->ExceptionInformation[1],
+           (unsigned long)GetCurrentThreadId());
+    {   /* return addresses into loaded modules, from the stack */
+        DWORD64 *sp = (DWORD64 *)(uintptr_t)ep->ContextRecord->Rsp;
+        unsigned i, hits = 0;
+        for (i = 0; i < 2048 && hits < 24; i++) {
+            MEMORY_BASIC_INFORMATION mbi;
+            DWORD64 v = sp[i];
+            if (v < 0x10000 || !VirtualQuery((void *)(uintptr_t)v, &mbi, sizeof(mbi)) ||
+                !(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ |
+                                 PAGE_EXECUTE_READWRITE))) {
+                continue;
+            }
+            gx_addr(w, sizeof(w), v);
+            gr_log("  stack[%u] %s", i, w);
+            hits++;
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 #define GX_SYM(f, name) \
     ((*(FARPROC *)&gx.f = GetProcAddress(gx.dll, name)) != NULL)
 
@@ -3262,6 +3313,7 @@ static bool gx_init_host(void)
     if (GetEnvironmentVariableA("OST_GUEST_API", api, sizeof(api)) > 0 && atoi(api) > 0) {
         cfg.guest_api_level = atoi(api);
     }
+    AddVectoredExceptionHandler(1, gx_veh);   /* logs where a renderer crash happened */
     if (gx.init(&cfg) != 0) {
         gr_log("ost_renderer_init(%dx%d) failed", GR_W, GR_H);
         g.failed = true;

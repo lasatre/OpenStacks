@@ -1,0 +1,15 @@
+diff --git a/host/gl/color_buffer_gl.cpp b/host/gl/color_buffer_gl.cpp
+index 61f3852..b7d5e54 100644
+--- a/host/gl/color_buffer_gl.cpp
++++ b/host/gl/color_buffer_gl.cpp
+@@ -398,7 +398,9 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::create(
+     }
+ 
+     // desktop GL only: use GL_UNSIGNED_INT_8_8_8_8_REV for faster readback.
+-    if (get_gfxstream_renderer() == SELECTED_RENDERER_HOST) {
++    // OpenStacks: disabled. The read goes through the GLES translator (s_gles2), which
++    // rejects this type (not GLES) with GL_INVALID_ENUM, so post-callback frames stay black.
++    if (false && get_gfxstream_renderer() == SELECTED_RENDERER_HOST) {
+ #define GL_UNSIGNED_INT_8_8_8_8           0x8035
+ #define GL_UNSIGNED_INT_8_8_8_8_REV       0x8367
+         cb->m_asyncReadbackType = GL_UNSIGNED_INT_8_8_8_8_REV;

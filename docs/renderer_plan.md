@@ -88,12 +88,21 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
   builds `ost_renderer.dll` (C API, `renderer/ost_renderer.h`) and `ost_renderer_smoke.exe`;
   `renderer/build_gfxstream.cmd` -> `deps/ost-renderer-build/Release/`. The smoke test opens a
   channel and gets `rcGetRendererVersion` back.
-  - **Host GL = ANGLE** (`EglOnEgl`: GLES on `libEGL.dll` + `libGLESv2.dll`, D3D11), like the
-    Android emulator on Windows. Desktop GL (WGL) would need `libshadertranslator.dll`
-    (gfxstream with `USE_ANGLE_SHADER_PARSER`): without it every shader fails to compile.
-    `OST_GL=wgl` keeps that path selectable. Tested with Chromium's ANGLE 2.1.28007 (from an
-    Electron app): GLES 3.0 on the RTX 3070. Shipping ANGLE (BSD) is still to decide: build it,
-    or a pinned prebuilt.
+  - **Host GL = desktop OpenGL (WGL)**, the Android emulator's host-GPU path on Windows
+    (gfxstream renderer id HOST). Guest GLSL ES is translated by `libshadertranslator.dll`
+    (ANGLE's translator from the Android emulator package, fetched pinned by
+    `renderer/fetch_shadertranslator.py`; gfxstream built with `USE_ANGLE_SHADER_PARSER`, header
+    vendored in `renderer/third_party/shadertranslator/` from AOSP's ANGLE `emu-master-dev`).
+    Without it every guest shader fails to compile.
+  - **ANGLE was tried first and dropped** (`OST_GL=angle` keeps it selectable: `EglOnEgl` +
+    gfxstream's ANGLE_INDIRECT id; HOST would make it use "#version 330 core" helper shaders and
+    a non-GLES readback type). Every ANGLE build tried (Chromium 2.1.28007 / 2.1.28055 from
+    Electron, the Android emulator's own) crashes inside the D3D11 backend a few seconds into
+    boot: use-after-free-looking reads in `Framebuffer11::markAttachmentsDirty` (post thread) or
+    `StateManager11::applyUniformsForShader` (render threads), with or without the display
+    window, readback, GLES3, or colour buffer ref counting. Fits ANGLE-D3D11 state shared across
+    gfxstream's many GL threads. (Resolved with Electron's Breakpad symbols.) ANGLE's Vulkan
+    backend has no matching GLES2 config here. One early boot got through by luck.
   - gfxstream's render thread reads a u32 `clientFlags` first; the BlueStacks guest does not
     send it (no framing loss after the 0x100 handshake in the trace), so the pump injects 0.
   - Logs: warnings and errors by default, `OST_RENDERER_VERBOSE=1` for gfxstream's info lines.
@@ -122,9 +131,13 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
     type, location and name), x10 is the uniform block count (+0x44, read only by
     getActiveUniformBlockCount, which glGetProgramiv does not use), x14 (+0x48) has no
     reader. Both are sent as 0.
-- **Open:** gfxstream's GLES1-emulation core shaders fail on ANGLE ("'core' : invalid
-  version directive") when Settings starts; check what uses them. Then apps and games,
-  rotation, the native player embedding, Android 11/13, shipping ANGLE, front-end switch.
+- **Desktop GL boot (Pie64):** boots to the home screen, stable across the boot, native
+  display window shows it (checked by capturing the hidden window off-screen with PrintWindow).
+- **Open:** the post-callback readback (VNC console, host screenshots) stays black on desktop GL;
+  `renderer/gfxstream-patches/0003` (GLES-valid readback type) is needed but not enough. Then
+  apps and games, rotation, the native player embedding, Android 11/13, front-end switch, CI.
+- Crash locator: gr_render's gfxstream path logs the faulting module+offset and stack return
+  addresses on an access violation; `ost_renderer.pdb` + llvm-symbolizer resolve ours.
 
 ## Milestones
 

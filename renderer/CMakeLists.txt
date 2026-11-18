@@ -7,6 +7,12 @@ set(GFXSTREAM_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../deps/gfxstream" CACHE PATH "gf
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Desktop GL (OST_GL=wgl) needs gfxstream's ANGLE shader parser: GLSL ES -> desktop GLSL via
+# libshadertranslator.dll (Android emulator), loaded at run time. Header from AOSP's ANGLE
+# (platform/external/angle, emu-master-dev, src/libShaderTranslator).
+set(USE_ANGLE_SHADER_PARSER ON CACHE BOOL "" FORCE)
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/third_party/shadertranslator")
+
 # gfxstream itself (its own top-level CMakeLists handles being a subdirectory)
 add_subdirectory("${GFXSTREAM_SRC}" gfxstream EXCLUDE_FROM_ALL)
 
@@ -24,6 +30,11 @@ target_link_libraries(ost_renderer PRIVATE
     gfxstream_host_common
     gfxstream_host_tracing
     gfxstream_backend_static)
+
+# PDB (function names; gfxstream itself has no /Zi): resolves the crash offsets gr_render
+# logs, e.g. llvm-symbolizer --obj=ost_renderer.dll 0x<offset> (VS Clang's llvm tools)
+target_compile_options(ost_renderer PRIVATE /Zi)
+target_link_options(ost_renderer PRIVATE /DEBUG:FULL)
 
 # Smoke test: one channel, rcGetRendererVersion
 add_executable(ost_renderer_smoke smoke.c)

@@ -5,8 +5,11 @@ rem   1. clone gfxstream at the pinned commit into deps\gfxstream (once)
 rem   2. apply renderer\gfxstream-patches\*.patch (once per patch)
 rem   3. configure deps\ost-renderer-build (renderer\CMakeLists.txt + gfxstream, VS 2022,
 rem      ClangCL) and build ost_renderer.dll + ost_renderer_smoke.exe
+rem   4. fetch libshadertranslator.dll (renderer\fetch_shadertranslator.py: pinned,
+rem      hash-checked) next to it, and install both into build\ when the QEMU build
+rem      is there (assemble.py ships every DLL in build\)
 rem  Needs: Visual Studio 2022 (Build Tools) with the C++ and "C++ Clang" components,
-rem         CMake 3.20+, git. Output: deps\ost-renderer-build\Release\ost_renderer.dll
+rem         CMake 3.20+, git, python. Output: deps\ost-renderer-build\Release\ost_renderer.dll
 rem ==========================================================================
 setlocal
 set "RDIR=%~dp0"
@@ -37,6 +40,12 @@ if not exist "%BLD%\CMakeCache.txt" (
     "-DCMAKE_CXX_FLAGS=/DWIN32 /D_WINDOWS /EHsc /GR /D_WINSOCKAPI_" || goto :fail
 )
 "%CMAKE%" --build "%BLD%" --config Release --target ost_renderer ost_renderer_smoke --parallel || goto :fail
+python "%RDIR%fetch_shadertranslator.py" --dest "%BLD%\Release" || goto :fail
+if exist "%ROOT%build\qemu-system-x86_64.exe" (
+  copy /y "%BLD%\Release\ost_renderer.dll" "%ROOT%build\" >nul || goto :fail
+  copy /y "%BLD%\Release\libshadertranslator.dll" "%ROOT%build\" >nul || goto :fail
+  echo [gfxstream] installed ost_renderer.dll + libshadertranslator.dll into %ROOT%build
+)
 echo.
 echo Build OK: %BLD%\Release\ost_renderer.dll (smoke test: ost_renderer_smoke.exe)
 exit /b 0

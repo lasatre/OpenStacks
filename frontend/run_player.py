@@ -70,7 +70,20 @@ def smoke(report: str = "") -> int:
     return 0 if ok else 1
 
 
+def _restore_library_path() -> None:
+    """Frozen on Linux: PyInstaller's bootloader points LD_LIBRARY_PATH at its own bundle, and
+    every child would inherit it (QEMU, adb, xdg-open: system programs picking up our copies
+    of libraries). The loader read it at our own start already, so put the original back."""
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        orig = os.environ.pop("LD_LIBRARY_PATH_ORIG", None)
+        if orig is not None:
+            os.environ["LD_LIBRARY_PATH"] = orig
+        else:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+
+
 def main() -> int:
+    _restore_library_path()
     _use_os_trust_store()
     if len(sys.argv) > 1 and sys.argv[1] == "--smoke":
         return smoke(sys.argv[2] if len(sys.argv) > 2 else "")

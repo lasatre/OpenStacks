@@ -1,5 +1,7 @@
 # build outputs
 build/
+build-linux/
+build-asan/
 deps/
 __pycache__/
 *.pyc
@@ -28,3 +30,4 @@ packaging/version_info.txt
 *.spec.bak
 
 .venv-build/
+.venv-linux/

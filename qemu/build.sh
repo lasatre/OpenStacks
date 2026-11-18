@@ -44,6 +44,7 @@ if [ ! -f "$BUILD/build.ninja" ]; then
   if ! (cd "$BUILD" && "$QEMU_TREE/configure" --target-list=x86_64-softmmu --cc="$cc" \
       --enable-kvm --enable-slirp --audio-drv-list=pa \
       --disable-werror --disable-docs --disable-tools --disable-sdl --disable-gtk \
+      --disable-curses --disable-vnc-sasl --disable-vnc-jpeg \
       ${QEMU_CONFIGURE_EXTRA:-}); then
     echo "configure FAILED - see the messages above"
     rm -f "$BUILD/build.ninja"

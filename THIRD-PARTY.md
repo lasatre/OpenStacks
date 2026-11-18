@@ -28,6 +28,28 @@
 
 The LGPL libraries are dynamically linked and can be replaced in place.
 
+## Shipped in the Linux AppImage
+
+Paths are inside the AppImage (`OpenStacks/`); the AppImage extracts with
+`--appimage-extract`.
+
+| Component | Where | License | Source |
+|---|---|---|---|
+| QEMU 11.1.0 (with the OpenStacks devices in `qemu/hw/misc/`) | `qemu/qemu-system-x86_64`, `qemu/pc-bios/` | GPL-2.0 (firmware in `pc-bios/`: see QEMU's `pc-bios/README`) | https://download.qemu.org/qemu-11.1.0.tar.xz, plus `qemu/` in this repository |
+| libslirp | `qemu/lib/libslirp.so.0` | BSD-3-Clause | Ubuntu 22.04 `libslirp0` |
+| dtc (libfdt) | `qemu/lib/libfdt.so.1` | BSD-2-Clause or GPL-2.0-or-later | Ubuntu 22.04 `libfdt1` |
+| pixman | `qemu/lib/libpixman-1.so.0` | MIT | Ubuntu 22.04 `libpixman-1-0` |
+| gfxstream (with `renderer/gfxstream-patches/`) | `qemu/libost_renderer.so` | Apache-2.0 | https://github.com/google/gfxstream (pinned commit) |
+| ANGLE shader translator (Android emulator build 16740729) | `qemu/libshadertranslator.so` | BSD-3-Clause (`renderer/ANGLE-LICENSE.txt`) | https://dl.google.com/android/repository/emulator-linux_x64-16740729.zip (pinned SHA-1/SHA-256) |
+| LLVM libc++ (the shader translator's C++ runtime, same package) | `qemu/libc++.so` | Apache-2.0 WITH LLVM-exception (`renderer/LIBCXX-LICENSE.txt`) | same as above |
+| Python 3, Qt 6 / PySide6, PyInstaller bootloader | `OpenStacks`, `_internal/` | PSF-2.0; LGPL-3.0; GPL-2.0 with the bootloader exception | as in the Windows ZIP |
+| Qt's runtime libraries (xcb, fontconfig, FreeType, ICU, ...) | `_internal/` | their own (mostly MIT, LGPL, FTL); see Ubuntu 22.04's `/usr/share/doc/<package>/copyright` | Ubuntu 22.04 packages, collected by PyInstaller |
+| 7-Zip 26.06 (`7zzs`, static) | `tools/7zz` | LGPL-2.1, BSD parts, unRAR restriction (`License.txt` in the 7-Zip archive) | https://github.com/ip7z/7zip/releases/tag/26.06 |
+| AppImage type2-runtime 20251108 | the AppImage's own header | MIT | https://github.com/AppImage/type2-runtime/releases/tag/20251108 |
+| Sora (brand wordmark, outlined) | `_internal/brand/` | SIL OFL-1.1 (`brand/font-license/Sora-OFL.txt`) | https://fonts.google.com/specimen/Sora |
+
+GLib, libpulse, zlib, X11/GL and the C/C++ runtimes come from the system.
+
 ## Downloaded on demand (not shipped)
 
 | Component | When | License / terms | Source |
@@ -35,10 +57,10 @@ The LGPL libraries are dynamically linked and can be replaced in place.
 | BlueStacks 5 Android images (incl. libhoudini) | when you create an instance for an image | BlueStacks' terms | BlueStacks' public CDN (`cdn3.bluestacks.com`) |
 | Lawnchair | while an image is installed | GPL-3.0 | https://github.com/LawnchairLauncher/lawnchair/releases (pinned SHA-256) |
 | Kitsune Magisk v27.2-kitsune-4 | the player's Root button | GPL-3.0 | https://github.com/AndnixSH/KitsuneMagisk/releases (pinned SHA-256) |
-| Android SDK platform-tools (adb) | first-run setup, if no adb is found | Android SDK license | https://dl.google.com/android/repository/platform-tools-latest-windows.zip |
+| Android SDK platform-tools (adb) | first-run setup, if no adb is found | Android SDK license | https://dl.google.com/android/repository/platform-tools-latest-windows.zip (`-linux.zip` on Linux) |
 
 ## Required, not shipped
 
-Only for instances set to the BlueStacks GPU renderer (new instances use the open renderer,
+Windows only, and only for instances set to the BlueStacks GPU renderer (new instances use the open renderer,
 gfxstream, which needs nothing from BlueStacks): BlueStacks 5's GPU renderer (`libOpenglRender.dll` and its folder) is proprietary and is loaded from
 your own BlueStacks 5 installation. OpenStacks is not affiliated with or endorsed by BlueStacks or now.gg.

@@ -80,6 +80,41 @@ every change keeps the Windows build green.
      minutes instead of ~16). Same caching on the Linux job.
 7. **Docs** - README Linux section, THIRD-PARTY (Linux deps), BACKLOG.
 
+## Status (branch `linux-port`)
+
+Phases 1-7 are implemented and checked in WSL2 (Ubuntu 22.04, KVM on the custom WSL kernel,
+Xvfb). Left for the user's real Linux machine: the AppImage on a desktop session (Wayland +
+XWayland), a real GPU driver, sound through PipeWire/PulseAudio, image download from scratch.
+
+Checked in WSL2:
+- QEMU 11.1 + all devices on KVM; Pie64, Android 11 and 13 boot through gfxstream on GLX.
+- `st_probe` against the Linux `libshadertranslator.so` (same ABI as Windows), smoke test.
+- The 3D Unity test game runs on the D3D12 GPU; video playback not checked yet.
+- X11 display window: shows the guest, rotation, letterbox, clicks, typing, embedding,
+  destroy -> recreate, save-set release; the player embeds it, re-adopts a running instance
+  after the player died, stops it.
+
+Findings along the way (each fixed and committed):
+- **Xlib threads**: gfxstream's GLX path needs `XInitThreads()` before any display opens (the
+  emulator does it in `main`); `ost_renderer_init` calls it.
+- **Library loading**: glibc's `dlopen` ignores the caller's RUNPATH, so QEMU loads
+  `libost_renderer.so` by absolute path (next to `/proc/self/exe`) and the adapter preloads
+  `libshadertranslator.so` from its own folder, `RTLD_LOCAL`: the emulator's `libc++.so` it pulls
+  in exports libc++abi's `__cxa_*`, which must stay out of the global scope.
+- **Exit**: Linux `exit()` runs static destructors while gfxstream's threads still run (Windows'
+  `ExitProcess` stops them first): the puller's condvar hung exit, Mesa teardown crashed it. An
+  `on_exit` handler `_exit()`s after QEMU's own cleanup.
+- **WSLg's Mesa D3D12 driver** corrupts the heap under gfxstream's many concurrent GL contexts
+  (not under ASan, not with llvmpipe). WSL-only; test with `GALLIUM_DRIVER=llvmpipe` there.
+- **llvmpipe is too slow for the 3D game**: the guest's HPP transport gives up on a reply that
+  takes over a second (`hppRecv: Invalid case! host status=1`). A real GPU is fine.
+- **PulseAudio**: QEMU refuses to start when its server is unreachable; the engine falls back
+  to `-audiodev none` (with a warning) when no PulseAudio socket answers.
+
+Not done / backlog: file drops onto the screen (XDND goes to the player's top-level window, so
+Qt should handle them; unchecked), the pop-out's aspect-locked resizing (Windows' WM_SIZING),
+native Wayland.
+
 ## Risks
 
 - **Guest timekeeping on KVM**: the BlueStacks kernel was tuned for WHPX here (VMware TSC leaf,

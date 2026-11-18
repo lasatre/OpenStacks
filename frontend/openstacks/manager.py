@@ -11,6 +11,7 @@ Run via:  python -m openstacks.manager
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -410,7 +411,9 @@ class ManagerWindow(QMainWindow):
             name = n
             break
         if not res.ok:
-            QMessageBox.critical(self, "Launch failed", res.error or "\n".join(res.warnings))
+            msg = res.error or "\n".join(res.warnings)
+            print(f"[openstacks] launch failed: {msg}", file=sys.stderr, flush=True)
+            QMessageBox.critical(self, "Launch failed", msg)
         else:
             for w in res.warnings:
                 self.statusBar().showMessage(w, 8000)

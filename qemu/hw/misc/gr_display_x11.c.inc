@@ -31,7 +31,7 @@ static void gx_repaint(void);
     f(XInitThreads) f(XOpenDisplay) f(XCreateWindow) f(XSelectInput) f(XStoreName) \
     f(XSetClassHint) f(XChangeProperty) f(XInternAtom) f(XMapWindow) f(XPending) \
     f(XNextEvent) f(XFlush) f(XSetErrorHandler) f(XSetInputFocus) f(XResizeWindow) \
-    f(XGetErrorText) f(XSetWMProtocols) f(XUnmapWindow)
+    f(XGetErrorText) f(XSetWMProtocols) f(XUnmapWindow) f(XQueryTree) f(XFree)
 
 static struct {
 #define GRX_PTR(n) __typeof__(n) *n;
@@ -88,9 +88,9 @@ static Window grx_make_window(void)
     int scr = DefaultScreen(g_xdpy);
     XSetWindowAttributes wa = {
         .background_pixel = BlackPixel(g_xdpy, scr),       /* the letterbox bars */
-        .event_mask = StructureNotifyMask | ExposureMask | ButtonPressMask |
-                      ButtonReleaseMask | PointerMotionMask | KeyPressMask |
-                      KeyReleaseMask,
+        .event_mask = StructureNotifyMask | SubstructureNotifyMask | ExposureMask |
+                      ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
+                      KeyPressMask | KeyReleaseMask,
     };
     Window w = x11.XCreateWindow(g_xdpy, RootWindow(g_xdpy, scr), 0, 0, GR_W, GR_H, 0,
                                  CopyFromParent, InputOutput, CopyFromParent,
@@ -113,9 +113,29 @@ static Window grx_make_window(void)
     return w;
 }
 
+/* Expose on gfxstream's GL subwindow too: when the picture fills our window (no
+ * letterbox bars) the subwindow covers it completely and only the subwindow gets
+ * Expose. Selecting events on another client's window is allowed (masks are per
+ * client); its events come in on our connection. */
+static void grx_watch_children(void)
+{
+    Window root, parent, *kids = NULL;
+    unsigned n = 0, i;
+    if (!g.hwnd || !x11.XQueryTree(g_xdpy, (Window)g.hwnd, &root, &parent, &kids, &n)) {
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        x11.XSelectInput(g_xdpy, kids[i], ExposureMask);
+    }
+    if (kids) x11.XFree(kids);
+}
+
 static void grx_layout(void)
 {
-    if (gr_gfx() && g.hwnd) gx_show_in((void *)(uintptr_t)g.hwnd, g_xw, g_xh);
+    if (gr_gfx() && g.hwnd) {
+        gx_show_in((void *)(uintptr_t)g.hwnd, g_xw, g_xh);
+        grx_watch_children();
+    }
 }
 
 /* GR_SHOW: a top-level window follows the guest's aspect, like the Win32 one */
@@ -139,9 +159,21 @@ static void grx_pointer(int x, int y, int down)
 
 static void grx_event(XEvent *e)
 {
+    if (e->type == Expose && e->xany.window != (Window)g.hwnd) {
+        /* gfxstream's subwindow (grx_watch_children) */
+        if (e->xexpose.count == 0 && gr_gfx()) gx_repaint();
+        return;
+    }
     if (e->xany.window != (Window)g.hwnd) return;      /* a previous window's leftovers */
     switch (e->type) {
+    case CreateNotify:                       /* gfxstream made its subwindow */
+        if (e->xcreatewindow.parent == (Window)g.hwnd) {
+            x11.XSelectInput(g_xdpy, e->xcreatewindow.window, ExposureMask);
+        }
+        break;
     case ConfigureNotify:
+        /* SubstructureNotify also reports the subwindow's: only ours count */
+        if (e->xconfigure.window != (Window)g.hwnd) break;
         if (e->xconfigure.width != g_xw || e->xconfigure.height != g_xh) {
             g_xw = e->xconfigure.width;
             g_xh = e->xconfigure.height;
@@ -179,6 +211,7 @@ static void grx_event(XEvent *e)
         break;
     }
     case ReparentNotify:
+        if (e->xreparent.window != (Window)g.hwnd) break;
         /* back on the root: the embedder let go of us (or exited with us in its
          * save-set, which also maps us). Hidden again until embedded anew. */
         if (e->xreparent.parent == RootWindow(g_xdpy, DefaultScreen(g_xdpy))) {

@@ -588,6 +588,12 @@ def _pulse_available() -> bool:
 
 def _port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if sys.platform != "win32":
+            # Linux: without it the bind fails for ~60 s after QEMU exits, while closed
+            # ADB connections sit in TIME_WAIT (QEMU's slirp binds with SO_REUSEADDR and
+            # would start fine). A port someone listens on still fails. Not on Windows:
+            # there SO_REUSEADDR would let the bind steal a listening port.
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
             return False

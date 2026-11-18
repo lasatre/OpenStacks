@@ -1,0 +1,2 @@
+# patches for other trees: keep their bytes exactly (git apply on Windows checkouts)
+*.patch -text

@@ -79,14 +79,52 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
 
 ## Status
 
-- **M1 (in progress):** renderControl, GLES1 and GLES2 mapped (above). Open: the Vulkan
-  encoder (`libvulkan_enc`, opcodes 20000+), the unnamed GLES2 opcodes, and runtime
-  confirmation with the stream tracer (`GR_TRACE=1`).
-- **M2 (done):** `renderer/build_gfxstream.cmd` builds `gfxstream_backend.dll` (6.8 MB) with VS
-  2022 Build Tools + ClangCL at the pinned commit cf47bd2. Needs `_WINSOCKAPI_` (winsock.h vs
-  WinSock2.h clash) and `renderer/gfxstream-patches/0001-vk-log-string-c_str.patch`. The DLL
-  exports `initLibrary` (RenderLib, C++) and the virtio-gpu `stream_renderer_*` C API; the
-  adapter uses `initLibrary`.
+- **M1 (mostly done):** renderControl, GLES1 and GLES2 mapped (above), runtime trace done.
+  Open: 2488 reply fields x10/x14, a game workload, the Vulkan encoder, Android 11/13 libs.
+- **M2 (done):** gfxstream builds on Windows (VS 2022 Build Tools + ClangCL, pinned commit
+  cf47bd2). Needs `_WINSOCKAPI_` (winsock.h vs WinSock2.h clash) and
+  `renderer/gfxstream-patches/0001-vk-log-string-c_str.patch`.
+- **M4 adapter (done):** `renderer/` is a CMake project (gfxstream as a subdirectory) that
+  builds `ost_renderer.dll` (C API, `renderer/ost_renderer.h`) and `ost_renderer_smoke.exe`;
+  `renderer/build_gfxstream.cmd` -> `deps/ost-renderer-build/Release/`. The smoke test opens a
+  channel and gets `rcGetRendererVersion` back.
+  - **Host GL = ANGLE** (`EglOnEgl`: GLES on `libEGL.dll` + `libGLESv2.dll`, D3D11), like the
+    Android emulator on Windows. Desktop GL (WGL) would need `libshadertranslator.dll`
+    (gfxstream with `USE_ANGLE_SHADER_PARSER`): without it every shader fails to compile.
+    `OST_GL=wgl` keeps that path selectable. Tested with Chromium's ANGLE 2.1.28007 (from an
+    Electron app): GLES 3.0 on the RTX 3070. Shipping ANGLE (BSD) is still to decide: build it,
+    or a pinned prebuilt.
+  - gfxstream's render thread reads a u32 `clientFlags` first; the BlueStacks guest does not
+    send it (no framing loss after the 0x100 handshake in the trace), so the pump injects 0.
+  - Logs: warnings and errors by default, `OST_RENDERER_VERBOSE=1` for gfxstream's info lines.
+- **M3 (first cut):** `OST_RENDERER=gfxstream` in gr_render.c: `ost_renderer.dll` (or
+  `OST_GFXSTREAM_DLL`) instead of libOpenglRender.dll. Per connection a pump thread
+  (`gx_pump`): handshake via the pure lane's createFinish, guest bytes (pure window or HPP
+  ring, non-blocking drains) -> `ost_channel_write`, replies -> pure lane staging + send.
+  The renderer's notify callback wakes the pump. Display: `ost_renderer_show` into
+  gr_renderHostWnd from the UI thread (gr_layout); rotation via `setOpenGLDisplayRotation`;
+  readback via the post callback into the VNC frame buffer. `OST_GX_LOG=1` logs every
+  renderControl call and reply per connection.
+- **First light (Pie64):** the home screen (Lawnchair, SystemUI, wallpaper) renders on
+  gfxstream + ANGLE; SurfaceFlinger, Settings, SystemUI, system_server, Play Store and GMS
+  connect over the pure lane, Lawnchair over HPP. Two fixes got there:
+  - **Colour buffer ref counting:** BlueStacks' gralloc (inside SurfaceFlinger) does
+    rcCreateColorBuffer -> rcOpenColorBuffer2 -> rcCloseColorBuffer up front and keeps
+    using the buffer. That is the pre-O rule (create holds a reference); with O+ rules
+    gfxstream frees it at that close ("bad color buffer handle"). gr_render passes guest API
+    level 25 to gfxstream (it only drives this and a Vulkan version cap);
+    `OST_GUEST_API` overrides. NoDelayCloseColorBuffer off (emulator default, 1 s grace).
+  - **Opcode 2488** (`renderer/gfxstream-patches/0002-...`): gfxstream's render thread waits
+    forever on an opcode no decoder takes, so the first glLinkProgram hung SurfaceFlinger.
+    The GLES2 decoder now answers it from the host program. Fields pinned from the guest:
+    uStride/aStride are GL_ACTIVE_UNIFORM/ATTRIBUTE_MAX_LENGTH (ProgramData +0x38/+0x40),
+    records are {nameLen, size, type, location, name[maxLen + 4]} (the guest reads size,
+    type, location and name), x10 is the uniform block count (+0x44, read only by
+    getActiveUniformBlockCount, which glGetProgramiv does not use), x14 (+0x48) has no
+    reader. Both are sent as 0.
+- **Open:** gfxstream's GLES1-emulation core shaders fail on ANGLE ("'core' : invalid
+  version directive") when Settings starts; check what uses them. Then apps and games,
+  rotation, the native player embedding, Android 11/13, shipping ANGLE, front-end switch.
 
 ## Milestones
 

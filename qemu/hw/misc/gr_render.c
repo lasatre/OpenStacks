@@ -325,6 +325,10 @@ typedef struct GrSock {
     bool     trBroken;         /* framing lost: stop tracing this cid      */
     struct GrTraceOp *trOps;   /* census, open addressing (GR_TRACE_SLOTS)  */
     uint64_t trLastDump;
+    /* --- gfxstream backend (OST_RENDERER=gfxstream): per-connection pump --- */
+    HANDLE   gxThread;         /* pump thread of the current/last session   */
+    void    *gxCh;             /* OstChannel* (under S_LOCK)                */
+    bool     gxWake;           /* reply readable (channel notify, S_LOCK)   */
 } GrSock;
 
 typedef struct GrState {
@@ -1154,13 +1158,25 @@ static int gr_verbose(void)
     return v;
 }
 
+/* OST_RENDERER=gfxstream: gfxstream (ost_renderer.dll) instead of the DLL */
+static int gr_gfx(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        char b[16] = {0};
+        v = GetEnvironmentVariableA("OST_RENDERER", b, sizeof(b)) > 0 &&
+            strcmp(b, "gfxstream") == 0;
+    }
+    return v;
+}
+
 static int gr_pure(void)
 {
     static int cached = -1;
     if (cached < 0) {
         char buf[8] = {0};
         DWORD n = GetEnvironmentVariableA("GR_PURE", buf, sizeof(buf));
-        cached = (n > 0 && buf[0] == '1') ? 1 : 0;
+        cached = ((n > 0 && buf[0] == '1') || gr_gfx()) ? 1 : 0;   /* gfxstream: pure lane */
         gr_log("GR_PURE=%d", cached);
     }
     return cached;
@@ -2849,6 +2865,9 @@ static void gr_register_drop(HWND h)
            SUCCEEDED(hr) ? "registered" : "FAILED", (unsigned long)hr);
 }
 
+static void gx_layout(HWND parent);
+static void gx_set_rotation(int o);
+
 static LRESULT CALLBACK gr_child_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (gr_input_msg(h, m, w, l)) return 0;
@@ -2867,6 +2886,7 @@ static BOOL CALLBACK gr_find_child(HWND c, LPARAM l)
 static void gr_layout(HWND parent)
 {
     RECT rc;
+    if (gr_gfx()) gx_layout(parent);     /* (re)creates + sizes its subwindow */
     if (!g_child) {
         EnumChildWindows(parent, gr_find_child, 0);
         if (g_child) {
@@ -2875,7 +2895,7 @@ static void gr_layout(HWND parent)
             gr_log("native display: DLL window %p subclassed", (void *)g_child);
         }
     }
-    if (!g_child) return;
+    if (!g_child || gr_gfx()) return;
     GetClientRect(parent, &rc);
     if (rc.right > 0 && rc.bottom > 0) {
         SetWindowPos(g_child, NULL, 0, 0, rc.right, rc.bottom,
@@ -2933,7 +2953,9 @@ void gr_render_set_orientation(int o)
 {
     if (o < 0 || o > 3) return;
     qatomic_set(&g_orient, o);
-    if (g.ready && TAB(0x40)) {
+    if (gr_gfx()) {
+        gx_set_rotation(o);
+    } else if (g.ready && TAB(0x40)) {
         ((PgaSetRotation_t)TAB(0x40))(1.0f, 1.0f, o);
     }
     if (g.hwnd) PostMessageW(g.hwnd, WM_APP + 1, (WPARAM)o, 0);
@@ -3130,6 +3152,423 @@ static void readpix_spawn(void)
 }
 
 /* ================================================================= */
+/* gfxstream backend (OST_RENDERER=gfxstream, docs/renderer_plan.md)  */
+/* ost_renderer.dll = gfxstream's host renderer behind a C API         */
+/* (renderer/ost_renderer.h). The transport stays ours: per connection */
+/* a pump thread moves the guest's bytes (pure lane window / HPP ring) */
+/* into a gfxstream RenderChannel and stages its replies through the  */
+/* pure lane's hstAlloc/hstSend (pvt_alloccopy / pvt_send). gfxstream */
+/* decodes; we never parse the stream.                                 */
+
+typedef struct GxConfig {
+    int api_version, width, height, guest_api_level;
+    void (*log)(void *user, int level, const char *msg);
+    void *user;
+} GxConfig;
+
+static struct {
+    HMODULE dll;
+    int  (*init)(const GxConfig *);
+    int  (*show)(void *, int, int, float);
+    void (*set_rotation)(float);
+    void (*set_frame_cb)(void (*)(void *, int, int, const uint8_t *), void *);
+    void *(*ch_open)(void);
+    int  (*ch_write)(void *, const void *, size_t);
+    long (*ch_read)(void *, void *, size_t, int);
+    void (*ch_set_notify)(void *, void (*)(void *), void *);
+    void (*ch_arm)(void *);
+    void (*ch_stop)(void *);
+    void (*ch_close)(void *);
+    bool shown;
+} gx;
+
+static void gx_log(void *user, int level, const char *msg)
+{
+    (void)user;
+    gr_log("gfxstream[%c] %s", "EWID"[level & 3], msg);
+}
+
+/* composited frame (RGBA, top row first) -> the VNC console buffer */
+static void gx_frame(void *user, int w, int h, const uint8_t *rgba)
+{
+    (void)user;
+    if (!g.fbBuf || w != GR_W || h != GR_H) {
+        gr_once(0xd0, "gfxstream frame %dx%d != fb %dx%d", w, h, GR_W, GR_H);
+        return;
+    }
+    memcpy(g.fbBuf, rgba, GR_FB_BYTES);
+    g.postOn = true;
+    ++g_postctx.posts;
+    qatomic_inc(&g_frameSeq);
+}
+
+static void gx_set_rotation(int o)
+{
+    if (gx.set_rotation && g.ready) gx.set_rotation((float)(o * 90));
+}
+
+/* UI thread (WM_SIZE / WM_TIMER via gr_layout): gfxstream creates its
+ * display as a child of our window on the calling thread, so this must
+ * be the thread that pumps that window's messages.                    */
+static void gx_layout(HWND parent)
+{
+    RECT rc;
+    if (!g.ready || !gx.show) return;
+    GetClientRect(parent, &rc);
+    if (rc.right <= 0 || rc.bottom <= 0) return;
+    if (gx.show(parent, rc.right, rc.bottom, (float)(qatomic_read(&g_orient) * 90)) == 0) {
+        if (!gx.shown) {
+            gr_log("gfxstream display in %p (%ldx%ld)", (void *)parent,
+                   rc.right, rc.bottom);
+        }
+        gx.shown = true;
+    }
+}
+
+#define GX_SYM(f, name) \
+    ((*(FARPROC *)&gx.f = GetProcAddress(gx.dll, name)) != NULL)
+
+static bool gx_init_host(void)
+{
+    char path[MAX_PATH] = {0}, api[8] = {0};
+    if (!GetEnvironmentVariableA("OST_GFXSTREAM_DLL", path, sizeof(path))) {
+        strcpy(path, "ost_renderer.dll");    /* next to qemu (DLL search path) */
+    }
+    gx.dll = LoadLibraryExA(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!gx.dll) {
+        gr_log("LoadLibraryExA(%s) FAILED err=%lu", path, (unsigned long)GetLastError());
+        fprintf(stderr, "[gr_render] cannot load %s (err=%lu)\n", path,
+                (unsigned long)GetLastError());
+        g.failed = true;
+        return false;
+    }
+    if (!(GX_SYM(init, "ost_renderer_init") && GX_SYM(show, "ost_renderer_show") &&
+          GX_SYM(set_rotation, "ost_renderer_set_rotation") &&
+          GX_SYM(set_frame_cb, "ost_renderer_set_frame_callback") &&
+          GX_SYM(ch_open, "ost_channel_open") && GX_SYM(ch_write, "ost_channel_write") &&
+          GX_SYM(ch_read, "ost_channel_read") &&
+          GX_SYM(ch_set_notify, "ost_channel_set_notify") &&
+          GX_SYM(ch_arm, "ost_channel_arm") && GX_SYM(ch_stop, "ost_channel_stop") &&
+          GX_SYM(ch_close, "ost_channel_close"))) {
+        gr_log("%s: missing exports (stale build?)", path);
+        g.failed = true;
+        return false;
+    }
+    /* gfxstream only uses the API level for colour buffer ref counting: BlueStacks'
+     * gralloc creates, opens and closes each buffer up front (in SurfaceFlinger)
+     * and keeps using it, i.e. the pre-O rule "create holds a reference". With
+     * O+ (>= 26) rules gfxstream frees it at that first close.               */
+    GxConfig cfg = { 1, GR_W, GR_H, 25, gx_log, NULL };
+    if (GetEnvironmentVariableA("OST_GUEST_API", api, sizeof(api)) > 0 && atoi(api) > 0) {
+        cfg.guest_api_level = atoi(api);
+    }
+    if (gx.init(&cfg) != 0) {
+        gr_log("ost_renderer_init(%dx%d) failed", GR_W, GR_H);
+        g.failed = true;
+        return false;
+    }
+    g.fbBuf = (uint8_t *)calloc(1, GR_FB_BYTES);
+    g.fbPrev = (uint8_t *)calloc(1, GR_FB_BYTES);
+    {
+        char rb[4] = {0};
+        g_readback = !(GetEnvironmentVariableA("GR_READBACK", rb, sizeof(rb)) > 0 &&
+                       rb[0] == '0');
+    }
+    if (g_readback) gx.set_frame_cb(gx_frame, NULL);
+    vt_table_init();
+    vt_pure_table_init();
+
+    g_uiReady = CreateEventW(NULL, TRUE, FALSE, NULL);
+    CloseHandle(CreateThread(NULL, 0, gr_ui_thread, NULL, 0, NULL));
+    WaitForSingleObject(g_uiReady, 10000);
+    if (!g.hwnd) {
+        gr_log("CreateWindowExW failed err=%lu", (unsigned long)GetLastError());
+        g.failed = true;
+        return false;
+    }
+    g.ready = true;
+    PostMessageW(g.hwnd, WM_TIMER, 1, 0);    /* gr_layout on the UI thread */
+    gr_log("READY: gfxstream backend (%s, %dx%d, guest API %d, readback %s)", path,
+           GR_W, GR_H, cfg.guest_api_level, g_readback ? "on" : "off");
+    return true;
+}
+
+static void gx_notify(void *user)        /* renderer thread, channel lock held */
+{
+    GrSock *s = (GrSock *)user;
+    S_LOCK(s);
+    s->gxWake = true;
+    S_UNLOCK(s);
+    WakeAllConditionVariable(S_CNDP(s));
+}
+
+/* pure lane: every guest byte available now (carry, then the window);
+ * acks the WRITE, so the guest's next chunk can come.                  */
+static uint32_t gx_take_pure(GrSock *s, const uint8_t **out)
+{
+    uint8_t *win = GR_WIN(s->cid);
+    uint32_t n = 0;
+    S_LOCK(s);
+    uint32_t cav = s->pCarryLen - s->pCarryPos;
+    uint32_t wav = S_WCNT(s) > S_RPOS(s) ? S_WCNT(s) - S_RPOS(s) : 0;
+    if (cav + wav && win && pure_ensure(&s->pOut, &s->pOutCap, cav + wav)) {
+        if (cav) memcpy(s->pOut, s->pCarry + s->pCarryPos, cav);
+        if (wav) memcpy(s->pOut + cav, win + S_RPOS(s), wav);
+        s->pCarryLen = s->pCarryPos = 0;
+        S_RPOS(s) = S_WCNT(s);
+        n = cav + wav;
+    }
+    pure_ack_write_locked(s);
+    S_UNLOCK(s);
+    *out = s->pOut;
+    return n;
+}
+
+/* HPP lane: drain every published slot (HD-Player hppRecv, non-blocking) */
+static uint32_t gx_take_hpp(GrSock *s, const uint8_t **out)
+{
+    uint8_t *W = GR_WIN(s->cid);
+    uint32_t N = hpp_nslots(s), n = 0, head, tail;
+    if (!W) return 0;
+    head = hpp_ld(W, 4);
+    tail = hpp_ld(W, 8);
+    while (head != tail) {
+        uint32_t slot = head % N, len = hpp_ld(W, 0xc + 4 * slot);
+        if (len > HPP_SLOT) len = HPP_SLOT;
+        if (!pure_ensure(&s->hRx, &s->hRxCap, n + len)) break;
+        memcpy(s->hRx + n, W + HPP_HDR + slot * HPP_SLOT, len);
+        gr_trace_feed(s, W + HPP_HDR + slot * HPP_SLOT, len);
+        n += len;
+        head++;
+        hpp_st(W, 4, head);
+        s->hSlots++;
+        if (n >= 0x100000) break;        /* forward in ~1 MiB pieces */
+        tail = hpp_ld(W, 8);
+    }
+    if (n && head == hpp_ld(W, 8) && hpp_lock(s, W)) {
+        uint8_t c = W[1];                /* ring empty: wake a ring-space waiter */
+        if (c == 2) W[1] = 0;
+        hpp_unlock(W);
+        if (c == 2) hpp_raise(s);
+    }
+    *out = s->hRx;
+    return n;
+}
+
+/* nothing to move: sleep until a guest WRITE/kick, a reply or disconnect */
+static void gx_idle(GrSock *s)
+{
+    if (s->hpp) {
+        uint8_t *W = GR_WIN(s->cid), c;
+        if (!W || !hpp_lock(s, W)) return;
+        c = W[1];
+        if (c != 3) W[2] = 2;                /* host asleep: kick me */
+        if (hpp_ld(W, 8) != hpp_ld(W, 4)) {  /* raced a publish */
+            W[2] = 0;
+            hpp_unlock(W);
+            return;
+        }
+        if (c == 2) W[1] = 0;
+        hpp_unlock(W);
+        if (c == 2) hpp_raise(s);
+        S_LOCK(s);
+        if (!s->gxWake && !S_RUN(s) && !S_DISC(s)) {
+            SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), c == 3 ? 1 : HPP_WAITMS, 0);
+        }
+        S_RUN(s) = 0;
+        S_UNLOCK(s);
+        if (hpp_lock(s, W)) {
+            W[2] = 0;
+            hpp_unlock(W);
+        }
+        return;
+    }
+    S_LOCK(s);
+    if (!s->gxWake && !S_DISC(s) && S_WCNT(s) <= S_RPOS(s) &&
+        s->pCarryLen == s->pCarryPos) {
+        SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), 10, 0);
+    }
+    S_UNLOCK(s);
+}
+
+/* OST_GX_LOG=1: log renderControl calls (op, first args) and replies */
+typedef struct GxFr {
+    uint32_t left, hn, need;
+    uint8_t hdr[24];
+    unsigned logged;
+    bool broken;
+} GxFr;
+
+static bool gx_log_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        char b[4] = {0};
+        v = GetEnvironmentVariableA("OST_GX_LOG", b, sizeof(b)) > 0 && b[0] == '1';
+    }
+    return v == 1;
+}
+
+static void gx_fr_feed(GrSock *s, GxFr *f, const uint8_t *p, uint32_t n)
+{
+    while (n && !f->broken && f->logged < 2000) {
+        if (f->left) {
+            uint32_t k = n < f->left ? n : f->left;
+            f->left -= k; p += k; n -= k;
+            continue;
+        }
+        while (n && f->hn < f->need) {
+            f->hdr[f->hn++] = *p++;
+            n--;
+        }
+        if (f->hn < 8) break;
+        uint32_t op = ldl_le_p(f->hdr), size = ldl_le_p(f->hdr + 4);
+        if (size < 8 || op < 1024) {
+            gr_log("gxlog cid=%u: framing lost (op=%u size=%u)", s->cid, op, size);
+            f->broken = true;
+            break;
+        }
+        f->need = size < 24 ? size : 24;
+        if (f->hn < f->need) continue;
+        if (op >= 10000 && op < 10100) {
+            char a[64];
+            unsigned k, o = 0;
+            for (k = 8; k + 4 <= f->need; k += 4) {
+                o += sprintf(a + o, " %x", ldl_le_p(f->hdr + k));
+            }
+            a[o] = 0;
+            gr_log("gxlog cid=%u %s(%u) size=%u:%s", s->cid, rcOpName(op), op, size, a);
+            f->logged++;
+        }
+        f->left = size - f->hn;
+        f->hn = 0;
+        f->need = 8;
+    }
+}
+
+static DWORD WINAPI gx_pump(LPVOID arg)
+{
+    GxFr fr = { .need = 8 };
+    GrSock *s = (GrSock *)arg;
+    GrWrapper w = { g_vt_pure, s };
+    void *ch = NULL;
+    uint8_t *rbuf = (uint8_t *)malloc(0x10000);
+    uint64_t in = 0, out = 0, replies = 0;
+    const char *why = "disconnect";
+
+    /* BlueStacks' 0x100-byte handshake (+ HPP negotiation), as with the DLL */
+    if (!rbuf || pvt_createfinish(&w) != 0) {
+        why = "handshake";
+        goto done;
+    }
+    ch = gx.ch_open();
+    if (!ch) {
+        why = "ost_channel_open";
+        goto done;
+    }
+    gx.ch_set_notify(ch, gx_notify, s);
+    S_LOCK(s);
+    s->gxCh = ch;
+    s->gxWake = false;
+    if (S_DISC(s)) gx.ch_stop(ch);
+    S_UNLOCK(s);
+    {   /* emugl clientFlags: the goldfish guest sends them, BlueStacks' does not */
+        uint32_t flags = 0;
+        if (gx.ch_write(ch, &flags, 4) != 0) goto done;
+    }
+    gr_log("gfxstream cid=%u '%.48s' %s", s->cid, (char *)s->raw + 0x30,
+           s->hpp ? "hpp" : "pure");
+
+    while (!S_DISC(s)) {
+        const uint8_t *p;
+        uint32_t n = s->hpp ? gx_take_hpp(s, &p) : gx_take_pure(s, &p);
+        bool moved = n > 0;
+        long r;
+        bool staged = false;
+        if (n) {
+            if (gx.ch_write(ch, p, n) != 0) {
+                why = "channel stopped (write)";
+                break;
+            }
+            in += n;
+            if (gx_log_on()) gx_fr_feed(s, &fr, p, n);
+        }
+        /* replies: stage everything readable, then deliver in one send */
+        S_LOCK(s);
+        s->gxWake = false;
+        S_UNLOCK(s);
+        gx.ch_arm(ch);
+        while ((r = gx.ch_read(ch, rbuf, 0x10000, 0)) > 0) {
+            if (pvt_alloccopy(&w, rbuf, (int)r) != 0) {
+                gr_log("gfxstream cid=%u: reply staging full", s->cid);
+                break;
+            }
+            out += (uint64_t)r;
+            staged = true;
+            if (gx_log_on() && fr.logged < 2000) {
+                char h[3 * 16 + 4];
+                hexn(h, rbuf, r < 16 ? (unsigned)r : 16);
+                gr_log("gxlog cid=%u reply %ld: %s", s->cid, r, h);
+            }
+        }
+        if (r < 0) {
+            why = "channel stopped (read)";
+            break;
+        }
+        if (staged) {
+            replies++;
+            if (pvt_send(&w) != 0) break;
+            moved = true;
+        }
+        if (!moved) gx_idle(s);
+    }
+done:
+    S_LOCK(s);
+    s->gxCh = NULL;
+    S_UNLOCK(s);
+    if (ch) gx.ch_close(ch);
+    free(rbuf);
+    gr_log("gfxstream cid=%u closed (%s): in %llu B, out %llu B, %llu replies", s->cid,
+           why, (unsigned long long)in, (unsigned long long)out,
+           (unsigned long long)replies);
+    return 0;
+}
+
+/* OP_CONNECT: a fresh session on this cid gets its own pump */
+static bool gx_connect(GrSock *s, uint32_t cid)
+{
+    if (s->gxThread) {                   /* the previous session's pump */
+        S_LOCK(s);
+        S_DISC(s) = 1;
+        if (s->gxCh) gx.ch_stop(s->gxCh);
+        S_UNLOCK(s);
+        WakeAllConditionVariable(S_CNDP(s));
+        if (WaitForSingleObject(s->gxThread, 5000) != WAIT_OBJECT_0) {
+            gr_log("gfxstream cid=%u: previous pump did not exit", cid);
+        }
+        CloseHandle(s->gxThread);
+        s->gxThread = NULL;
+    }
+    sock_prepare(s, cid);
+    if (!s->wrapper) {                   /* marks the sock as initialised */
+        s->wrapper = calloc(1, sizeof(GrWrapper));
+        if (s->wrapper) {
+            ((GrWrapper *)s->wrapper)->vtable = g_vt_pure;
+            ((GrWrapper *)s->wrapper)->sock = s;
+        }
+    }
+    s->gxWake = false;
+    s->gxThread = CreateThread(NULL, 0, gx_pump, s, 0, NULL);
+    if (!s->gxThread) {
+        gr_log("gfxstream cid=%u: CreateThread failed", cid);
+        return false;
+    }
+    ++g.connectOK;
+    gr_log("connect cid=%u OK (gfxstream)", cid);
+    return true;
+}
+
+/* ================================================================= */
 /* VEH: capture violations from renderer-side threads                */
 
 static LONG CALLBACK gr_veh(struct _EXCEPTION_POINTERS *ep)
@@ -3152,10 +3591,13 @@ static LONG CALLBACK gr_veh(struct _EXCEPTION_POINTERS *ep)
 /* ================================================================= */
 /* init                                                              */
 
+static bool gx_init_host(void);
+
 static bool gr_init_dll_and_host(void)
 {
     if (g.ready) return true;
     if (g.failed) return false;
+    if (gr_gfx()) return gx_init_host();
 
     bool mode1 = gr_renderer_mode() == 1;
 
@@ -3293,6 +3735,11 @@ static void worker_dispatch_op(const GrOp *op)
     switch (cmd) {
     case OP_CONNECT: {
         int rc;
+        if (gr_gfx()) {
+            if (!gx_connect(s, cid)) s->used = false;
+            mbox_set(mb, 0, 0);
+            break;
+        }
         /* sock+0x208 in the exe is a shared refcount (exe + DLL each
          * hold one); the OLD render thread may still be finishing its
          * protocol with the same object. NEVER free or re-calloc an
@@ -3334,6 +3781,7 @@ static void worker_dispatch_op(const GrOp *op)
          * refcounted and dies with the DLL's own close (vt+0x38).      */
         S_LOCK(s);
         S_DISC(s) = 1;
+        if (s->gxCh) gx.ch_stop(s->gxCh);      /* wakes a pump blocked in gfxstream */
         S_UNLOCK(s);
         WakeAllConditionVariable(S_CNDP(s));   /* HPP waiters exit (0x68) */
         if (gr_trace_on()) gr_trace_dump(s, "close");

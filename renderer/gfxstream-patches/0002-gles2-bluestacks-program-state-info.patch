@@ -1,0 +1,102 @@
+diff --git a/host/gl/gles2_dec/gles2_dec.cpp b/host/gl/gles2_dec/gles2_dec.cpp
+index 0c29b96..479a044 100644
+--- a/host/gl/gles2_dec/gles2_dec.cpp
++++ b/host/gl/gles2_dec/gles2_dec.cpp
+@@ -17,6 +17,7 @@
+ #include "gles2_dec.h"
+ 
+ #include <cstring>
++#include <vector>
+ #include <stdio.h>
+ #include <string.h>
+ 
+@@ -34,6 +35,60 @@ typedef unsigned int tsize_t; // Target "size_t", which is 32-bit for now. It ma
+ #else
+ #  define SET_LASTCALL(name)
+ #endif
++
++namespace {
++
++// OpenStacks: BlueStacks' guest (goldfish-opengl-pie fork) sends opcode 2488
++// glGetProgramStateInfoCustom(program) after every successful glLinkProgram and
++// fills its GLSharedGroup from the reply instead of glGetActiveUniform loops:
++//   u32 L, then L bytes: {nU, uMaxLen, nA, aMaxLen, x10, x14} +
++//   nU records of (uMaxLen + 20) bytes + nA records of (aMaxLen + 20) bytes,
++//   record = {u32 nameLen, u32 size, u32 type, u32 location, char name[maxLen + 4]}.
++// x10 lands in the guest's uniform block count, x14 next to it; the guest never
++// reads either locally, so they stay 0 (querying blocks would raise a GL error
++// on GLES2 contexts).
++void ostProgramStateInfo(gles2_decoder_context_t* ctx, GLuint program,
++                         std::vector<unsigned char>* out) {
++    GLint nU = 0, uMax = 0, nA = 0, aMax = 0;
++    ctx->glGetProgramiv_dec(ctx, program, 0x8B86 /* GL_ACTIVE_UNIFORMS */, &nU);
++    ctx->glGetProgramiv_dec(ctx, program, 0x8B87 /* GL_ACTIVE_UNIFORM_MAX_LENGTH */, &uMax);
++    ctx->glGetProgramiv_dec(ctx, program, 0x8B89 /* GL_ACTIVE_ATTRIBUTES */, &nA);
++    ctx->glGetProgramiv_dec(ctx, program, 0x8B8A /* GL_ACTIVE_ATTRIBUTE_MAX_LENGTH */, &aMax);
++    if (nU < 0) nU = 0;
++    if (nA < 0) nA = 0;
++    if (uMax < 0) uMax = 0;
++    if (aMax < 0) aMax = 0;
++    const size_t uRec = (size_t)uMax + 20, aRec = (size_t)aMax + 20;
++    out->assign(24 + (size_t)nU * uRec + (size_t)nA * aRec, 0);
++    uint32_t hdr[6] = {(uint32_t)nU, (uint32_t)uMax, (uint32_t)nA, (uint32_t)aMax, 0, 0};
++    memcpy(out->data(), hdr, sizeof(hdr));
++    unsigned char* rec = out->data() + 24;
++    for (GLint i = 0; i < nU; i++, rec += uRec) {
++        GLsizei len = 0;
++        GLint size = 0;
++        GLenum type = 0;
++        GLchar* name = (GLchar*)(rec + 16);
++        ctx->glGetActiveUniform_dec(ctx, program, (GLuint)i, (GLsizei)(uMax + 4), &len, &size,
++                                    &type, name);
++        GLint loc = len > 0 ? ctx->glGetUniformLocation_dec(ctx, program, name) : -1;
++        uint32_t f[4] = {(uint32_t)len, (uint32_t)size, (uint32_t)type, (uint32_t)loc};
++        memcpy(rec, f, sizeof(f));
++    }
++    for (GLint i = 0; i < nA; i++, rec += aRec) {
++        GLsizei len = 0;
++        GLint size = 0;
++        GLenum type = 0;
++        GLchar* name = (GLchar*)(rec + 16);
++        ctx->glGetActiveAttrib_dec(ctx, program, (GLuint)i, (GLsizei)(aMax + 4), &len, &size,
++                                   &type, name);
++        GLint loc = len > 0 ? ctx->glGetAttribLocation_dec(ctx, program, name) : -1;
++        uint32_t f[4] = {(uint32_t)len, (uint32_t)size, (uint32_t)type, (uint32_t)loc};
++        memcpy(rec, f, sizeof(f));
++    }
++}
++
++}  // namespace
++
+ size_t gles2_decoder_context_t::decode(void *buf, size_t len, IOStream *stream, ChecksumCalculator* checksumCalc) {
+ 	if (len < 8) return 0;
+ #ifdef CHECK_GL_ERRORS
+@@ -10676,6 +10731,28 @@ size_t gles2_decoder_context_t::decode(void *buf, size_t len, IOStream *stream,
+ 			gfxstream::base::endTrace();
+ 			break;
+ 		}
++		case 2488: {  // OpenStacks: BlueStacks glGetProgramStateInfoCustom(program)
++			gfxstream::base::beginTrace("glGetProgramStateInfoCustom decode");
++			GLuint var_program = Unpack<GLuint,uint32_t>(ptr + 8);
++			if (useChecksum) {
++				ChecksumCalculatorThreadInfo::validOrDie(checksumCalc, ptr, 8 + 4, ptr + 8 + 4, checksumSize,
++					"gles2_decoder_context_t::decode, glGetProgramStateInfoCustom: GL checksumCalculator failure\n");
++			}
++			std::vector<unsigned char> blob;
++			ostProgramStateInfo(this, var_program, &blob);
++			const uint32_t blobLen = (uint32_t)blob.size();
++			size_t totalTmpSize = 4 + blob.size() + checksumSize;
++			unsigned char *tmpBuf = stream->alloc(totalTmpSize);
++			memcpy(tmpBuf, &blobLen, 4);
++			memcpy(tmpBuf + 4, blob.data(), blob.size());
++			if (useChecksum) {
++				ChecksumCalculatorThreadInfo::writeChecksum(checksumCalc, &tmpBuf[0], totalTmpSize - checksumSize, &tmpBuf[totalTmpSize - checksumSize], checksumSize);
++			}
++			stream->flush();
++			SET_LASTCALL("glGetProgramStateInfoCustom");
++			gfxstream::base::endTrace();
++			break;
++		}
+ 		default:
+ 			return ptr - (unsigned char*)buf;
+ 		} //switch

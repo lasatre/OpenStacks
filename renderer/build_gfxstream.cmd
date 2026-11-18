@@ -1,18 +1,19 @@
 @echo off
 rem ==========================================================================
-rem  gfxstream host renderer for OpenStacks (Windows, Visual Studio ClangCL).
+rem  ost_renderer.dll: gfxstream host renderer for OpenStacks (Windows, VS ClangCL).
 rem   1. clone gfxstream at the pinned commit into deps\gfxstream (once)
 rem   2. apply renderer\gfxstream-patches\*.patch (once per patch)
-rem   3. configure deps\gfxstream-build (VS 2022, ClangCL) and build gfxstream_backend
+rem   3. configure deps\ost-renderer-build (renderer\CMakeLists.txt + gfxstream, VS 2022,
+rem      ClangCL) and build ost_renderer.dll + ost_renderer_smoke.exe
 rem  Needs: Visual Studio 2022 (Build Tools) with the C++ and "C++ Clang" components,
-rem         CMake 3.20+, git. Output: deps\gfxstream-build\Release\gfxstream_backend.dll
+rem         CMake 3.20+, git. Output: deps\ost-renderer-build\Release\ost_renderer.dll
 rem ==========================================================================
 setlocal
 set "RDIR=%~dp0"
 for %%i in ("%RDIR%..") do set "ROOT=%%~fi\"
 set "GFX_COMMIT=cf47bd2660e7217f5729c91664d36d81c1b3282a"
 set "SRC=%ROOT%deps\gfxstream"
-set "BLD=%ROOT%deps\gfxstream-build"
+set "BLD=%ROOT%deps\ost-renderer-build"
 set "CMAKE=cmake"
 where cmake >nul 2>&1 || set "CMAKE=%ProgramFiles%\CMake\bin\cmake.exe"
 
@@ -31,16 +32,16 @@ for %%p in ("%RDIR%gfxstream-patches\*.patch") do (
 
 rem _WINSOCKAPI_: keep windows.h from pulling in winsock.h (clashes with WinSock2.h)
 if not exist "%BLD%\CMakeCache.txt" (
-  "%CMAKE%" -S "%SRC%" -B "%BLD%" -G "Visual Studio 17 2022" -A x64 -T ClangCL ^
+  "%CMAKE%" -S "%RDIR%." -B "%BLD%" -G "Visual Studio 17 2022" -A x64 -T ClangCL ^
     "-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS /D_WINSOCKAPI_" ^
     "-DCMAKE_CXX_FLAGS=/DWIN32 /D_WINDOWS /EHsc /GR /D_WINSOCKAPI_" || goto :fail
 )
-"%CMAKE%" --build "%BLD%" --config Release --target gfxstream_backend --parallel || goto :fail
+"%CMAKE%" --build "%BLD%" --config Release --target ost_renderer ost_renderer_smoke --parallel || goto :fail
 echo.
-echo Build OK: %BLD%\Release\gfxstream_backend.dll
+echo Build OK: %BLD%\Release\ost_renderer.dll (smoke test: ost_renderer_smoke.exe)
 exit /b 0
 
 :fail
 echo.
-echo gfxstream build FAILED - see the messages above.
+echo ost_renderer build FAILED - see the messages above.
 exit /b 1

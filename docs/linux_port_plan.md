@@ -37,17 +37,16 @@ every change keeps the Windows build green.
 
 ## Architecture changes
 
-1. **Split `gr_render.c`** (no behaviour change on Windows, done first so every later step is a
-   small diff):
-   - `gr_core.c`: device glue, op queue/worker, socks, the pure lane + HPP ring transport, the
-     stream tracer. Locks/condvars move from raw SRWLOCK to `QemuMutex`/`QemuCond` (the SRWLOCK
-     regions exist only to mirror HD-Player's sock layout for the DLL).
-   - `gr_bluestacks.c`: the libOpenglRender.dll bridge (vtables, exe replica, responders, VEH).
-     Windows only; Kconfig/meson skip it elsewhere.
-   - `gr_gfxstream.c`: the gfxstream backend (pump, loading `ost_renderer`, readback, recreate),
-     with `dlopen`/`LoadLibrary` behind a tiny shim.
-   - `gr_display_win32.c` / `gr_display_x11.c`: screen window, letterbox layout, input, drop
-     target (Windows), rotation title. Same small interface: create, layout, rotation, quit.
+1. **`gr_render.c`: Windows-only parts behind `_WIN32`, one translation unit.** (Done.) The
+   DLL bridge, the legacy exe-replica lanes and the Win32 display share the transport's static
+   state, so they stay in the file, guarded, instead of being split out behind a private
+   header. Portable now: the transport (pure lane + HPP ring), the stream tracer, the gfxstream
+   backend and the worker. Host differences go through small shims (`gr_getenv`, `gr_ms`,
+   `gr_sleep_ms`, `gr_yield`, `gr_dlopen`/`gr_dlsym`; sock locks: the exe-layout SRWLOCK on
+   Windows, `QemuMutex`/`QemuCond` elsewhere; pump threads: `QemuThread`). The display is an
+   interface (`grd_start`, `grd_kick_layout`, `grd_orientation`, with `gx_show_in` doing the
+   letterbox): Win32 in the file, Linux in `gr_display_x11.c.inc`. Off Windows `gr_gfx()` is
+   always on.
 2. **Adapter**: `ost_renderer` builds as `.so` from the same CMake project; the C API is already
    platform-neutral except `void *parent_hwnd` (becomes a native window handle: HWND or XID).
 3. **Front-end**: platform checks behind small helpers (`native.py` gets an X11 path:

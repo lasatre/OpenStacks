@@ -26,8 +26,9 @@ brackets). Move an item to NOTES when it lands.
   scroll/zoom and has a multi-touch mode.
 - **Keymap editor** (game controls overlay, BlueStacks' signature feature) - the button is a
   stub.
-- **Player window sizing** - follow the guest resolution and orientation like BlueStacks
-  (fit the window to 16:9 or 9:16, remember the size per instance).
+- **Player window sizing** - the window fits the guest's aspect when an instance opens,
+  rotates or its tab is selected. Open: keep the aspect while resizing by hand, and remember
+  the size per instance.
 - **Manager thumbnails are black with the native display** - they come from a readback that
   the native GPU path skips (`GR_READBACK=0`). Use `adb screencap` or a renderer snapshot.
 - **VNC console is not rotated** - the readback frame is the unrotated panel (display=vnc only).

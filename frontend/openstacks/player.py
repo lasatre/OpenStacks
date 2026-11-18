@@ -373,11 +373,18 @@ class PlayerPane(QWidget):
         win._returning = True
         win.close()
         win.deleteLater()
+        w = self.window()
+        if hasattr(w, "fit_to_screen"):
+            QTimer.singleShot(0, lambda: w.fit_to_screen(self))
 
     def _on_rotation(self, rot: int) -> None:
-        # a popped-out screen follows portrait <-> landscape like BlueStacks
+        # the screen follows portrait <-> landscape like BlueStacks (popped out or docked)
         if self.screen_window is not None:
             self.screen_window.fit(*self._screen_size())
+        else:
+            win = self.window()
+            if hasattr(win, "fit_to_screen"):
+                win.fit_to_screen(self)
 
     def rotate(self) -> None:
         """Toggle Android between its natural orientation and 90 degrees.
@@ -723,6 +730,7 @@ class PlayerWindow(QMainWindow):
         # the VNC/ADB input toggle only applies to the VNC display
         if pane is not None:
             self._rail_buttons["input_mode"].setVisible(not pane.native)
+            QTimer.singleShot(0, lambda: self.fit_to_screen(pane))
 
     def _close_tab(self, idx: int) -> None:
         w = self.tabs.widget(idx)
@@ -751,6 +759,29 @@ class PlayerWindow(QMainWindow):
                 th.start()
                 self._bg_threads.append(th)
         self.tabs.removeTab(idx)
+
+    def fit_to_screen(self, pane: Optional["PlayerPane"] = None) -> None:
+        """Resize the window so the Screen tab has exactly the guest's aspect ratio (no
+        letterbox strips), keeping the current screen height where it fits on the desktop."""
+        pane = pane or self.current_pane()
+        if pane is None or pane.screen_window is not None or self.isMaximized() \
+                or self.isFullScreen():
+            return
+        gw, gh = pane._screen_size()
+        disp = pane.display
+        if disp.width() < 10 or disp.height() < 10:
+            return
+        chrome_w = self.width() - disp.width()
+        chrome_h = self.height() - disp.height()
+        avail = self.screen().availableGeometry() if self.screen() else None
+        max_w = (avail.width() * 0.9 if avail else 1600) - chrome_w
+        max_h = (avail.height() * 0.9 if avail else 900) - chrome_h
+        # keep the current screen height (landscape) or width (portrait), within the desktop
+        th = min(max(disp.height(), 360), max_h)
+        tw = th * gw / gh
+        if tw > max_w:
+            tw, th = max_w, max_w * gh / gw
+        self.resize(int(round(tw)) + chrome_w, int(round(th)) + chrome_h)
 
     def restart_instance(self, inst: Instance, after_boot=None) -> None:
         """Stop QEMU, start it again with fresh props, reopen the tab; after_boot(pane)
@@ -797,6 +828,7 @@ class PlayerWindow(QMainWindow):
         self.tabs.setCurrentIndex(i)
         pane.start()
         pane.refresh_adb()
+        QTimer.singleShot(0, lambda: self.fit_to_screen(pane))   # after the layout settles
         return pane
 
     def close_quietly(self) -> None:

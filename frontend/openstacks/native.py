@@ -170,7 +170,8 @@ class NativeDisplay(QWidget):
 
     def paintEvent(self, ev) -> None:
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#0b0d12"))
+        # letterbox strips (window not at the guest's aspect) blend with the window
+        p.fillRect(self.rect(), self.palette().window())
         if self._container is None:
             p.setPen(QColor("#7d8590"))
             p.drawText(self.rect(), Qt.AlignCenter, self.state())

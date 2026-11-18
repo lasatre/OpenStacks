@@ -99,7 +99,8 @@ def main() -> int:
         app = run_app()
         win = ManagerWindow()
         win.show()
-        QTimer.singleShot(600, lambda: win.launch_by_name(sys.argv[2]))
+        name = " ".join(sys.argv[2:])          # unquoted names with spaces still work
+        QTimer.singleShot(600, lambda: win.launch_by_name(name))
         return app.exec()
     from openstacks.player import main as player_main
     player_main()

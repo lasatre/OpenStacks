@@ -3241,6 +3241,10 @@ static void gx_layout(HWND parent)
         ch = rc.bottom;
         cw = (int)((int64_t)rc.bottom * fw / fh);
     }
+    if (rc.right - cw <= 2 && rc.bottom - ch <= 2) {   /* aspect already right (player): */
+        cw = rc.right;                                 /* fill, no 1 px rounding bar     */
+        ch = rc.bottom;
+    }
     if (cw < 1 || ch < 1) return;
     if (gx.show(parent, (rc.right - cw) / 2, (rc.bottom - ch) / 2, cw, ch,
                 gx_rot_deg(o)) == 0) {

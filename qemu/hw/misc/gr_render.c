@@ -2866,6 +2866,8 @@ static void gr_register_drop(HWND h)
 }
 
 static void gx_layout(HWND parent);
+static void gx_recreate_window(void);
+static bool g_recreate;   /* UI thread: our window died, build a new one */
 static void gx_set_rotation(int o);
 
 static LRESULT CALLBACK gr_child_proc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -2939,6 +2941,17 @@ static LRESULT CALLBACK gr_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
             FillRect((HDC)w, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
         }
         return 1;
+    case WM_DESTROY:
+        if (h == g.hwnd) {
+            HWND par = GetParent(h);
+            DWORD ppid = 0;
+            if (par) GetWindowThreadProcessId(par, &ppid);
+            gr_log("display window %p destroyed (parent %p, pid %lu)%s", (void *)h,
+                   (void *)par, (unsigned long)ppid,
+                   gr_gfx() ? ": recreating it" : "");
+            if (gr_gfx()) g_recreate = true;
+        }
+        break;
     case WM_CLOSE:
         return 0;                    /* only the front-end/QEMU end us */
     default:
@@ -3013,9 +3026,21 @@ static DWORD WINAPI gr_ui_thread(LPVOID arg)
         gr_register_drop(g.hwnd);      /* files dragged onto the screen */
     }
     SetEvent(g_uiReady);
-    while (GetMessageW(&m, NULL, 0, 0) > 0) {
-        TranslateMessage(&m);
-        DispatchMessageW(&m);
+    for (;;) {
+        /* wake for messages, and every 500 ms to check our window still exists:
+         * when a foreign parent (the player) dies, Windows destroys it without
+         * running our WM_DESTROY                                              */
+        MsgWaitForMultipleObjects(0, NULL, FALSE, 500, QS_ALLINPUT);
+        while (PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) {
+            if (m.message == WM_QUIT) return 0;
+            TranslateMessage(&m);
+            DispatchMessageW(&m);
+        }
+        if (gr_gfx() && g.ready && (g_recreate || (g.hwnd && !IsWindow(g.hwnd)))) {
+            g_recreate = false;
+            gr_log("display window %p is gone: recreating it", (void *)g.hwnd);
+            gx_recreate_window();
+        }
     }
     return 0;
 }
@@ -3185,6 +3210,7 @@ static struct {
     void (*ch_arm)(void *);
     void (*ch_stop)(void *);
     void (*ch_close)(void *);
+    void (*drop_window)(void);
     bool shown;
 } gx;
 
@@ -3255,6 +3281,26 @@ static void gx_layout(HWND parent)
         gx.shown = true;
     }
     InvalidateRect(parent, NULL, TRUE);  /* repaint the bars */
+}
+
+/* UI thread, after our window was destroyed (Windows takes child windows down
+ * with their parent, also across processes: e.g. the player went away while the
+ * screen was embedded in it). A new top-level window + gfxstream subwindow lets
+ * the player find and embed it again; the guest never notices.            */
+static void gx_recreate_window(void)
+{
+    if (gx.drop_window) gx.drop_window();     /* its subwindow died with ours */
+    gx.shown = false;
+    g_child = NULL;
+    g_childProc = NULL;
+    g.hwnd = gr_make_window(GR_W, GR_H);
+    if (!g.hwnd) {
+        gr_log("display window recreate FAILED err=%lu", (unsigned long)GetLastError());
+        return;
+    }
+    gr_register_drop(g.hwnd);
+    PostMessageW(g.hwnd, WM_TIMER, 1, 0);      /* gr_layout -> gx_layout */
+    gr_log("display window recreated: %p", (void *)g.hwnd);
 }
 
 /* crash locator: module+offset of the fault and of return addresses on the stack */
@@ -3332,7 +3378,8 @@ static bool gx_init_host(void)
           GX_SYM(ch_read, "ost_channel_read") &&
           GX_SYM(ch_set_notify, "ost_channel_set_notify") &&
           GX_SYM(ch_arm, "ost_channel_arm") && GX_SYM(ch_stop, "ost_channel_stop") &&
-          GX_SYM(ch_close, "ost_channel_close"))) {
+          GX_SYM(ch_close, "ost_channel_close") &&
+          GX_SYM(drop_window, "ost_renderer_drop_window"))) {
         gr_log("%s: missing exports (stale build?)", path);
         g.failed = true;
         return false;

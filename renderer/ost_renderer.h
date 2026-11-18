@@ -46,6 +46,9 @@ OST_API int ost_renderer_init(const OstRendererConfig *cfg);
 OST_API int ost_renderer_show(void *parent_hwnd, int x, int y, int w, int h,
                               float rotation_deg);
 OST_API void ost_renderer_set_rotation(float rotation_deg);
+/* Forget the display child window (e.g. it died with its parent); the next
+ * ost_renderer_show creates a new one. */
+OST_API void ost_renderer_drop_window(void);
 OST_API void ost_renderer_repaint(void);
 
 /* Frame capture for readback consumers (VNC display, screenshots); NULL turns it off. */

@@ -248,6 +248,15 @@ OST_API int ost_renderer_show(void* parent_hwnd, int x, int y, int w, int h,
     return ok ? 0 : -1;
 }
 
+OST_API void ost_renderer_drop_window(void) {
+    gfxstream::RendererPtr r;
+    {
+        std::lock_guard<std::mutex> lk(g.mu);
+        r = g.renderer;
+    }
+    if (r) r->destroyOpenGLSubwindow();
+}
+
 OST_API void ost_renderer_set_rotation(float rotation_deg) {
     std::lock_guard<std::mutex> lk(g.mu);
     if (g.renderer) g.renderer->setOpenGLDisplayRotation(rotation_deg);

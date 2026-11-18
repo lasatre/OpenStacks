@@ -1,2 +1,4 @@
 # patches for other trees: keep their bytes exactly (git apply on Windows checkouts)
 *.patch -text
+# shell scripts run under Linux/WSL straight from a Windows checkout: always LF
+*.sh text eol=lf

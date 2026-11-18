@@ -1,0 +1,34 @@
+diff --git a/host/renderControl_dec/renderControl_dec.cpp b/host/renderControl_dec/renderControl_dec.cpp
+index 6985c40..0b6b8f1 100644
+--- a/host/renderControl_dec/renderControl_dec.cpp
++++ b/host/renderControl_dec/renderControl_dec.cpp
+@@ -754,9 +754,19 @@ size_t renderControl_decoder_context_t::decode(void *buf, size_t len, IOStream *
+ 			GLenum var_format = Unpack<GLenum,uint32_t>(ptr + 8 + 4 + 4 + 4 + 4 + 4);
+ 			GLenum var_type = Unpack<GLenum,uint32_t>(ptr + 8 + 4 + 4 + 4 + 4 + 4 + 4);
+ 			uint64_t var_pixels_guest_paddr = Unpack<uint64_t,uint64_t>(ptr + 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4);
+-			void* var_pixels = stream->getDmaForReading(var_pixels_guest_paddr);
++			void* var_pixels = nullptr;
+ 			uint32_t size_pixels __attribute__((unused)) = Unpack<uint32_t,uint32_t>(ptr + 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 8);
+ 			uint32_t var_pixels_size = Unpack<uint32_t,uint32_t>(ptr + 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 8);
++			// OpenStacks: BlueStacks' encoder sends the pixels inline, like rcUpdateColorBuffer:
++			// [7 args][u32 n][n bytes][u32 pixels_size] (packet = 44 + n), not a guest address.
++			const uint32_t ostInline = Unpack<uint32_t,uint32_t>(ptr + 8 + 4 * 7);
++			const bool ostIsInline = packetLen > 52 && (uint64_t)ostInline + 44 == packetLen;
++			if (ostIsInline) {
++				var_pixels = ptr + 8 + 4 * 7 + 4;
++				var_pixels_size = Unpack<uint32_t,uint32_t>(ptr + 8 + 4 * 7 + 4 + ostInline);
++			} else {
++				var_pixels = stream->getDmaForReading(var_pixels_guest_paddr);
++			}
+ 			if (useChecksum) {
+ 				ChecksumCalculatorThreadInfo::validOrDie(checksumCalc, ptr, 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 8 + 4, ptr + 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 8 + 4, checksumSize,
+ 					"renderControl_decoder_context_t::decode, OP_rcUpdateColorBufferDMA: GL checksumCalculator failure\n");
+@@ -767,7 +777,7 @@ size_t renderControl_decoder_context_t::decode(void *buf, size_t len, IOStream *
+ 			DECODER_DEBUG_LOG("renderControl(%p): rcUpdateColorBufferDMA(colorbuffer:0x%08x x:0x%08x y:0x%08x width:0x%08x height:0x%08x format:0x%08x type:0x%08x pixels:%p(%u) pixels_size:0x%08x )", stream, var_colorbuffer, var_x, var_y, var_width, var_height, var_format, var_type, var_pixels, var_pixels_size);
+ 			int function_call_retval = 			this->rcUpdateColorBufferDMA(var_colorbuffer, var_x, var_y, var_width, var_height, var_format, var_type, var_pixels, var_pixels_size);
+ 			std::memcpy(&tmpBuf[0], &function_call_retval, sizeof(int));
+-			stream->unlockDma(var_pixels_guest_paddr);
++			if (!ostIsInline) stream->unlockDma(var_pixels_guest_paddr);
+ 			if (useChecksum) {
+ 				ChecksumCalculatorThreadInfo::writeChecksum(checksumCalc, &tmpBuf[0], totalTmpSize - checksumSize, &tmpBuf[totalTmpSize - checksumSize], checksumSize);
+ 			}

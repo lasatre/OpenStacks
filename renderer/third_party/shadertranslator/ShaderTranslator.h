@@ -1,6 +1,11 @@
+// From AOSP platform/external/angle, branch aosp-emu-30-release,
+// src/libShaderTranslator/ShaderTranslator.h. It must match the struct layout inside
+// libshadertranslator.dll (renderer/fetch_shadertranslator.py; the emulator build pinned
+// there): emu-master-dev's header has 15 more extension fields in ST_BuiltInResources
+// and silently misaligns everything after them. renderer/st_probe checks the pair.
+// (OpenStacks: <cstdint> added, the header uses uint64_t without including it.)
+#include <cstdint>
 #pragma once
-
-#include <array>
 
 #if defined(_WIN32)
 #        define ANGLE_EXPORT __declspec(dllexport)
@@ -363,43 +368,27 @@ struct ST_BuiltInResources
     int EXT_draw_buffers;
     int EXT_frag_depth;
     int EXT_shader_texture_lod;
+    int WEBGL_debug_shader_precision;
     int EXT_shader_framebuffer_fetch;
-    int EXT_shader_framebuffer_fetch_non_coherent;
     int NV_shader_framebuffer_fetch;
     int NV_shader_noperspective_interpolation;
     int ARM_shader_framebuffer_fetch;
     int OVR_multiview;
     int OVR_multiview2;
     int EXT_multisampled_render_to_texture;
-    int EXT_multisampled_render_to_texture2;
     int EXT_YUV_target;
     int EXT_geometry_shader;
-    int OES_geometry_shader;
-    int OES_shader_io_blocks;
-    int EXT_shader_io_blocks;
     int EXT_gpu_shader5;
     int EXT_shader_non_constant_global_initializers;
     int OES_texture_storage_multisample_2d_array;
     int OES_texture_3D;
     int ANGLE_texture_multisample;
     int ANGLE_multi_draw;
-    // TODO(angleproject:3402) remove after chromium side removal to pass compilation
     int ANGLE_base_vertex_base_instance;
     int WEBGL_video_texture;
     int APPLE_clip_distance;
     int OES_texture_cube_map_array;
     int EXT_texture_cube_map_array;
-    int EXT_shadow_samplers;
-    int OES_shader_multisample_interpolation;
-    int OES_shader_image_atomic;
-    int EXT_tessellation_shader;
-    int OES_texture_buffer;
-    int EXT_texture_buffer;
-    int OES_sample_variables;
-    int EXT_clip_cull_distance;
-    int EXT_primitive_bounding_box;
-    int ANGLE_base_vertex_base_instance_shader_builtin;
-    int ANDROID_extension_pack_es31a;
 
     // Set to 1 to enable replacing GL_EXT_draw_buffers #extension directives
     // with GL_NV_draw_buffers in ESSL output. This flag can be used to emulate
@@ -434,13 +423,17 @@ struct ST_BuiltInResources
     // Default is NULL.
     ST_HashFunction64 HashFunction;
 
-    // The maximum complexity an expression can be when SH_LIMIT_EXPRESSION_COMPLEXITY is turned on.
+    // Selects a strategy to use when implementing array index clamping.
+    // Default is ST_CLAMP_WITH_CLAMP_INTRINSIC.
+    ST_ArrayIndexClampingStrategy ArrayIndexClampingStrategy;
+
+    // The maximum complexity an expression can be when ST_LIMIT_EXPRESSION_COMPLEXITY is turned on.
     int MaxExpressionComplexity;
 
     // The maximum depth a call stack can be.
     int MaxCallStackDepth;
 
-    // The maximum number of parameters a function can have when SH_LIMIT_EXPRESSION_COMPLEXITY is
+    // The maximum number of parameters a function can have when ST_LIMIT_EXPRESSION_COMPLEXITY is
     // turned on.
     int MaxFunctionParameters;
 
@@ -452,10 +445,6 @@ struct ST_BuiltInResources
 
     // maximum number of available image units
     int MaxImageUnits;
-
-    // OES_sample_variables constant
-    // maximum number of available samples
-    int MaxSamples;
 
     // maximum number of image uniforms in a vertex shader
     int MaxVertexImageUniforms;
@@ -476,9 +465,9 @@ struct ST_BuiltInResources
     int MaxCombinedShaderOutputResources;
 
     // maximum number of groups in each dimension
-    std::array<int, 3> MaxComputeWorkGroupCount;
+    int MaxComputeWorkGroupCount[3];
     // maximum number of threads per work group in each dimension
-    std::array<int, 3> MaxComputeWorkGroupSize;
+    int MaxComputeWorkGroupSize[3];
 
     // maximum number of total uniform components
     int MaxComputeUniformComponents;
@@ -539,44 +528,11 @@ struct ST_BuiltInResources
     int MaxGeometryShaderInvocations;
     int MaxGeometryImageUniforms;
 
-    // EXT_tessellation_shader constants
-    int MaxTessControlInputComponents;
-    int MaxTessControlOutputComponents;
-    int MaxTessControlTextureImageUnits;
-    int MaxTessControlUniformComponents;
-    int MaxTessControlTotalOutputComponents;
-    int MaxTessControlImageUniforms;
-    int MaxTessControlAtomicCounters;
-    int MaxTessControlAtomicCounterBuffers;
-
-    int MaxTessPatchComponents;
-    int MaxPatchVertices;
-    int MaxTessGenLevel;
-
-    int MaxTessEvaluationInputComponents;
-    int MaxTessEvaluationOutputComponents;
-    int MaxTessEvaluationTextureImageUnits;
-    int MaxTessEvaluationUniformComponents;
-    int MaxTessEvaluationImageUniforms;
-    int MaxTessEvaluationAtomicCounters;
-    int MaxTessEvaluationAtomicCounterBuffers;
-
     // Subpixel bits used in rasterization.
     int SubPixelBits;
 
     // APPLE_clip_distance/EXT_clip_cull_distance constant
     int MaxClipDistances;
-    int MaxCullDistances;
-    int MaxCombinedClipAndCullDistances;
-
-    // Direct-to-metal backend constants:
-
-    // Binding index for driver uniforms:
-    int DriverUniformsBindingIndex;
-    // Binding index for default uniforms:
-    int DefaultUniformsBindingIndex;
-    // Binding index for UBO's argument buffer
-    int UBOArgumentBufferBindingIndex;
 };
 
 // Varying interpolation qualifier, see section 4.3.9 of the ESSL 3.00.4 spec

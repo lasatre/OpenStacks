@@ -39,3 +39,6 @@ target_link_options(ost_renderer PRIVATE /DEBUG:FULL)
 # Smoke test: one channel, rcGetRendererVersion
 add_executable(ost_renderer_smoke smoke.c)
 target_link_libraries(ost_renderer_smoke PRIVATE ost_renderer)
+
+# st_probe: checks the vendored ShaderTranslator.h against libshadertranslator.dll
+add_executable(st_probe st_probe.cpp)

@@ -130,6 +130,7 @@ class Adb:
         cmd = [exe] + (["-s", self.serial] if device else []) + list(args)
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                                   errors="replace", timeout=timeout, encoding="utf-8")
         except subprocess.TimeoutExpired as e:
             raise AdbError(f"adb timed out: {' '.join(args)}") from e

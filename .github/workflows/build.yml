@@ -1,0 +1,127 @@
+name: Build
+
+# Builds the portable Windows release: QEMU 11.1 with the OpenStacks devices (MSYS2 ucrt64),
+# the PySide6 front-end (PyInstaller), image patches and 7-Zip, zipped as
+# OpenStacks-<version>-win64.zip. Tags v* also publish a GitHub release.
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write          # only used by the release step on tags
+
+env:
+  QEMU_VERSION: "11.1.0"
+  PYTHON_VERSION: "3.12"
+  SEVENZIP_URL: https://github.com/ip7z/7zip/releases/download/26.06/7zr.exe
+  SEVENZIP_SHA256: e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: ver
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $v = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $base = (Select-String frontend/openstacks/__init__.py -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
+            $v = "$base-dev.$("${{ github.sha }}".Substring(0, 7))"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "version $v"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: MSYS2 (ucrt64 toolchain for QEMU)
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            diffutils
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-pixman
+            mingw-w64-ucrt-x86_64-libslirp
+            mingw-w64-ucrt-x86_64-dtc
+
+      - name: Cache QEMU source tarball
+        uses: actions/cache@v4
+        with:
+          path: deps/qemu-${{ env.QEMU_VERSION }}.tar.xz
+          key: qemu-src-${{ env.QEMU_VERSION }}
+
+      - name: Build QEMU
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          cmd /c qemu\build.cmd
+          if ($LASTEXITCODE -ne 0) { throw "QEMU build failed" }
+
+      - name: QEMU runs without MSYS2 on PATH and has the OpenStacks devices
+        shell: cmd
+        run: |
+          set "PATH=%SystemRoot%\system32;%SystemRoot%"
+          build\qemu-system-x86_64.exe -device help > devices.txt 2>&1
+          findstr /c:"bstpgaipc" devices.txt || (type devices.txt & exit /b 1)
+          findstr /c:"bstvmsg" devices.txt || exit /b 1
+
+      - name: Front-end (PyInstaller)
+        run: |
+          python packaging/set_version.py "${{ steps.ver.outputs.version }}"
+          python -m pip install --upgrade pip
+          python -m pip install -r frontend/requirements.txt pyinstaller
+          pyinstaller --noconfirm --distpath dist --workpath build-pyi packaging/openstacks.spec
+
+      - name: 7-Zip (7zr.exe, pinned)
+        run: |
+          New-Item -ItemType Directory -Force deps | Out-Null
+          Invoke-WebRequest -Uri $env:SEVENZIP_URL -OutFile deps/7zr.exe
+          $h = (Get-FileHash deps/7zr.exe -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne $env:SEVENZIP_SHA256) { throw "7zr.exe sha256 $h != $env:SEVENZIP_SHA256" }
+
+      - name: Assemble release
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}     # strip.exe for QEMU
+        run: |
+          python packaging/assemble.py --version "${{ steps.ver.outputs.version }}" --sevenzip deps/7zr.exe --zip
+
+      - name: Smoke test (frozen app, clean PATH)
+        run: |
+          $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
+          $p = Start-Process -FilePath release/OpenStacks/OpenStacks.exe -ArgumentList "--smoke", "$PWD\smoke.txt" -Wait -PassThru
+          Get-Content smoke.txt
+          if ($p.ExitCode -ne 0) { throw "smoke test failed ($($p.ExitCode))" }
+          if (Test-Path release/OpenStacks/data) { Remove-Item -Recurse -Force release/OpenStacks/data }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenStacks-${{ steps.ver.outputs.version }}-win64
+          path: release/OpenStacks-${{ steps.ver.outputs.version }}-win64.zip
+          if-no-files-found: error
+
+      - name: GitHub release (tags)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/OpenStacks-${{ steps.ver.outputs.version }}-win64.zip
+          draft: true
+          generate_release_notes: true

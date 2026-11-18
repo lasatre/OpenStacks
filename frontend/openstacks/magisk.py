@@ -20,9 +20,10 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
+from . import paths
 from .adb import Adb, AdbError
 
-CACHE = Path(__file__).resolve().parents[2] / "deps" / "magisk"   # dev/deps/magisk
+CACHE = paths.DEPS_DIR / "magisk"
 FLAG = "/data/adb/.ost_magisk"
 BIN = "/data/adb/magisk"
 STAGE = "/data/local/tmp/ost_magisk"

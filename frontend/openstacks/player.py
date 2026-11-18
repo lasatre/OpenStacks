@@ -799,11 +799,50 @@ class PlayerWindow(QMainWindow):
         pane.refresh_adb()
         return pane
 
+    def close_quietly(self) -> None:
+        """Close without asking (the manager is exiting and stops every instance itself)."""
+        self._quiet_close = True
+        self.close()
+
+    def _panes(self) -> list[PlayerPane]:
+        return [w for w in (self.tabs.widget(i) for i in range(self.tabs.count()))
+                if isinstance(w, PlayerPane)]
+
     def closeEvent(self, ev) -> None:
-        for i in range(self.tabs.count()):
-            w = self.tabs.widget(i)
-            if isinstance(w, PlayerPane):
-                w.shutdown()
+        panes = self._panes()
+        running = [p.inst for p in panes if qemu_engine.is_running(p.inst)]
+        stop = False
+        if running and not getattr(self, "_quiet_close", False):
+            names = ", ".join(i.name for i in running)
+            box = QMessageBox(self)
+            box.setWindowTitle("Close player")
+            box.setIcon(QMessageBox.Question)
+            box.setText(f"Shut down {'all running instances' if len(running) > 1 else names}?")
+            box.setInformativeText(
+                (f"Running: {names}.\n\n" if len(running) > 1 else "")
+                + "Keep running closes only this window; the instances stay up and can be "
+                  "reopened from the manager.")
+            b_stop = box.addButton("Shut down" + (" all" if len(running) > 1 else ""),
+                                   QMessageBox.DestructiveRole)
+            box.addButton("Keep running", QMessageBox.AcceptRole)
+            b_cancel = box.addButton(QMessageBox.Cancel)
+            box.setDefaultButton(b_stop)
+            box.exec()
+            if box.clickedButton() is b_cancel:
+                ev.ignore()
+                return
+            stop = box.clickedButton() is b_stop
+        self._quiet_close = False
+        for p in panes:
+            p.shutdown()
+        self.tabs.clear()                     # reopening from the manager starts fresh tabs
+        if stop:
+            th = _CallThread(lambda: ",".join(i.name for i in running
+                                              if not qemu_engine.shutdown(i)), None)
+            th.done.connect(lambda bad: bad and QMessageBox.warning(
+                None, "OpenStacks", f"QEMU did not stop: {bad}"))
+            th.start()
+            self._bg_threads.append(th)
         super().closeEvent(ev)
 
 

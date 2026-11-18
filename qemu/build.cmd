@@ -7,8 +7,9 @@ rem   3. configure (once) + ninja into build\
 rem   4. copy pc-bios and the MSYS2 runtime DLLs next to the exe (self-contained)
 rem  qemu\hw\misc is the ONLY canonical copy of the device sources.
 rem  Kills running QEMU first (the linker cannot replace a running exe).
-rem  Needs: C:\msys64 with mingw-w64-ucrt-x86_64-{gcc,ninja,meson,glib2,pixman,
-rem         libslirp,pkgconf} + python + curl + tar. Override with QEMU_TREE=...
+rem  Needs: MSYS2 (MSYS2_ROOT, default C:\msys64) with mingw-w64-ucrt-x86_64-{gcc,
+rem         ninja,meson,glib2,pixman,libslirp,pkgconf} + python + curl + tar.
+rem         Override the source tree with QEMU_TREE=...
 rem ==========================================================================
 setlocal
 set "QDIR=%~dp0"
@@ -16,8 +17,10 @@ for %%i in ("%QDIR%..") do set "ROOT=%%~fi\"
 set "QVER=11.1.0"
 if not defined QEMU_TREE set "QEMU_TREE=%ROOT%deps\qemu-%QVER%"
 set "MSYSTEM=UCRT64"
-set "PATH=C:\msys64\ucrt64\bin;C:\msys64\usr\bin;%PATH%"
-set "BASH=C:\msys64\usr\bin\bash.exe"
+if not defined MSYS2_ROOT set "MSYS2_ROOT=C:\msys64"
+set "PATH=%MSYS2_ROOT%\ucrt64\bin;%MSYS2_ROOT%\usr\bin;%PATH%"
+set "BASH=%MSYS2_ROOT%\usr\bin\bash.exe"
+set "CHERE_INVOKING=1"
 
 taskkill /f /im qemu-system-x86_64.exe >nul 2>&1
 

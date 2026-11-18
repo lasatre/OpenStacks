@@ -22,3 +22,11 @@ frontend/instances.conf
 frontend/logs/
 frontend/screenshots/
 frontend/.venv/
+
+# packaging outputs (packaging/assemble.py, PyInstaller)
+dist/
+build-pyi/
+release/
+packaging/version_info.txt
+*.spec.bak
+

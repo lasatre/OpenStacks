@@ -10,6 +10,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import os
 import urllib.request
 from pathlib import Path
 
@@ -83,6 +84,13 @@ class Ramdisk:
                                      nlink=1, dev=(0, 0), rdev=(0, 0), data=data))
         else:
             e["data"], e["mode"] = data, S_IFREG | mode
+
+
+def deps_dir(*parts: str) -> Path:
+    """Download cache for patches: OST_DEPS_DIR (set by the app: <data>/deps), else the
+    source checkout's deps/."""
+    base = os.environ.get("OST_DEPS_DIR") or str(Path(__file__).resolve().parents[1] / "deps")
+    return Path(base).joinpath(*parts)
 
 
 def fetch(url: str, dest: Path, sha256: str) -> Path:

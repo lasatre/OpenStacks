@@ -45,8 +45,10 @@ import secrets
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]      # <repo>/frontend
-PROJECT_ROOT = REPO_ROOT.parent                      # <repo>
+from . import paths
+
+REPO_ROOT = paths.CONF_DIR                           # <repo>/frontend | <data>
+PROJECT_ROOT = paths.APP_DIR                         # <repo> | <app>
 DEFAULT_IMAGE = "Pie64"                              # BlueStacks engine image (Android 9)
 
 RES_RE = re.compile(r"^(\d{1,5})x(\d{1,5})$")
@@ -58,8 +60,7 @@ KNOWN_DEVICES = (
 )
 
 DEFAULT_QEMU_CANDIDATES = (
-    PROJECT_ROOT / "build" / "qemu-system-x86_64.exe",                   # qemu/build.cmd
-    PROJECT_ROOT.parent / "qemu_bst" / "build" / "qemu-system-x86_64.exe",  # legacy tree
+    paths.QEMU_EXE,                                       # qemu/build.cmd | <app>/qemu
     Path(r"C:\Program Files\qemu\qemu-system-x86_64.exe"),               # stock fallback
 )
 
@@ -70,6 +71,7 @@ DEFAULT_ADB_CANDIDATES = tuple(p for p in (
     shutil.which("adb") and Path(shutil.which("adb")),
     Path(r"C:\Path\platform-tools\adb.exe"),
     Path(os.environ.get("LOCALAPPDATA", "")) / "Android" / "Sdk" / "platform-tools" / "adb.exe",
+    paths.DEPS_DIR / "platform-tools" / "adb.exe",       # preflight download
     REPO_ROOT / "platform-tools" / "adb.exe",
     Path(r"C:\Program Files\BlueStacks_nxt\HD-Adb.exe"),
 ) if p)
@@ -118,17 +120,13 @@ class GlobalSettings:
             base = Path(self.assets_dir)
             base = base if base.is_absolute() else base.resolve()
             return str(base / image if (base / image).is_dir() else base)
-        cand = PROJECT_ROOT / "assets" / image
-        if cand.exists():
-            return str(cand)
-        legacy = PROJECT_ROOT.parent / "qemu_test"   # pre-repo workspace
-        return str(legacy) if legacy.exists() else str(cand)
+        return str(paths.ASSETS_DIR / image)
 
     def resolved_instances_dir(self) -> str:
-        return self.instances_dir or str(PROJECT_ROOT / "instances")
+        return self.instances_dir or str(paths.INSTANCES_DIR)
 
     def resolved_screenshots_dir(self) -> str:
-        return self.screenshots_dir or str(REPO_ROOT / "screenshots")
+        return self.screenshots_dir or str(paths.SCREENSHOTS_DIR)
 
 
 @dataclass
@@ -212,7 +210,7 @@ class Store:
 
     def __init__(self, path: str | Path | None = None):
         env = os.environ.get("OPENSTACKS_CONF")
-        self.path = Path(path or env or (REPO_ROOT / "instances.conf"))
+        self.path = Path(path or env or paths.CONF_FILE)
         self.global_settings = GlobalSettings()
         self._instances: dict[str, Instance] = {}
         self._default_name = ""

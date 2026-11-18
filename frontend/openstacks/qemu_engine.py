@@ -39,7 +39,10 @@ from pathlib import Path
 
 from .config import GlobalSettings, Instance, REPO_ROOT
 
-LOGS_DIR = REPO_ROOT / "logs"
+from . import paths
+
+LOGS_DIR = paths.LOGS_DIR
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 MSYS2_BIN = r"C:\msys64\ucrt64\bin"          # DLLs needed by the patched build
 # Phase-73 guest CPU: qemu64 lacks SSSE3/SSE4 (libhoudini aborts ARM apps,
 # 0xdead0000); "host"/AVX models crash the initramfs sh under WHPX (AVX
@@ -133,7 +136,8 @@ def qemu_device_map(qemu_path: str, timeout: float = 30.0) -> dict[str, str]:
         return _DEVICE_CACHE[qemu_path]
     try:
         proc = subprocess.run([qemu_path, "-device", "help"], capture_output=True,
-                              text=True, errors="replace", timeout=timeout)
+                              text=True, errors="replace", timeout=timeout,
+                              creationflags=NO_WINDOW)
         out = (proc.stdout or "") + "\n" + (proc.stderr or "")
     except (OSError, subprocess.TimeoutExpired):
         _DEVICE_CACHE[qemu_path] = {}
@@ -372,7 +376,8 @@ class QemuEngine:
                 proc = subprocess.Popen(
                     argv, stdout=logf, stderr=subprocess.STDOUT, cwd=cwd,
                     env=env,
-                    creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+                    creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | NO_WINDOW)          # windowed .exe: no console window for QEMU
             except OSError as e:
                 return LaunchResult(False, argv, warnings, f"failed to spawn QEMU: {e}")
             for w in warnings:

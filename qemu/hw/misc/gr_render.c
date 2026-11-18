@@ -2893,10 +2893,20 @@ static bool gr_init_dll_and_host(void)
 
     bool mode1 = gr_renderer_mode() == 1;
 
-    HMODULE dll = LoadLibraryExA(GR_DLL_PATH, NULL,
+    /* OST_RENDERER_DLL overrides the BlueStacks install path (the DLL's
+     * folder is searched for its own dependencies). */
+    const char *dll_path = getenv("OST_RENDERER_DLL");
+    if (!dll_path || !*dll_path) {
+        dll_path = GR_DLL_PATH;
+    }
+    HMODULE dll = LoadLibraryExA(dll_path, NULL,
                                  LOAD_WITH_ALTERED_SEARCH_PATH);
     if (!dll) {
-        gr_log("LoadLibraryExA FAILED err=%lu", (unsigned long)GetLastError());
+        gr_log("LoadLibraryExA(%s) FAILED err=%lu", dll_path,
+               (unsigned long)GetLastError());
+        fprintf(stderr, "[gr_render] cannot load the BlueStacks 5 renderer %s "
+                "(err=%lu): install BlueStacks 5 or set OST_RENDERER_DLL\n",
+                dll_path, (unsigned long)GetLastError());
         g.failed = true;
         return false;
     }

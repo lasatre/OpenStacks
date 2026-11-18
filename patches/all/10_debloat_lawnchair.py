@@ -18,9 +18,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from _lib import Ramdisk, fetch  # noqa: E402
+from _lib import Ramdisk, deps_dir, fetch  # noqa: E402
 
-CACHE = Path(__file__).resolve().parents[2] / "deps" / "lawnchair"
+CACHE = deps_dir("lawnchair")
 
 # Lawnchair 15 beta 3 needs Android 8+ (minSdk 26, ships x86_64 code); 1.2 covers Nougat.
 LAWNCHAIR = {

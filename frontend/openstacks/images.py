@@ -33,10 +33,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-ASSETS_ROOT = PROJECT_ROOT / "assets"
-CACHE_DIR = PROJECT_ROOT / "deps" / "images"
-PATCH_DIR = PROJECT_ROOT / "patches"
+from . import paths
+
+ASSETS_ROOT = paths.ASSETS_DIR
+CACHE_DIR = paths.DEPS_DIR / "images"
+PATCH_DIR = paths.PATCH_DIR
 
 # Download locations are per BlueStacks client build: the URL embeds the version and a
 # per-build key baked into HD-MultiInstanceManager.exe (getImageDownloadUrl).
@@ -198,7 +199,8 @@ def find_7z() -> Optional[str]:
         p = shutil.which(name)
         if p:
             return p
-    for p in (r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe",
+    for p in (str(paths.TOOLS_DIR / "7zr.exe"),
+              r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe",
               r"C:\Program Files\BlueStacks_nxt\7zr.exe"):
         if Path(p).exists():
             return p
@@ -240,6 +242,7 @@ def apply_patches(staging: Path, image: str, progress: Optional[ProgressFn] = No
         d = PATCH_DIR / sub
         if d.is_dir():
             scripts += sorted(p for p in d.glob("*.py") if not p.name.startswith("_"))
+    os.environ["OST_DEPS_DIR"] = str(paths.DEPS_DIR)     # patch download cache
     for i, script in enumerate(scripts):
         if progress:
             progress(f"patch {script.name}", i, len(scripts))

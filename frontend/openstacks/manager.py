@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBo
                                QMainWindow, QMessageBox, QPushButton,
                                QSpinBox, QVBoxLayout, QWidget)
 
+from . import __version__
 from .adb import Adb, AdbError
 from .config import Instance, KNOWN_DEVICES, Store
 from .qemu_engine import ENGINE as qemu_engine
@@ -31,8 +32,9 @@ from .qemu_engine import ENGINE as qemu_engine
 def run_app() -> QApplication:
     """QApplication with the shared QEMU-engine + Store singletons ready."""
     app = QApplication.instance() or QApplication([])
-    app.setApplicationName("OpenStacks")
     app.setOrganizationName("OpenStacks")
+    from . import brand
+    brand.apply(app)
     Store()                # ensure instances.conf is parsed once
     return app
 
@@ -44,18 +46,19 @@ def make_thumb_placeholder(inst: Instance, running: bool,
     """Simple painted placeholder: resolution box + name + state dot."""
     w, h = inst.res_wh()
     pm = QPixmap(max_w, max_h)
-    pm.fill(QColor("#0b0d12"))
+    pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing, True)
-    p.setPen(QColor("#3a4556"))
-    p.setBrush(QColor(running and "#16324a" or "#20242e"))
+    # brand colors: indigo tile, teal/indigo accents when running
+    p.setPen(QColor(running and "#6366F1" or "#3a3d5c"))
+    p.setBrush(QColor(running and "#272463" or "#1E1B4B"))
     p.drawRoundedRect(6, 6, max_w - 13, max_h - 13, 6, 6)
-    p.setPen(QColor(running and "#7fd1ff" or "#9aa3ad"))
+    p.setPen(QColor(running and "#FFFFFF" or "#A5B4FC"))
     p.drawText(QRect(8, 10, max_w - 18, 20), Qt.AlignCenter, inst.name)
-    p.setPen(QColor("#5d6673"))
+    p.setPen(QColor("#8b8fc7"))
     p.drawText(QRect(8, max_h - 30, max_w - 18, 14),
                Qt.AlignCenter, f"{w}x{h} @{inst.dpi}")
-    p.setBrush(QColor(running and "#2ecc71" or "#555b66"))
+    p.setBrush(QColor(running and "#2DD4BF" or "#555b66"))
     p.setPen(Qt.NoPen)
     p.drawEllipse(8, 8, 8, 8)
     p.end()
@@ -170,11 +173,12 @@ class ManagerWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.store = Store()
-        self.setWindowTitle("OpenStacks - Instance Manager")
-        self.resize(460, 640)
+        self.setWindowTitle("OpenStacks")
+        self.resize(560, 660)
 
         central = QWidget(self)
         lay = QVBoxLayout(central)
+        lay.addLayout(self._build_header(central))
 
         self.list = QListWidget(central)
         self.list.setIconSize(self._icon_size())
@@ -200,9 +204,107 @@ class ManagerWindow(QMainWindow):
         self._threads: list[QThread] = []
 
         self.refresh()
+        QTimer.singleShot(400, self._preflight)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh)
         self._timer.start(2000)      # gentle running-state refresh
+
+    # -- header / about --------------------------------------------------------------------
+    def _build_header(self, parent) -> QHBoxLayout:
+        from . import brand
+        row = QHBoxLayout()
+        row.setContentsMargins(4, 2, 4, 6)
+        self._logo = QLabel(parent)
+        self._logo.setPixmap(brand.logo(30))
+        self._logo.setToolTip(f"OpenStacks {__version__}")
+        row.addWidget(self._logo)
+        row.addStretch(1)
+        ver = QLabel(f"v{__version__}", parent)
+        ver.setEnabled(False)                     # muted text
+        row.addWidget(ver)
+        about = QPushButton("About", parent)
+        about.clicked.connect(self._about)
+        row.addWidget(about)
+        return row
+
+    def _about(self) -> None:
+        from . import brand
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About OpenStacks")
+        lay = QVBoxLayout(dlg)
+        logo = QLabel(dlg)
+        logo.setPixmap(brand.logo(96, stacked=True))
+        logo.setAlignment(Qt.AlignCenter)
+        lay.addWidget(logo)
+        text = QLabel(dlg)
+        text.setTextFormat(Qt.RichText)
+        text.setWordWrap(True)
+        text.setOpenExternalLinks(True)
+        text.setText(
+            f"<p align=center><b>OpenStacks {__version__}</b></p>"
+            "<p>Runs BlueStacks 5 Android images (Android 7, 9, 11 and 13) on QEMU, with "
+            "re-implemented BlueStacks paravirtual devices and BlueStacks 5's own GPU "
+            "renderer. Images are downloaded from BlueStacks' servers and cleaned up "
+            "locally (no BlueStacks launcher, store or ads; Lawnchair as the home screen).</p>"
+            "<p>Not affiliated with or endorsed by BlueStacks or now.gg. BlueStacks 5 must "
+            "be installed for its renderer.</p>"
+            "<p><b>Third-party software</b>: QEMU (GPL-2.0), Qt / PySide6 (LGPL-3.0), "
+            "7-Zip (LGPL-2.1), Sora font (OFL-1.1); downloaded on demand: Lawnchair "
+            "(GPL-3.0), Kitsune Magisk (GPL-3.0), Android platform-tools (Google). "
+            "See THIRD-PARTY.md.</p>")
+        lay.addWidget(text)
+        bb = QDialogButtonBox(QDialogButtonBox.Close, parent=dlg)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        dlg.resize(460, 0)
+        dlg.exec()
+
+    # -- first-run prerequisite check ------------------------------------------------------
+    def _preflight(self) -> None:
+        from . import checks
+        problems = checks.run(self.store.global_settings)
+        if not problems:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("OpenStacks setup")
+        box.setIcon(QMessageBox.Warning)
+        box.setText("Some things OpenStacks needs are missing:")
+        box.setInformativeText("\n\n".join(f"\u2022 {p.title}: {p.detail}" for p in problems))
+        fix = None
+        if any(p.key == "adb" and p.fixable for p in problems):
+            fix = box.addButton("Download platform-tools", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Ok)
+        box.exec()
+        if fix is not None and box.clickedButton() is fix:
+            self._download_adb()
+
+    def _download_adb(self) -> None:
+        from . import checks
+        dlg = QProgressDialog("Downloading Android platform-tools from Google...", "", 0, 0, self)
+        dlg.setWindowTitle("OpenStacks setup")
+        dlg.setCancelButton(None)
+        dlg.setMinimumDuration(0)
+        dlg.show()
+
+        def done(path):
+            dlg.close()
+            self.statusBar().showMessage(f"adb ready: {path}", 8000)
+
+        def failed(msg):
+            dlg.close()
+            QMessageBox.warning(self, "OpenStacks setup", f"platform-tools download failed: {msg}")
+        th = _LaunchThread(checks.download_platform_tools, self)
+        th.done.connect(done)
+        th.failed.connect(failed)
+        th.start()
+        self._threads.append(th)
+
+    def changeEvent(self, ev) -> None:            # light/dark switch: swap the logo
+        from PySide6.QtCore import QEvent
+        if ev.type() == QEvent.PaletteChange and hasattr(self, "_logo"):
+            from . import brand
+            self._logo.setPixmap(brand.logo(30))
+        super().changeEvent(ev)
 
     # -- helpers --------------------------------------------------------------------------
     def _icon_size(self):
@@ -302,6 +404,15 @@ class ManagerWindow(QMainWindow):
         self.refresh()
         if res.ok:
             self._open_player()
+
+    def launch_by_name(self, name: str) -> None:
+        """Select an instance and launch it (OpenStacks.exe --launch <name>)."""
+        for i in range(self.list.count()):
+            if self.list.item(i).data(Qt.UserRole) == name:
+                self.list.setCurrentRow(i)
+                self._launch()
+                return
+        QMessageBox.warning(self, "OpenStacks", f"No instance named {name!r}.")
 
     def _stop(self) -> None:
         name = self._selected_name()
@@ -472,7 +583,7 @@ class ManagerWindow(QMainWindow):
     def closeEvent(self, ev) -> None:
         running = [i.name for i in self.store.instances() if self._is_running(i.name)]
         if self._player is not None:
-            self._player.close()
+            self._player.close_quietly()          # the manager decides: stop everything
         if running:
             self.statusBar().showMessage(f"Shutting down {', '.join(running)}...")
             QApplication.processEvents()

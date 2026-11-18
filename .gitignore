@@ -11,11 +11,8 @@ instances/
 # local scratch: guest/host binaries pulled for reverse engineering
 work/
 
-# per-boot evidence: logs stay local, grades + metadata are tracked
-runs/**
-!runs/*/
-!runs/*/grade.txt
-!runs/*/meta.txt
+# per-boot evidence (boot.py): local only
+runs/
 
 # front-end local state
 frontend/instances.conf

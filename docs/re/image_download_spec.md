@@ -137,5 +137,5 @@ bst.guid / machine_id / install_id / account id; none are needed.
   `HD-MultiInstanceManager.exe` (immediates in `getImageDownloadUrl`); no metadata API found.
   Cloud `POST /bs4/check_upgrade` returned 500 for generic params (not pursued).
 - Exact resume semantics of the client downloader; exact Data.vhdx -> Data_orig.vhdx step.
-- Work files (decompiled FUN_140023740 / FUN_140031dc0, sparse 7z listings):
-  <local scratch folder, not kept>
+- The work files (decompiled FUN_140023740 / FUN_140031dc0, sparse 7z listings) were local
+  scratch and are not kept.

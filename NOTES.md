@@ -1,6 +1,6 @@
-# OpenStacks dev notes (fresh canon, from Phase 60)
+# OpenStacks dev notes (post Claude migration)
 
-The old canon (`../grbridge/NOTES.md` §1–69, `../qemu_bst/REPORT.md`, `../FINDINGS.md`)
+The old canon, not included in this repository, (`../grbridge/NOTES.md` §1–69, `../qemu_bst/REPORT.md`, `../FINDINGS.md`)
 stays as the historical record. **Its numbering is off by 10 for the late phases**
 (NOTES §69 = Phase 59). Treat its conclusions as hypotheses: §1 below refutes several.
 

@@ -6,18 +6,20 @@
 </p>
 
 <p align="center">
-  Run BlueStacks 5 Android images on QEMU, without BlueStacks' launcher, store or ads.
+  Run BlueStacks 5 Android images on QEMU, without the Bluestacks bloat.
 </p>
 
 ---
 
 OpenStacks is a Windows Android emulator built from open parts. It runs on QEMU,
-BlueStacks' paravirtual devices are reimplemented as QEMU devices, and a PySide6 front-end
-works like BlueStacks' multi-instance manager and player. The Android images come straight
-from BlueStacks' download servers and are cleaned up on your machine. For graphics,
-OpenStacks loads the GPU renderer from your BlueStacks 5 installation.
+BlueStacks' paravirtual devices are reimplemented as QEMU devices, and a custom front-end that works similarly to the BlueStacks software. The Android images come straight
+from BlueStacks' download servers and are debloated on your machine.
 
 > OpenStacks is not affiliated with or endorsed by BlueStacks or now.gg.
+
+### AI Usage Disclosure
+
+As is made clear by the commit history, this project was built entirely by AI, just with minor human guidance. It was initially built using GLM-5.3-Flash, DeepSeek V4.1 Flash, and MiMo-V2.6-Flash before being transitioned to Claude Opus 5.5 and Sonnet 5.5.
 
 ## Features
 

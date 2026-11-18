@@ -2925,6 +2925,7 @@ static LRESULT CALLBACK gr_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
             SetWindowPos(h, NULL, 0, 0, r.right - r.left, r.bottom - r.top,
                          SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
+        if (gr_gfx()) gx_layout(h);    /* the content aspect flipped */
         return 0;
     }
     case WM_TIMER:
@@ -2932,6 +2933,11 @@ static LRESULT CALLBACK gr_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         else KillTimer(h, 1);
         return 0;
     case WM_ERASEBKGND:
+        if (gr_gfx()) {                /* letterbox bars around gfxstream's display */
+            RECT rc;
+            GetClientRect(h, &rc);
+            FillRect((HDC)w, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        }
         return 1;
     case WM_CLOSE:
         return 0;                    /* only the front-end/QEMU end us */
@@ -3169,7 +3175,7 @@ typedef struct GxConfig {
 static struct {
     HMODULE dll;
     int  (*init)(const GxConfig *);
-    int  (*show)(void *, int, int, float);
+    int  (*show)(void *, int, int, int, int, float);
     void (*set_rotation)(float);
     void (*set_frame_cb)(void (*)(void *, int, int, const uint8_t *), void *);
     void *(*ch_open)(void);
@@ -3220,16 +3226,31 @@ static void gx_set_rotation(int o)
 static void gx_layout(HWND parent)
 {
     RECT rc;
+    int o = qatomic_read(&g_orient);
+    int fw = (o & 1) ? GR_H : GR_W, fh = (o & 1) ? GR_W : GR_H;   /* guest as shown */
+    int cw, ch;
     if (!g.ready || !gx.show) return;
     GetClientRect(parent, &rc);
     if (rc.right <= 0 || rc.bottom <= 0) return;
-    if (gx.show(parent, rc.right, rc.bottom, gx_rot_deg(qatomic_read(&g_orient))) == 0) {
+    /* letterbox: the largest rect of the guest's aspect, centred (gfxstream
+     * stretches the frame over its whole subwindow); our window paints the bars */
+    if ((int64_t)rc.right * fh <= (int64_t)rc.bottom * fw) {
+        cw = rc.right;
+        ch = (int)((int64_t)rc.right * fh / fw);
+    } else {
+        ch = rc.bottom;
+        cw = (int)((int64_t)rc.bottom * fw / fh);
+    }
+    if (cw < 1 || ch < 1) return;
+    if (gx.show(parent, (rc.right - cw) / 2, (rc.bottom - ch) / 2, cw, ch,
+                gx_rot_deg(o)) == 0) {
         if (!gx.shown) {
-            gr_log("gfxstream display in %p (%ldx%ld)", (void *)parent,
-                   rc.right, rc.bottom);
+            gr_log("gfxstream display in %p (%ldx%ld, content %dx%d)", (void *)parent,
+                   rc.right, rc.bottom, cw, ch);
         }
         gx.shown = true;
     }
+    InvalidateRect(parent, NULL, TRUE);  /* repaint the bars */
 }
 
 /* crash locator: module+offset of the fault and of return addresses on the stack */

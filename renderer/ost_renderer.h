@@ -40,9 +40,11 @@ typedef struct OstRendererConfig {
 /* Start the renderer (host GPU). 0 on success. Call once. */
 OST_API int ost_renderer_init(const OstRendererConfig *cfg);
 
-/* Show the display inside `parent_hwnd` (a child window is created that fills ww x wh).
- * rotation_deg: 0/90/180/270. Can be called again to resize/rotate. 0 on success. */
-OST_API int ost_renderer_show(void *parent_hwnd, int ww, int wh, float rotation_deg);
+/* Show the display inside `parent_hwnd`: a child window at (x, y) of w x h client pixels,
+ * which the (rotated) guest frame fills, stretched; the caller letterboxes. rotation_deg:
+ * 0/90/180/270. Call again to move/resize/rotate. 0 on success. */
+OST_API int ost_renderer_show(void *parent_hwnd, int x, int y, int w, int h,
+                              float rotation_deg);
 OST_API void ost_renderer_set_rotation(float rotation_deg);
 OST_API void ost_renderer_repaint(void);
 

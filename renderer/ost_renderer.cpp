@@ -232,16 +232,18 @@ OST_API int ost_renderer_init(const OstRendererConfig* cfg) {
     return 0;
 }
 
-OST_API int ost_renderer_show(void* parent_hwnd, int ww, int wh, float rotation_deg) {
+OST_API int ost_renderer_show(void* parent_hwnd, int x, int y, int w, int h,
+                              float rotation_deg) {
     gfxstream::RendererPtr r;
     {
         std::lock_guard<std::mutex> lk(g.mu);
         r = g.renderer;
     }
-    if (!r) return -1;
-    bool ok = r->showOpenGLSubwindow((FBNativeWindowType)parent_hwnd, 0, 0, ww, wh, g.width,
-                                     g.height, 1.0f, rotation_deg, false /* keep */,
-                                     false /* visible */);
+    if (!r || w <= 0 || h <= 0) return -1;
+    // fbw/fbh of showOpenGLSubwindow = the GL viewport in window pixels (the guest frame
+    // is stretched over it), not the guest framebuffer size: the whole subwindow here.
+    bool ok = r->showOpenGLSubwindow((FBNativeWindowType)parent_hwnd, x, y, w, h, w, h, 1.0f,
+                                     rotation_deg, false /* keep */, false /* visible */);
     if (!ok) logf(0, "showOpenGLSubwindow failed");
     return ok ? 0 : -1;
 }

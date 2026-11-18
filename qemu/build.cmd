@@ -6,7 +6,8 @@ rem   2. copy qemu\hw\misc\* into the tree + hook Kconfig/meson (apply_to_tree.p
 rem   3. configure (once) + ninja into build\
 rem   4. copy pc-bios and the MSYS2 runtime DLLs next to the exe (self-contained)
 rem  qemu\hw\misc is the ONLY canonical copy of the device sources.
-rem  Kills running QEMU first (the linker cannot replace a running exe).
+rem  Kills running QEMU first (the linker cannot replace a running exe); OST_NO_KILL=1
+rem  renames the running exe aside instead.
 rem  Needs: MSYS2 (MSYS2_ROOT, default C:\msys64) with mingw-w64-ucrt-x86_64-{gcc,
 rem         ninja,meson,glib2,pixman,libslirp,pkgconf} + python + curl + tar.
 rem         Override the source tree with QEMU_TREE=...
@@ -22,7 +23,15 @@ set "PATH=%MSYS2_ROOT%\ucrt64\bin;%MSYS2_ROOT%\usr\bin;%PATH%"
 set "BASH=%MSYS2_ROOT%\usr\bin\bash.exe"
 set "CHERE_INVOKING=1"
 
-taskkill /f /im qemu-system-x86_64.exe >nul 2>&1
+rem OST_NO_KILL=1 keeps running VMs: the in-use exe is renamed aside (*.old) instead
+if defined OST_NO_KILL (
+  if exist "%ROOT%build\qemu-system-x86_64.exe" (
+    del /q "%ROOT%build\qemu-system-x86_64.exe.old" >nul 2>&1
+    ren "%ROOT%build\qemu-system-x86_64.exe" qemu-system-x86_64.exe.old
+  )
+) else (
+  taskkill /f /im qemu-system-x86_64.exe >nul 2>&1
+)
 
 if not exist "%ROOT%deps" mkdir "%ROOT%deps"
 for /f "delims=" %%i in ('%BASH% -lc "cygpath -u '%ROOT%deps'"') do set "UDEPS=%%i"

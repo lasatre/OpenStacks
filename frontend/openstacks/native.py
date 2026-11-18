@@ -391,6 +391,11 @@ class NativeDisplay(QWidget):
         self._hwnd, self._win = hwnd, win
         self._container = QWidget.createWindowContainer(win, self)
         self._container.setFocusPolicy(Qt.StrongFocus)
+        if sys.platform != "win32":
+            # Qt hands drops on a window container to the embedded window, and QEMU's
+            # foreign window ignores them: let them reach the player (APK install).
+            # Windows drops land on QEMU's HWND itself (WM_DROPFILES -> the player).
+            self._container.setAcceptDrops(False)
         self._layout()
         self._container.show()
         _show(hwnd)

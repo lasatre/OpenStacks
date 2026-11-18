@@ -149,8 +149,14 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
 - **CI + release:** build.yml builds the renderer after QEMU (shallow fetch of the pinned
   gfxstream commit, patches, ClangCL) with the shader translator download cached; assemble.py
   ships both DLLs (they are in build\) plus their licenses in `licenses/`.
-- **Open:** the player (embedding, pop-out, resize) on gfxstream, a first CI run, then the
-  default switch.
+- **Player:** embedding, resizing and rotation work. gfxstream's showOpenGLSubwindow fbw/fbh are
+  the viewport in window pixels (not the guest size); gr_render letterboxes the guest aspect
+  into the window, and fills it when the aspect is within 2 px. Pixel-identical to the
+  BlueStacks renderer in the player (user image diff).
+- **CI:** green, release ZIP ships the renderer.
+- **Default (done):** new instances use gfxstream; instances saved before keep `bluestacks`.
+  The README no longer requires BlueStacks.
+- **Next:** Linux (BACKLOG), the Vulkan encoder, the gaps no workload has hit yet.
 - Crash locator: gr_render's gfxstream path logs the faulting module+offset and stack return
   addresses on an access violation; `ost_renderer.pdb` + llvm-symbolizer resolve ours.
 

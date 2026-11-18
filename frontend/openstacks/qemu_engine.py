@@ -364,7 +364,7 @@ class QemuEngine:
             fbw, fbh = inst.res_wh()
             env["GR_FB_W"], env["GR_FB_H"] = str(fbw), str(fbh)
             # GPU renderer: BlueStacks' libOpenglRender.dll or the open one (gfxstream)
-            if getattr(inst, "renderer", "bluestacks") == "gfxstream":
+            if getattr(inst, "renderer", "gfxstream") == "gfxstream":
                 env["OST_RENDERER"] = "gfxstream"
             else:
                 env.pop("OST_RENDERER", None)

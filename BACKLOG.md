@@ -7,9 +7,6 @@ brackets). Move an item to NOTES when it lands.
 - **Installer and signing** - the release is a portable ZIP. An installer (Inno Setup / MSI)
   with Start menu shortcuts, per-instance shortcuts (`OpenStacks.exe --launch <name>`) and
   a signed exe would avoid SmartScreen warnings.
-- **Renderer without a BlueStacks install** - BlueStacks 5 must be installed for
-  `libOpenglRender.dll`. Its client package on the same CDN as the images could probably
-  supply the renderer folder, like the image downloader does (licensing to check first).
 - **Updates** - no update check; a newer release has to be extracted over the old one
   (`data\` is kept).
 
@@ -78,17 +75,14 @@ brackets). Move an item to NOTES when it lands.
   installed. Lawnchair 15 on Pie64 needs a build that fixes Android 9. System apps (e.g.
   com.bluestacks.settings) would need a Root.vhd-level patch path [10r].
 
-## Linux host (plan: option A, open-source gfxstream renderer)
-Everything except the renderer is porting work; swapping the renderer is the real project
-(estimate: about two weeks of focused work).
-1. Pluggable renderer backend in gr_render: the DLL only sees the HstSocketHost vtable
-   (peek/recv/recvcopy/alloc/alloccopy/send/createFinish); put that behind an interface.
-2. gfxstream backend, built and A/B-tested on Windows first against libOpenglRender.dll (same
-   guest, same tools). GL (renderControl + GLES) first, then Vulkan.
-3. Compatibility: diff the guest encoders' opcode tables (vendor/lib64 lib_renderControl_enc,
-   libGLESv2_enc, the Vulkan encoder) against gfxstream's decoders, and fill gaps for
-   BlueStacks' additions (e.g. rcSetColorBufferVulkanMode2, ANDROID_EMU extension negotiation,
-   rcComposeAsync*).
+## Linux host (open-source gfxstream renderer)
+The renderer swap is done on Windows (docs/renderer_plan.md): gr_render has a gfxstream backend
+(`renderer/`, ost_renderer.dll) that runs all three images without BlueStacks. Left for Linux:
+1. Build gfxstream + the adapter as a .so (CMake, clang/gcc); libshadertranslator.so comes in
+   Google's Linux emulator package (same pinned-download approach).
+2. Vulkan guests: the Vulkan encoder is not mapped or tested yet (GL only so far).
+3. Compatibility gaps not hit yet: BlueStacks' rcGLShaderWorkaround / rcGLHostInfo, the
+   texture-cache GLES opcodes (2478-2480), GLES 3.2 extras (2496+).
 4. Port gr_render's Win32 parts (HWND window, SRWLOCK/CONDITION_VARIABLE, LoadLibrary,
    timeBeginPeriod) to QEMU primitives and SDL/X11; most of this disappears with gfxstream.
 5. KVM instead of WHPX: native kvm-clock (drop the VMware TSC leaf), AVX without the

@@ -152,7 +152,7 @@ class Instance:
     hvmem_mb: int = 512                # hvmem ram_size_mib= (proven shape uses 512)
     extra_append: str = ""             # extra KEY=VALUE / kernel args for -append
     display: str = "native"            # native (GPU window embed) | vnc (readback)
-    renderer: str = "bluestacks"       # bluestacks (libOpenglRender.dll) | gfxstream (open)
+    renderer: str = "gfxstream"        # gfxstream (open) | bluestacks (libOpenglRender.dll)
     image: str = "Pie64"               # engine image: Pie64 (Android 9), Rvc64 (11), Nougat*
     magisk: bool = False               # rooted with Magisk (player Root button; magisk.py)
     is_default: bool = False
@@ -243,6 +243,8 @@ class Store:
             if sect == "global":
                 continue
             it = Instance(name=sect)
+            if not cp.has_option(sect, "renderer"):
+                it.renderer = "bluestacks"   # made before the open renderer: keep its GPU path
             for f in fields(it):
                 if f.name == "name" or not cp.has_option(sect, f.name):
                     continue

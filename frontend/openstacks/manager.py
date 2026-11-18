@@ -143,9 +143,9 @@ class InstanceEditDialog(QDialog):
         form.addRow("PCI devices", self.ed_devices)
 
         self.cb_renderer = QComboBox()
+        self.cb_renderer.addItem("Open renderer (gfxstream)", "gfxstream")
         self.cb_renderer.addItem("BlueStacks (needs BlueStacks 5 installed)", "bluestacks")
-        self.cb_renderer.addItem("Open renderer (gfxstream, experimental)", "gfxstream")
-        k = self.cb_renderer.findData(getattr(i, "renderer", "bluestacks"))
+        k = self.cb_renderer.findData(getattr(i, "renderer", "gfxstream"))
         self.cb_renderer.setCurrentIndex(max(k, 0))
         form.addRow("GPU renderer", self.cb_renderer)
 

@@ -50,7 +50,7 @@ def run(global_settings, instances=()) -> list[Problem]:
         out.append(Problem("qemu", "QEMU not found",
                            f"Expected {paths.QEMU_EXE}. In a source checkout run "
                            "qemu\\build.cmd; the release ZIP ships it in qemu\\."))
-    used = {getattr(i, "renderer", "bluestacks") for i in instances} or {"bluestacks"}
+    used = {getattr(i, "renderer", "gfxstream") for i in instances} or {"gfxstream"}
     if "gfxstream" in used and qemu:
         missing = [f for f in paths.GFXSTREAM_FILES if not (Path(qemu).parent / f).exists()]
         if missing:
@@ -59,10 +59,10 @@ def run(global_settings, instances=()) -> list[Problem]:
                                "checkout run renderer\\build_gfxstream.cmd."))
     if "bluestacks" in used and not paths.RENDERER_DLL.exists():
         out.append(Problem("renderer", "BlueStacks 5 is not installed",
-                           "OpenStacks uses BlueStacks 5's GPU renderer "
+                           "An instance is set to BlueStacks' GPU renderer "
                            f"({paths.RENDERER_DLL.name}), which cannot be redistributed. "
-                           "Install BlueStacks 5 from bluestacks.com (it does not need to "
-                           "run), or set OST_RENDERER_DLL to the DLL's path."))
+                           "Switch it to the open renderer (Settings > GPU renderer), or install "
+                           "BlueStacks 5 from bluestacks.com (it does not need to run)."))
     if whpx_available() is False:
         out.append(Problem("whpx", "Windows Hypervisor Platform is off",
                            "Enable it in 'Turn Windows features on or off' (Windows "

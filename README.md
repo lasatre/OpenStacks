@@ -23,8 +23,10 @@
 ---
 
 OpenStacks is a Windows Android emulator built from open parts. It runs on QEMU,
-BlueStacks' paravirtual devices are reimplemented as QEMU devices, and a custom front-end that works similarly to the BlueStacks software. The Android images come straight
-from BlueStacks' download servers and are debloated on your machine.
+BlueStacks' paravirtual devices are reimplemented as QEMU devices, graphics go through Google's
+[gfxstream](https://github.com/google/gfxstream), and a custom front-end works similarly to the
+BlueStacks software. The Android images come straight from BlueStacks' download servers and are
+debloated on your machine. BlueStacks itself doesn't need to be installed.
 
 > OpenStacks is not affiliated with or endorsed by BlueStacks or now.gg.
 
@@ -36,7 +38,7 @@ As is made clear by the commit history, this project was built entirely by AI, j
 
 - Android 7, 9, 11 and 13, downloaded when you create an instance
 - No BlueStacks launcher, store, rewards or ads; [Lawnchair](https://github.com/LawnchairLauncher/lawnchair) as the home screen
-- GPU acceleration; ARM apps and 3D games run
+- GPU acceleration (open renderer, or BlueStacks' own per instance); ARM apps and 3D games run
 - Multiple instances with their own resolution, CPU and RAM
 - File transfer, APK install and drag & drop
 - One-click root with Magisk
@@ -52,7 +54,8 @@ As is made clear by the commit history, this project was built entirely by AI, j
 
 - Windows 10 or 11 (64-bit), with virtualization enabled
 - **Windows Hypervisor Platform**: *Turn Windows features on or off*, tick it, reboot
-- **BlueStacks 5** installed (it doesn't need to be running)
+- A GPU with up-to-date drivers (desktop OpenGL)
+- Optional: **BlueStacks 5** installed, only for instances set to the BlueStacks renderer
 
 OpenStacks checks these on first start and tells you what's missing.
 
@@ -93,6 +96,7 @@ You need [MSYS2](https://www.msys2.org) and Python 3.10+:
     pip install -r frontend\requirements.txt
 
     qemu\build.cmd                  build QEMU with the OpenStacks devices
+    renderer\build_gfxstream.cmd    build the open GPU renderer (VS 2022 with ClangCL)
     python frontend\run_player.py   run the app
 
 The [build workflow](.github/workflows/build.yml) packages the release ZIP; `packaging\`

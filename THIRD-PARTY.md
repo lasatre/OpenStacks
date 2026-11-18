@@ -39,6 +39,6 @@ The LGPL libraries are dynamically linked and can be replaced in place.
 
 ## Required, not shipped
 
-Only for instances that use the BlueStacks GPU renderer (the default for now; the open renderer,
-gfxstream, needs nothing from BlueStacks): BlueStacks 5's GPU renderer (`libOpenglRender.dll` and its folder) is proprietary and is loaded from
+Only for instances set to the BlueStacks GPU renderer (new instances use the open renderer,
+gfxstream, which needs nothing from BlueStacks): BlueStacks 5's GPU renderer (`libOpenglRender.dll` and its folder) is proprietary and is loaded from
 your own BlueStacks 5 installation. OpenStacks is not affiliated with or endorsed by BlueStacks or now.gg.

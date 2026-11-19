@@ -1,8 +1,13 @@
 name: Build
 
-# Builds the portable Windows release: QEMU 11.1 with the OpenStacks devices (MSYS2 ucrt64),
-# the PySide6 front-end (PyInstaller), image patches and 7-Zip, zipped as
-# OpenStacks-<version>-win64.zip. Tags v* also publish a GitHub release.
+# One workflow, two platforms built in parallel:
+#   windows: QEMU 11.1 with the OpenStacks devices (MSYS2 ucrt64), the open renderer
+#            (gfxstream, VS 2022 ClangCL), the PySide6 front-end (PyInstaller), image patches
+#            and 7-Zip -> OpenStacks-<version>-win64.zip
+#   linux:   the same on Ubuntu 22.04 (packaging/build_linux.sh) -> an AppImage
+# Tags v* publish both in one (draft) GitHub release once both jobs pass.
+# Compilers go through ccache (QEMU on both, gfxstream on Linux); the Windows gfxstream
+# build dir is cached by an exact key over renderer/ (MSBuild has no compiler launcher).
 
 on:
   push:
@@ -12,13 +17,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write          # only used by the release step on tags
+  contents: write          # only used by the release job on tags
 
 env:
   QEMU_VERSION: "11.1.0"
   PYTHON_VERSION: "3.12"
   SEVENZIP_URL: https://github.com/ip7z/7zip/releases/download/26.06/7zr.exe
   SEVENZIP_SHA256: e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc
+  CCACHE_MAXSIZE: 2G
 
 jobs:
   windows:
@@ -26,11 +32,13 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      CCACHE_DIR: ${{ github.workspace }}\.ccache
     steps:
       - uses: actions/checkout@v4
 
+      # (each job derives the version itself: the Windows job also runs alone under act)
       - name: Version
-        id: ver
         run: |
           if ("${{ github.ref_type }}" -eq "tag") {
             $v = "${{ github.ref_name }}".TrimStart("v")
@@ -38,7 +46,7 @@ jobs:
             $base = (Select-String frontend/openstacks/__init__.py -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
             $v = "$base-dev.$("${{ github.sha }}".Substring(0, 7))"
           }
-          "version=$v" >> $env:GITHUB_OUTPUT
+          "VERSION=$v" >> $env:GITHUB_ENV
           Write-Host "version $v"
 
       # (skipped under nektos/act on a Windows host: these installers do not run there;
@@ -58,6 +66,7 @@ jobs:
           install: >-
             diffutils
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ccache
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-meson
             mingw-w64-ucrt-x86_64-pkgconf
@@ -72,6 +81,13 @@ jobs:
         with:
           path: deps/qemu-${{ env.QEMU_VERSION }}.tar.xz
           key: qemu-src-${{ env.QEMU_VERSION }}
+
+      - name: Cache ccache (QEMU)
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-${{ github.sha }}
+          restore-keys: ccache-windows-
 
       - name: Build QEMU
         env:
@@ -93,8 +109,18 @@ jobs:
       - name: Cache shader translator (from the Android emulator package, ~455 MB)
         uses: actions/cache@v4
         with:
-          path: deps/shadertranslator
-          key: shadertranslator-${{ hashFiles('renderer/fetch_shadertranslator.py') }}
+          path: deps/shadertranslator/windows
+          key: shadertranslator-windows-${{ hashFiles('renderer/fetch_shadertranslator.py') }}
+
+      # exact key: a hit means identical renderer sources, so MSBuild's up-to-date check
+      # (timestamps) is safe; any change rebuilds from scratch
+      - name: Cache gfxstream build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/gfxstream
+            deps/ost-renderer-build
+          key: gfxstream-windows-${{ hashFiles('renderer/**') }}
 
       - name: Build the open renderer (gfxstream, VS 2022 ClangCL)
         run: |
@@ -108,7 +134,7 @@ jobs:
         run: |
           python -m venv .venv-build
           $py = ".venv-build\Scripts\python.exe"
-          & $py packaging/set_version.py "${{ steps.ver.outputs.version }}"
+          & $py packaging/set_version.py "$env:VERSION"
           & $py -m pip install --upgrade pip
           & $py -m pip install -r frontend/requirements.txt pyinstaller
           & $py -m PyInstaller --noconfirm --distpath dist --workpath build-pyi packaging/openstacks.spec
@@ -125,7 +151,7 @@ jobs:
         env:
           MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}     # strip.exe for QEMU
         run: |
-          python packaging/assemble.py --version "${{ steps.ver.outputs.version }}" --sevenzip deps/7zr.exe --zip
+          python packaging/assemble.py --version "$env:VERSION" --sevenzip deps/7zr.exe --zip
 
       - name: Smoke test (frozen app, clean PATH)
         run: |
@@ -135,18 +161,116 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "smoke test failed ($($p.ExitCode))" }
           if (Test-Path release/OpenStacks/data) { Remove-Item -Recurse -Force release/OpenStacks/data }
 
-      # upload the folder, not the ZIP: artifacts are always zipped on download, so a ZIP
-      # would arrive as a ZIP inside a ZIP (the release asset below is the ZIP itself)
+      # the folder for people (artifacts are zipped on download: a ZIP would arrive as a
+      # ZIP inside a ZIP), the ZIP itself for the release job
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenStacks-${{ steps.ver.outputs.version }}-win64
+          name: OpenStacks-${{ env.VERSION }}-win64
           path: release/OpenStacks/
           if-no-files-found: error
-
-      - name: GitHub release (tags)
+      - uses: actions/upload-artifact@v4
         if: github.ref_type == 'tag'
+        with:
+          name: release-windows
+          path: release/OpenStacks-${{ env.VERSION }}-win64.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: ver
+        run: |
+          if [ "${{ github.ref_type }}" = tag ]; then
+            v="${{ github.ref_name }}"; v="${v#v}"
+          else
+            base=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' frontend/openstacks/__init__.py)
+            v="$base-dev.${GITHUB_SHA::7}"
+          fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "version $v"
+
+      - name: Build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential ccache ninja-build pkg-config python3-venv python3-tomli \
+            libglib2.0-dev libpixman-1-dev libslirp-dev libfdt-dev zlib1g-dev libpulse-dev \
+            clang cmake git libx11-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev \
+            patchelf file curl xz-utils \
+            libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1
+
+      # the front-end needs Python 3.12+ (see packaging/build_linux.sh: PySide6's
+      # Signal.emit leaks references to True, fatal before 3.12's immortal objects)
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache QEMU source tarball
+        uses: actions/cache@v4
+        with:
+          path: deps/qemu-${{ env.QEMU_VERSION }}.tar.xz
+          key: qemu-src-${{ env.QEMU_VERSION }}
+
+      - name: Cache ccache (QEMU + gfxstream)
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-linux-${{ github.sha }}
+          restore-keys: ccache-linux-
+
+      - name: Cache shader translator (from the Android emulator package, ~350 MB)
+        uses: actions/cache@v4
+        with:
+          path: deps/shadertranslator/linux
+          key: shadertranslator-linux-${{ hashFiles('renderer/fetch_shadertranslator.py') }}
+
+      - name: Cache packaging tools (appimagetool, runtime, 7-Zip; pinned)
+        uses: actions/cache@v4
+        with:
+          path: deps/packaging
+          key: packaging-tools-${{ hashFiles('packaging/build_linux.sh') }}
+
+      - name: Build QEMU, the open renderer, the front-end, the AppImage
+        run: STAMP_VERSION=1 PYTHON="${{ steps.py.outputs.python-path }}" bash packaging/build_linux.sh "$VERSION"
+
+      - name: ccache stats
+        run: ccache -s
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenStacks-${{ env.VERSION }}-x86_64.AppImage
+          path: release/OpenStacks-${{ env.VERSION }}-x86_64.AppImage
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [windows, linux]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-windows
+          path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: OpenStacks-${{ needs.linux.outputs.version }}-x86_64.AppImage
+          path: out
+      - name: GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/OpenStacks-${{ steps.ver.outputs.version }}-win64.zip
+          files: |
+            out/OpenStacks-${{ needs.linux.outputs.version }}-win64.zip
+            out/OpenStacks-${{ needs.linux.outputs.version }}-x86_64.AppImage
           draft: true
           generate_release_notes: true

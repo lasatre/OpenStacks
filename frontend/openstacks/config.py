@@ -60,21 +60,27 @@ KNOWN_DEVICES = (
 )
 
 DEFAULT_QEMU_CANDIDATES = (
-    paths.QEMU_EXE,                                       # qemu/build.cmd | <app>/qemu
-    Path(r"C:\Program Files\qemu\qemu-system-x86_64.exe"),               # stock fallback
-)
+    paths.QEMU_EXE,                    # qemu/build.cmd | build.sh | <app>/qemu
+) + ((Path(r"C:\Program Files\qemu\qemu-system-x86_64.exe"),)   # stock fallback
+     if paths.WINDOWS else ())
 
 # Prefer the user's platform-tools adb: BlueStacks' HD-Adb (v36) and a newer
 # adb server kill each other's server on every call, which shows up as
 # "offline"/"device not found" flapping. HD-Adb is only the last resort.
+_ADB = f"adb{paths.EXE}"
 DEFAULT_ADB_CANDIDATES = tuple(p for p in (
     shutil.which("adb") and Path(shutil.which("adb")),
-    Path(r"C:\Path\platform-tools\adb.exe"),
-    Path(os.environ.get("LOCALAPPDATA", "")) / "Android" / "Sdk" / "platform-tools" / "adb.exe",
-    paths.DEPS_DIR / "platform-tools" / "adb.exe",       # preflight download
-    REPO_ROOT / "platform-tools" / "adb.exe",
-    Path(r"C:\Program Files\BlueStacks_nxt\HD-Adb.exe"),
+    paths.WINDOWS and Path(r"C:\Path\platform-tools\adb.exe"),
+    paths.WINDOWS and Path(os.environ.get("LOCALAPPDATA", "")) / "Android" / "Sdk"
+    / "platform-tools" / "adb.exe",
+    not paths.WINDOWS and Path.home() / "Android" / "Sdk" / "platform-tools" / "adb",
+    paths.DEPS_DIR / "platform-tools" / _ADB,            # preflight download
+    REPO_ROOT / "platform-tools" / _ADB,
+    paths.WINDOWS and Path(r"C:\Program Files\BlueStacks_nxt\HD-Adb.exe"),
 ) if p)
+
+# hardware acceleration: Windows Hypervisor Platform / KVM
+DEFAULT_ACCEL = "whpx" if paths.WINDOWS else "kvm"
 
 
 def _first_existing(paths) -> str:
@@ -93,7 +99,7 @@ class GlobalSettings:
     locale: str = "en-US"
     fullscreen: bool = False
     priority: str = "normal"           # normal | high
-    acceleration: str = "whpx"         # whpx (default: ~15x faster) | tcg
+    acceleration: str = DEFAULT_ACCEL  # whpx | kvm (default: ~15x faster) | tcg
     qemu_path: str = ""
     qemu_bios_dir: str = ""            # -L dir; auto-derived when empty
     assets_dir: str = ""               # kernel.bin / initramfs.bin / Root.vhd ...
@@ -245,7 +251,7 @@ class Store:
             if sect == "global":
                 continue
             it = Instance(name=sect)
-            if not cp.has_option(sect, "renderer"):
+            if not cp.has_option(sect, "renderer") and "bluestacks" in paths.RENDERERS:
                 it.renderer = "bluestacks"   # made before the open renderer: keep its GPU path
             for f in fields(it):
                 if f.name == "name" or not cp.has_option(sect, f.name):
@@ -259,6 +265,8 @@ class Store:
                     except ValueError:
                         continue
                 setattr(it, f.name, val)
+            if it.renderer not in paths.RENDERERS:   # e.g. a Windows config on Linux
+                it.renderer = "gfxstream"
             inst[sect] = it
         self._instances = inst
         if default_name in inst:

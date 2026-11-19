@@ -66,7 +66,8 @@ if exist "%ROOT%build\build.ninja" (
 )
 
 if not exist "%ROOT%build\build.ninja" (
-  %BASH% -lc "cd '%UROOT%build' && '%UTREE%/configure' --target-list=x86_64-softmmu --enable-slirp --enable-whpx --disable-werror --disable-docs --disable-tools --disable-sdl --disable-gtk"
+  rem CC: ccache when installed (mingw-w64-ucrt-x86_64-ccache; CI caches CCACHE_DIR)
+  %BASH% -lc "cd '%UROOT%build' && CC=$(command -v ccache >/dev/null && echo 'ccache gcc' || echo gcc) '%UTREE%/configure' --target-list=x86_64-softmmu --enable-slirp --enable-whpx --disable-werror --disable-docs --disable-tools --disable-sdl --disable-gtk"
   if errorlevel 1 goto :fail
 )
 

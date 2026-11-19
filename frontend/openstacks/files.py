@@ -15,6 +15,8 @@ import os
 import posixpath
 import queue
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -308,8 +310,12 @@ class FileTransferDialog(QDialog):
         def done(_):
             local = dest / e["name"]
             self.status.setText(f"Downloaded to {local}")
-            try:
-                os.startfile(str(local))          # open with the default app
+            try:                                  # open with the default app
+                if sys.platform == "win32":
+                    os.startfile(str(local))
+                else:
+                    subprocess.Popen(["xdg-open", str(local)], start_new_session=True,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except OSError:
                 pass
         self._submit(f"Downloading {e['name']}", lambda: self.adb.pull(remote, dest), done)

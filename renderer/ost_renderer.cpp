@@ -19,6 +19,9 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 #include "gfxstream/host/features.h"
 #include "render-utils/RenderChannel.h"
@@ -99,7 +102,12 @@ struct Puller {
     int width = 0, height = 0;
     gfxstream::Renderer::ReadPixelsCallback read = nullptr;
     std::thread thread;
-} gp;
+};
+// Never destroyed: the host process may exit without ost_renderer_shutdown (QEMU does),
+// and on Linux exit() runs static destructors while the puller still waits on cv. A
+// destroyed joinable std::thread would std::terminate, and glibc's pthread_cond_destroy
+// blocks until the waiter leaves, i.e. forever.
+Puller& gp = *new Puller();
 
 void pullerMain() {
     std::vector<uint8_t> buf;
@@ -207,6 +215,34 @@ OST_API int ost_renderer_init(const OstRendererConfig* cfg) {
     g.cfg = *cfg;
     g.width = cfg->width;
     g.height = cfg->height;
+#ifndef _WIN32
+    // GLX through Xlib from many render threads: Xlib must be put in thread-safe mode
+    // before anything opens a display (the Android emulator does this in main; gfxstream's
+    // own tests do too). Without it the shared Display corrupts the heap as soon as two
+    // guest render threads make contexts current at once. Idempotent.
+    if (void* x11 = dlopen("libX11.so.6", RTLD_NOW | RTLD_LOCAL)) {
+        if (auto initThreads = (int (*)())dlsym(x11, "XInitThreads")) {
+            if (!initThreads()) logf(1, "XInitThreads failed");
+        }
+    } else {
+        logf(1, "libX11.so.6: %s", dlerror());
+    }
+    // gfxstream dlopens "libshadertranslator.so" by name, and glibc's dlopen ignores our
+    // DT_RUNPATH: load it from our own directory first, so the by-name open finds it
+    // (matched by soname). Its libc++.so comes from its own $ORIGIN RUNPATH. RTLD_LOCAL
+    // matters: that libc++ exports operator new/delete and libc++abi's __cxa_* and
+    // __dynamic_cast; in the global scope they would bind libraries loaded later (Mesa,
+    // LLVM) to the wrong C++ runtime and corrupt the heap.
+    {
+        Dl_info self{};
+        if (dladdr((void*)&ost_renderer_init, &self) && self.dli_fname) {
+            std::string dir(self.dli_fname);
+            dir.erase(dir.find_last_of('/') + 1);
+            if (!dlopen((dir + "libshadertranslator.so").c_str(), RTLD_NOW | RTLD_LOCAL))
+                logf(1, "libshadertranslator.so: %s", dlerror());
+        }
+    }
+#endif
     g.lib = gfxstream::initLibrary();
     if (!g.lib) {
         logf(0, "initLibrary failed");
@@ -242,7 +278,7 @@ OST_API int ost_renderer_show(void* parent_hwnd, int x, int y, int w, int h,
     if (!r || w <= 0 || h <= 0) return -1;
     // fbw/fbh of showOpenGLSubwindow = the GL viewport in window pixels (the guest frame
     // is stretched over it), not the guest framebuffer size: the whole subwindow here.
-    bool ok = r->showOpenGLSubwindow((FBNativeWindowType)parent_hwnd, x, y, w, h, w, h, 1.0f,
+    bool ok = r->showOpenGLSubwindow((FBNativeWindowType)(uintptr_t)parent_hwnd, x, y, w, h, w, h, 1.0f,
                                      rotation_deg, false /* keep */, false /* visible */);
     if (!ok) logf(0, "showOpenGLSubwindow failed");
     return ok ? 0 : -1;

@@ -57,6 +57,19 @@ def smoke(report: str = "") -> int:
     except ImportError as e:
         ok = False
         lines.append(f"FAIL truststore: {e!r}")
+    # PySide6 6.12 drops a reference to True on every Signal.emit(); only Python 3.12+
+    # (immortal True) survives that. A 3.10 build ran out of True and aborted at exit.
+    from PySide6.QtCore import QObject, Signal
+
+    class _Probe(QObject):
+        sig = Signal(int)
+    probe, before = _Probe(), sys.getrefcount(True)
+    for _ in range(200):
+        probe.sig.emit(1)
+    leaked = before - sys.getrefcount(True) >= 100
+    ok &= not leaked
+    lines.append(f"{'FAIL' if leaked else 'ok  '} Signal.emit keeps True alive "
+                 f"(Python {sys.version.split()[0]})")
     seven = find_7z()
     lines.append(f"{'ok  ' if seven else 'FAIL'} 7-Zip: {seven}")
     ok &= bool(seven)
@@ -70,7 +83,20 @@ def smoke(report: str = "") -> int:
     return 0 if ok else 1
 
 
+def _restore_library_path() -> None:
+    """Frozen on Linux: PyInstaller's bootloader points LD_LIBRARY_PATH at its own bundle, and
+    every child would inherit it (QEMU, adb, xdg-open: system programs picking up our copies
+    of libraries). The loader read it at our own start already, so put the original back."""
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        orig = os.environ.pop("LD_LIBRARY_PATH_ORIG", None)
+        if orig is not None:
+            os.environ["LD_LIBRARY_PATH"] = orig
+        else:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+
+
 def main() -> int:
+    _restore_library_path()
     _use_os_trust_store()
     if len(sys.argv) > 1 and sys.argv[1] == "--smoke":
         return smoke(sys.argv[2] if len(sys.argv) > 2 else "")

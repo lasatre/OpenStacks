@@ -2,6 +2,7 @@
 #   pyinstaller --noconfirm packaging/openstacks.spec      (run from the repo root)
 # packaging/assemble.py then adds qemu/, patches/, tools/ and docs next to the exe.
 import os
+import sys
 
 ROOT = os.path.abspath(os.getcwd())
 FRONTEND = os.path.join(ROOT, "frontend")
@@ -26,13 +27,14 @@ a.binaries = [b for b in a.binaries if not any(d in b[0].lower().replace("\\", "
                                                  for d in _DROP)]
 a.datas = [d for d in a.datas if "/translations/" not in d[0].replace("\\", "/").lower()]
 pyz = PYZ(a.pure)
+WIN = sys.platform == "win32"          # icon + version resource: Windows executables only
 exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
     name="OpenStacks",
-    icon=os.path.join(BRAND, "ico", "openstacks.ico"),
+    icon=os.path.join(BRAND, "ico", "openstacks.ico") if WIN else None,
     console=False,
     version=os.path.join(ROOT, "packaging", "version_info.txt")
-    if os.path.exists(os.path.join(ROOT, "packaging", "version_info.txt")) else None,
+    if WIN and os.path.exists(os.path.join(ROOT, "packaging", "version_info.txt")) else None,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="OpenStacks")

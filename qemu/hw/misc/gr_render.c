@@ -47,9 +47,99 @@
 #include "qemu/main-loop.h"
 #include "qemu/aio.h"
 #include "ui/input.h"
+#ifdef _WIN32
 #include <ole2.h>          /* IDropTarget: files dragged onto the native screen */
-
 /* windows.h comes in via qemu/osdep.h on win32 */
+#else
+#include <dlfcn.h>
+#include <sched.h>
+#endif
+
+/* ================================================================= */
+/* host portability: the transport and the gfxstream backend build on */
+/* every host; BlueStacks' DLL bridge and the Win32 display are        */
+/* Windows-only (#ifdef _WIN32 blocks below), Linux has its own display */
+
+/* GetEnvironmentVariableA semantics: length of the value (0 = unset) */
+static unsigned gr_getenv(const char *name, char *buf, unsigned size)
+{
+#ifdef _WIN32
+    return (unsigned)GetEnvironmentVariableA(name, buf, size);
+#else
+    const char *v = getenv(name);
+    if (!v) return 0;
+    if (size) {
+        g_strlcpy(buf, v, size);
+    }
+    return (unsigned)strlen(v);
+#endif
+}
+
+static uint64_t gr_ms(void)               /* monotonic milliseconds */
+{
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    return (uint64_t)(g_get_monotonic_time() / 1000);
+#endif
+}
+
+static void gr_sleep_ms(unsigned ms)
+{
+#ifdef _WIN32
+    Sleep(ms);
+#else
+    g_usleep((gulong)ms * 1000);
+#endif
+}
+
+static void gr_relax(void)               /* spin-wait hint */
+{
+#ifdef _WIN32
+    YieldProcessor();
+#else
+    __builtin_ia32_pause();
+#endif
+}
+
+static void gr_yield(void)
+{
+#ifdef _WIN32
+    SwitchToThread();
+#else
+    sched_yield();
+#endif
+}
+
+/* a shared library: LoadLibraryExA / dlopen; symbols: GetProcAddress / dlsym */
+static void *gr_dlopen(const char *path)
+{
+#ifdef _WIN32
+    return (void *)LoadLibraryExA(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+#else
+    return dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#endif
+}
+
+static void *gr_dlsym(void *lib, const char *name)
+{
+#ifdef _WIN32
+    return (void *)GetProcAddress((HMODULE)lib, name);
+#else
+    return dlsym(lib, name);
+#endif
+}
+
+static const char *gr_dlerror(char *buf, size_t n)
+{
+#ifdef _WIN32
+    snprintf(buf, n, "err=%lu", (unsigned long)GetLastError());
+#else
+    const char *e = dlerror();
+    snprintf(buf, n, "%s", e ? e : "?");
+#endif
+    return buf;
+}
 
 /* ================================================================= */
 /* log helpers (stderr only, first-fire per condition)               */
@@ -60,7 +150,7 @@ static void gr_log(const char *fmt, ...)
     va_start(ap, fmt);
     /* Phase-11: wall-clock stamp (host ms) so each line can be
      * correlated against the guest's serialGR.log timeline.          */
-    fprintf(stderr, "[gr_render %10u] ", (unsigned)GetTickCount());
+    fprintf(stderr, "[gr_render %10u] ", (unsigned)gr_ms());
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fputc('\n', stderr);
@@ -129,6 +219,7 @@ static void gr_dump(const char *tag, const uint8_t *p, unsigned n)
     gr_log("HEX %s n=%u: %s", tag, n, hex);
 }
 
+#ifdef _WIN32   /* ---- BlueStacks DLL: objA/objB/log-pair stubs ---- */
 /* ================================================================= */
 /* objA / objB / log-pair stubs                                      */
 
@@ -177,6 +268,8 @@ static int gr_logSink(int a, int b, void *c, void *d)
     return 0;
 }
 
+#endif /* _WIN32: DLL stubs */
+
 /* ================================================================= */
 /* module state                                                      */
 
@@ -193,7 +286,7 @@ static int gr_renderer_mode(void)
         probed = 1;
         mode = 1;
         char buf[8];
-        DWORD n = GetEnvironmentVariableA("GR_RENDERER_MODE", buf, sizeof(buf));
+        unsigned n = gr_getenv("GR_RENDERER_MODE", buf, sizeof(buf));
         if (n > 0) {
             int v = atoi(buf);
             if (v == 1 || v == 2) mode = v;
@@ -209,9 +302,9 @@ static int gr_fb_dim(int which)
     static int w, h;
     if (!w) {
         char b[16] = {0};
-        w = GetEnvironmentVariableA("GR_FB_W", b, sizeof(b)) > 0 ? atoi(b) : 0;
+        w = gr_getenv("GR_FB_W", b, sizeof(b)) > 0 ? atoi(b) : 0;
         memset(b, 0, sizeof(b));
-        h = GetEnvironmentVariableA("GR_FB_H", b, sizeof(b)) > 0 ? atoi(b) : 0;
+        h = gr_getenv("GR_FB_H", b, sizeof(b)) > 0 ? atoi(b) : 0;
         if (w < 64 || w > 8192 || h < 64 || h > 8192) {
             w = 1600;
             h = 900;
@@ -326,9 +419,14 @@ typedef struct GrSock {
     struct GrTraceOp *trOps;   /* census, open addressing (GR_TRACE_SLOTS)  */
     uint64_t trLastDump;
     /* --- gfxstream backend (OST_RENDERER=gfxstream): per-connection pump --- */
-    HANDLE   gxThread;         /* pump thread of the current/last session   */
+    QemuThread gxThread;       /* pump thread of the current/last session   */
+    bool     gxThreadOn;
     void    *gxCh;             /* OstChannel* (under S_LOCK)                */
     bool     gxWake;           /* reply readable (channel notify, S_LOCK)   */
+#ifndef _WIN32
+    QemuMutex mtx;             /* S_LOCK (Windows: the exe-layout SRWLOCK)  */
+    QemuCond  cnd;             /* S_WAKE/S_WAIT (Windows: its condvar)      */
+#endif
 } GrSock;
 
 typedef struct GrState {
@@ -341,16 +439,26 @@ typedef struct GrState {
     GrOp q[GR_QSZ];
     unsigned qhead, qtail, qdropped;
 
+#ifdef _WIN32
     HMODULE dll;
+#else
+    void    *dll;
+#endif
     uint8_t *table;
     uint8_t  objA[0x88];
     uint8_t  objB[0x58];
     void    *logPair[2];
-    HWND     hwnd;
+#ifdef _WIN32
+    HWND     hwnd;                   /* the screen window (front-end embeds it) */
+#else
+    unsigned long hwnd;              /* X11 window id (0 = headless)            */
+#endif
 
     GrSock socks[GR_MAX_CID + 1];
 
+#ifdef _WIN32
     fn_rgba_t rgba;
+#endif
     uint8_t  *fbBuf, *fbPrev;
     bool      fbHas;
     uint64_t  lastBmpMs;
@@ -453,8 +561,23 @@ static void syn_producer_thread(void *obj, unsigned long long a2,
 #define S_HPPCNT(s)    (*(uint32_t      *)((s)->raw + 0x148))
 #define S_HPP(s)       ((s)->raw[0x14c])
 #define S_HPP2(s)      ((s)->raw[0x14d])
+#ifdef _WIN32
 #define S_MTXP(s)      ((SRWLOCK              *)((s)->raw + 0x150))
 #define S_CNDP(s)      ((CONDITION_VARIABLE   *)((s)->raw + 0x1a0))
+#endif
+/* sock lock + condvar: the exe-layout SRWLOCK/condvar on Windows (the DLL locks
+ * them too), QemuMutex/QemuCond fields elsewhere */
+#ifdef _WIN32
+#define S_LOCK(s)    AcquireSRWLockExclusive(S_MTXP(s))
+#define S_UNLOCK(s)  ReleaseSRWLockExclusive(S_MTXP(s))
+#define S_WAKE(s)    WakeAllConditionVariable(S_CNDP(s))
+#define S_WAIT(s, ms) SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), (ms), 0)
+#else
+#define S_LOCK(s)    qemu_mutex_lock(&(s)->mtx)
+#define S_UNLOCK(s)  qemu_mutex_unlock(&(s)->mtx)
+#define S_WAKE(s)    qemu_cond_broadcast(&(s)->cnd)
+#define S_WAIT(s, ms) qemu_cond_timedwait(&(s)->cnd, &(s)->mtx, (ms))
+#endif
 #define S_RUN(s)       ((s)->raw[0x1e8])
 #define S_CIDP(s)      ((uint32_t     *)((s)->raw + 0x1ec))
 #define S_RAISED(s)    (*(uint32_t      *)((s)->raw + 0x200))
@@ -533,6 +656,7 @@ static void sock_prepare(GrSock *s, uint32_t cid)
     /* exe: _Mtx_init_in_situ(+0x2a=0x150, mode 2) semantics; ucrt uses
      * SRWLOCK-style internals. Initialize the SRWLOCK + cond regions
      * exactly at those offsets.                                          */
+#ifdef _WIN32
     {
         HMODULE k32 = GetModuleHandleA("kernel32.dll");
         BOOL (WINAPI *initSrw)(SRWLOCK *) =
@@ -544,6 +668,10 @@ static void sock_prepare(GrSock *s, uint32_t cid)
         if (initSrw) initSrw(S_MTXP(s)); else memset(S_MTXP(s), 0, 0x50);
         if (initCond) initCond(S_CNDP(s)); else memset(S_CNDP(s), 0, 8);
     }
+#else
+    qemu_mutex_init(&s->mtx);
+    qemu_cond_init(&s->cnd);
+#endif
     S_RUN(s) = 0;
     S_CIDP(s)[0] = cid;
     S_RAISED(s) = 0;
@@ -594,9 +722,14 @@ static void sock_req_prepare(GrSock *s, uint8_t *mb)
     S_MBOXLEN(s) = ldl_le_p(mb + 0x04);
     S_MBOXDATA(s) = mb + 0x04;
     S_RUN(s) = 1;
-    WakeAllConditionVariable(S_CNDP(s));
+    S_WAKE(s);
 }
 
+/* the vtable-shaped wrapper BlueStacks' DLL calls into; the pure lane and the
+ * gfxstream pump use the same functions */
+typedef struct GrWrapper { const void *vtable; GrSock *sock; } GrWrapper;
+
+#ifdef _WIN32   /* ---- BlueStacks DLL: the exe-replica vtable lane ---- */
 /* ================================================================= */
 /* wrapper vtable - HD-Player HstSocketHost::vftable @0x14096a4d0    */
 /* (Phase-3 full decode; exe slot fns in parentheses)                 */
@@ -630,11 +763,8 @@ static void sock_req_prepare(GrSock *s, uint8_t *mb)
 /*   S_WCNT (+0x04) guest write count (doorbell bytes),              */
 /*   S_RPOS (+0x08) host read rpos. Window = the device aperture.    */
 
-typedef struct GrWrapper { const void *vtable; GrSock *sock; } GrWrapper;
 
 /* SRWLock guards on the exe mutex region (raw+0x150 = S_MTXP)        */
-#define S_LOCK(s)    AcquireSRWLockExclusive(S_MTXP(s))
-#define S_UNLOCK(s)  ReleaseSRWLockExclusive(S_MTXP(s))
 
 static int vt_peek4(void *w, uint32_t needed, void **out, int64_t timeout)
 {
@@ -1056,7 +1186,7 @@ static int vt_createfinish(void *w)
     }
     char env[8];
     memset(env, 0, sizeof(env));
-    DWORD envn = GetEnvironmentVariableA("GR_HPP", env, sizeof(env));
+    unsigned envn = gr_getenv("GR_HPP", env, sizeof(env));
     bool wantHpp = true;                     /* default: arm on pid>0   */
     if (envn > 0 && env[0] == '0') wantHpp = false;
     if (armHpp) {
@@ -1136,6 +1266,8 @@ static void vt_table_init(void)
     g_vt[15] = (void *)vt_stub_i;
 }
 
+#endif /* _WIN32: DLL vtable lane */
+
 /* ================================================================= */
 /* Phase-64 GR_PURE: a faithful HstSocketHost lane (dev/NOTES.md §9). */
 /* Guest contract (libOpenglSystemCommon HstStream decode, NOTES §7):  */
@@ -1153,7 +1285,7 @@ static int gr_verbose(void)
     static int v = -1;
     if (v < 0) {
         char b[4] = {0};
-        v = GetEnvironmentVariableA("GR_VERBOSE", b, sizeof(b)) > 0 && b[0] == '1';
+        v = gr_getenv("GR_VERBOSE", b, sizeof(b)) > 0 && b[0] == '1';
     }
     return v;
 }
@@ -1161,10 +1293,13 @@ static int gr_verbose(void)
 /* OST_RENDERER=gfxstream: gfxstream (ost_renderer.dll) instead of the DLL */
 static int gr_gfx(void)
 {
+#ifndef _WIN32
+    return 1;                        /* BlueStacks' DLL is Windows-only */
+#endif
     static int v = -1;
     if (v < 0) {
         char b[16] = {0};
-        v = GetEnvironmentVariableA("OST_RENDERER", b, sizeof(b)) > 0 &&
+        v = gr_getenv("OST_RENDERER", b, sizeof(b)) > 0 &&
             strcmp(b, "gfxstream") == 0;
     }
     return v;
@@ -1175,7 +1310,7 @@ static int gr_pure(void)
     static int cached = -1;
     if (cached < 0) {
         char buf[8] = {0};
-        DWORD n = GetEnvironmentVariableA("GR_PURE", buf, sizeof(buf));
+        unsigned n = gr_getenv("GR_PURE", buf, sizeof(buf));
         cached = ((n > 0 && buf[0] == '1') || gr_gfx()) ? 1 : 0;   /* gfxstream: pure lane */
         gr_log("GR_PURE=%d", cached);
     }
@@ -1307,7 +1442,7 @@ static uint8_t *pure_take(GrSock *s, uint32_t n, bool advance,
          * disconnect wake it) instead of a Sleep(1) poll, which costs up
          * to a whole Windows timer tick per wait. 1 ms cap = the old
          * accounting for timeouts and the stall watchdog.             */
-        SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), 1, 0);
+        S_WAIT(s, 1);
         waited++;
     }
     S_UNLOCK(s);
@@ -1348,9 +1483,23 @@ static bool hpp_lock(GrSock *s, uint8_t *W)
             return true;
         }
         if (S_DISC(s)) return false;
-        if (i > 100000) SwitchToThread();
-        else YieldProcessor();
+        if (i > 100000) gr_yield();
+        else gr_relax();
     }
+}
+
+/* The state bytes W[1..3] are read by the guest without the lock (it spins on W[3]
+ * and then reads W[2]), so every access is atomic: a plain `W[2] = fin; W[3] = 1;`
+ * may be emitted in either order (GCC 11 stored W[3] first, and a spinning guest
+ * read the stale status 1: "hppRecv: Invalid case! host status=1", app killed). */
+static inline uint8_t hpp_bld(uint8_t *W, int i)
+{
+    return __atomic_load_n(&W[i], __ATOMIC_ACQUIRE);
+}
+
+static inline void hpp_bst(uint8_t *W, int i, uint8_t v)
+{
+    __atomic_store_n(&W[i], v, __ATOMIC_RELEASE);
 }
 
 static inline void hpp_unlock(uint8_t *W)
@@ -1377,7 +1526,7 @@ void gr_render_kick(uint32_t cid)
     S_RUN(s) = 1;
     s->hKicks++;
     S_UNLOCK(s);
-    WakeAllConditionVariable(S_CNDP(s));
+    S_WAKE(s);
 }
 
 /* wait for a kick (or disconnect); bounded so a lost wakeup costs a few ms */
@@ -1386,7 +1535,7 @@ static bool hpp_wait_kick(GrSock *s)
     bool k;
     S_LOCK(s);
     if (!S_RUN(s) && !S_DISC(s)) {
-        SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), HPP_WAITMS, 0);
+        S_WAIT(s, HPP_WAITMS);
     }
     k = S_RUN(s);
     S_RUN(s) = 0;
@@ -1433,7 +1582,7 @@ static int hpp_flush(GrSock *s)
         uint32_t rem = total - pos, n, count, last;
         uint8_t fin, c;
         if (!hpp_lock(s, W)) return 0x68;
-        W[2] = 1;
+        hpp_bst(W, 2, 1);
         hpp_unlock(W);
         if (rem > cap) {
             n = cap; count = N; last = HPP_SLOT; fin = 3;
@@ -1447,10 +1596,10 @@ static int hpp_flush(GrSock *s)
         hpp_st(W, 8, count);
         S_LOCK(s); S_RUN(s) = 0; S_UNLOCK(s);   /* only kicks after this count */
         if (!hpp_lock(s, W)) return 0x68;
-        W[2] = fin;
-        c = W[1];
-        W[3] = 1;
-        if (c == 3) W[1] = 1;
+        hpp_bst(W, 2, fin);
+        c = hpp_bld(W, 1);
+        hpp_bst(W, 3, 1);
+        if (c == 3) hpp_bst(W, 1, 1);
         hpp_unlock(W);
         if (c == 3) hpp_raise(s);
         else if (c == 2) gr_once(0xc1, "hpp cid=%u: reply posted while guest "
@@ -1470,19 +1619,19 @@ static int hpp_flush(GrSock *s)
     while (__atomic_load_n(&W[3], __ATOMIC_ACQUIRE) != 0 && !S_DISC(s)) {
         uint8_t c;
         if (!hpp_lock(s, W)) return 0x68;
-        c = W[1];
-        if (c == 1 || c == 3) W[2] = 2;
-        if (c == 3) W[1] = 1;
+        c = hpp_bld(W, 1);
+        if (c == 1 || c == 3) hpp_bst(W, 2, 2);
+        if (c == 3) hpp_bst(W, 1, 1);
         hpp_unlock(W);
         if (c == 3) hpp_raise(s);
         if (__atomic_load_n(&W[3], __ATOMIC_ACQUIRE) == 0) {
-            if (hpp_lock(s, W)) { W[2] = 0; hpp_unlock(W); }
+            if (hpp_lock(s, W)) { hpp_bst(W, 2, 0); hpp_unlock(W); }
             break;
         }
         if (c == 1 || c == 3) hpp_wait_kick(s);
-        else SwitchToThread();
+        else gr_yield();
         if (!hpp_lock(s, W)) return 0x68;
-        W[2] = 0;
+        hpp_bst(W, 2, 0);
         hpp_unlock(W);
     }
     return S_DISC(s) ? 0x68 : 0;
@@ -1509,20 +1658,20 @@ static uint8_t *hpp_take(GrSock *s, uint32_t need, bool advance, bool atPeek)
         if (head == tail) {
             uint8_t c;
             if (!hpp_lock(s, W)) return NULL;
-            c = W[1];
-            if (c != 3) W[2] = 2;                    /* asleep: kick me */
+            c = hpp_bld(W, 1);
+            if (c != 3) hpp_bst(W, 2, 2);     /* asleep: kick me */
             if (hpp_ld(W, 8) != head && c != 3) {    /* raced a publish */
-                W[2] = 0;
+                hpp_bst(W, 2, 0);
                 hpp_unlock(W);
                 continue;
             }
-            if (c == 2) W[1] = 0;
+            if (c == 2) hpp_bst(W, 1, 0);
             hpp_unlock(W);
             if (c == 2) hpp_raise(s);                /* ring-space / sync waiter */
             if (c != 3) hpp_wait_kick(s);
-            else SwitchToThread();
+            else gr_yield();
             if (!hpp_lock(s, W)) return NULL;
-            W[2] = 0;
+            hpp_bst(W, 2, 0);
             hpp_unlock(W);
             continue;
         }
@@ -1670,7 +1819,7 @@ static int pure_flush(GrSock *s)
         static int ns = -1;
         if (ns < 0) {
             char b[4] = {0};
-            ns = (GetEnvironmentVariableA("GR_NO_NATIVESYNC", b, sizeof(b)) > 0 &&
+            ns = (gr_getenv("GR_NO_NATIVESYNC", b, sizeof(b)) > 0 &&
                   b[0] == '1');
             gr_log("GR_NO_NATIVESYNC=%d", ns);
         }
@@ -1716,7 +1865,7 @@ static int pure_flush(GrSock *s)
                 S_UNLOCK(s);
                 return -1;
             }
-            SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), 1, 0);
+            S_WAIT(s, 1);
             if (++spins == 3000) {
                 gr_log("pure send cid=%u waiting >3 s for the guest READ "
                        "(staged %u B, sent %u)", s->cid, total, pos);
@@ -1784,6 +1933,7 @@ static int pvt_createfinish(void *w)
     return 0;
 }
 
+#ifdef _WIN32   /* the DLL calls the pure lane through this vtable */
 static void *g_vt_pure[16];
 
 /* logging stubs for the slots the pure lane does not implement */
@@ -1813,6 +1963,8 @@ static void vt_pure_table_init(void)
     g_vt_pure[10] = (void *)pvt_createfinish;
 }
 
+#endif /* _WIN32: pure-lane vtable */
+
 /* ================================================================== */
 /* Stream tracer (GR_TRACE=1): which renderControl / GLES / Vulkan     */
 /* calls the guest really sends, per connection. Needed to map the     */
@@ -1827,7 +1979,7 @@ static bool gr_trace_on(void)
     static int on = -1;
     if (on < 0) {
         char b[4] = {0};
-        on = GetEnvironmentVariableA("GR_TRACE", b, sizeof(b)) > 0 && b[0] == '1';
+        on = gr_getenv("GR_TRACE", b, sizeof(b)) > 0 && b[0] == '1';
     }
     return on == 1;
 }
@@ -1837,7 +1989,7 @@ static void gr_trace_reset(GrSock *s)
     s->trSkip = 0x100;                   /* BlueStacks' handshake record   */
     s->trLeft = s->trHdrN = 0;
     s->trBroken = false;
-    s->trLastDump = GetTickCount64();
+    s->trLastDump = gr_ms();
     if (s->trOps) {
         memset(s->trOps, 0, GR_TRACE_SLOTS * sizeof(GrTraceOp));
     }
@@ -1928,8 +2080,8 @@ static void gr_trace_feed(GrSock *s, const uint8_t *p, uint32_t n)
         gr_trace_count(s, op, size);
         s->trLeft = size - 8;
     }
-    if (GetTickCount64() - s->trLastDump > 30000) {   /* long-lived clients */
-        s->trLastDump = GetTickCount64();
+    if (gr_ms() - s->trLastDump > 30000) {   /* long-lived clients */
+        s->trLastDump = gr_ms();
         gr_trace_dump(s, "periodic");
     }
 }
@@ -1950,7 +2102,7 @@ static void pure_write(GrSock *s, uint8_t *mb, uint32_t len)
     s->pWriteLen = len;
     s->pWrites++;
     S_UNLOCK(s);
-    WakeAllConditionVariable(S_CNDP(s));
+    S_WAKE(s);
     sock_req_prepare(s, mb);
     if (gr_verbose()) {
         hexn(h, win ? win : (uint8_t *)"", len < 16 ? len : 16);
@@ -1965,7 +2117,7 @@ static void pure_read(GrSock *s, uint32_t want)
     s->pReadWant = want;
     s->pReads++;
     S_UNLOCK(s);
-    WakeAllConditionVariable(S_CNDP(s));
+    S_WAKE(s);
     if (gr_verbose()) gr_log("pread cid=%u want=%u", s->cid, want);
 }
 
@@ -1975,6 +2127,7 @@ static int gr_pairarm(void);     /* Phase-61 GR_PAIRARM knob   */
 static int gr_windump(void);     /* Phase-62 GR_WINDUMP knob   */
 static void post_install(void);   /* forward decl (exe readpix lane) */
 
+#ifdef _WIN32   /* ---- BlueStacks DLL: legacy responder lanes ---- */
 /* ================================================================= */
 /* Phase-10 renderControl responder (gr-side "stub reply-source")     */
 /*                                                                   */
@@ -2119,6 +2272,8 @@ static int rcOpArgCount(uint32_t op)
     }
 }
 
+#endif /* _WIN32: legacy responders (part 1) */
+
 static const char *rcOpName(uint32_t op)
 {
     switch (op) {
@@ -2190,6 +2345,8 @@ static const char *rcOpName(uint32_t op)
     }
 }
 
+#ifdef _WIN32   /* ---- legacy responders (part 2) ---- */
+
 /* Stage a blob reply ([bufSize bytes][u32 ret]) — per the .so dec:
  * rcGetConfigs/rcReadColorBuffer read the blob DIRECTLY into the
  * caller's buffer (no length prefix) then a 4-byte scratch ret.     */
@@ -2201,7 +2358,7 @@ static int grRcVer(void)
     static int cached = -2;             /* -2 = not yet probed        */
     if (cached == -2) {
         char buf[16] = "";
-        DWORD n = GetEnvironmentVariableA("GR_RCVER", buf, sizeof(buf));
+        unsigned n = gr_getenv("GR_RCVER", buf, sizeof(buf));
         cached = (n > 0 && n < sizeof(buf)) ? atoi(buf) : 2;
         if (cached < 1 || cached > 9) cached = 2;
         gr_log("rcGetRendererVersion gate reply = %d (GR_RCVER)", cached);
@@ -2638,24 +2795,15 @@ static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win)
     rcOpApply(op, s, win + GR_WIN_RBASE);
 }
 
-/* ================================================================== */
-/* Phase-75 native display: the DLL presents straight into a child   */
-/* window ("BlueStacksApp") it creates inside the HWND we pass to     */
-/* PgaServerInit - the HD-Player path, GPU-only, no pixel readback.   */
-/* The front-end embeds our top window (found by pid + class) and the */
-/* input arrives here: mouse -> abs pointer + left button (bstvmsg's  */
-/* touch handler), keys -> PS/2 scancodes, both injected on the main  */
-/* loop via a oneshot BH (thread-safe; the BH runs under the BQL).    */
+#endif /* _WIN32: legacy responders (part 2) */
 
-static bool wndclass_registered;
-static HWND g_child;                 /* the DLL's present window       */
-static WNDPROC g_childProc;          /* its original wndproc           */
-static bool g_mouseDown;
+/* ================================================================= */
+/* input, rotation and frame state shared by every display backend    */
 
 typedef struct GrInputEv {
-    int kind;                        /* 0 = pointer, 1 = key           */
+    int kind;                        /* 0 = pointer, 1 = key (qnum), 2 = key (evdev) */
     int x, y, down;                  /* pointer: 0..0x7fff, button     */
-    int qnum;                        /* key: QEMU key number           */
+    int qnum;                        /* key: QEMU key number / Linux evdev code */
 } GrInputEv;
 
 static void gr_input_bh(void *opaque)
@@ -2668,6 +2816,8 @@ static void gr_input_bh(void *opaque)
             qemu_input_queue_btn(NULL, INPUT_BUTTON_LEFT, e->down != 0);
         }
         qemu_input_event_sync();
+    } else if (e->kind == 2) {
+        qemu_input_event_send_key_linux(NULL, (unsigned)e->qnum, e->down != 0);
     } else {
         qemu_input_event_send_key_number(NULL, e->qnum, e->down != 0);
     }
@@ -2682,21 +2832,20 @@ static void gr_input_post(GrInputEv ev)
 }
 
 static int g_orient;                 /* Phase-77: Surface.ROTATION_0..3 */
+/* where gx_show_in put the guest's picture inside the display window (letterbox) */
+static int g_cx, g_cy, g_cw, g_ch;
 
-static void gr_pointer(HWND h, LPARAM l, int down)
+/* pointer at (x, y) in a view of w x h pixels -> the guest's absolute pointer, in the
+ * UNROTATED panel frame (HD-Player inverts the rotation on the host, EXE 0x1402ec260) */
+static void gr_pointer_view(int x, int y, int w, int h, int down)
 {
-    RECT rc;
-    int w, hh, x = (short)LOWORD(l), y = (short)HIWORD(l);
     int64_t px, py, rx, ry, M = INPUT_EVENT_ABS_MAX;
-    GetClientRect(h, &rc);
-    w = rc.right > 1 ? rc.right : 1;
-    hh = rc.bottom > 1 ? rc.bottom : 1;
+    w = w > 1 ? w : 1;
+    h = h > 1 ? h : 1;
     x = x < 0 ? 0 : x >= w ? w - 1 : x;
-    y = y < 0 ? 0 : y >= hh ? hh - 1 : y;
+    y = y < 0 ? 0 : y >= h ? h - 1 : y;
     px = (int64_t)x * M / (w - 1 ? w - 1 : 1);       /* view fraction, 0..M */
-    py = (int64_t)y * M / (hh - 1 ? hh - 1 : 1);
-    /* Phase-77: the guest wants coordinates in the UNROTATED panel frame;
-     * HD-Player inverts the rotation on the host (EXE 0x1402ec260).     */
+    py = (int64_t)y * M / (h - 1 ? h - 1 : 1);
     switch (qatomic_read(&g_orient)) {
     case 1:  rx = M - py; ry = px;     break;
     case 2:  rx = M - px; ry = M - py; break;
@@ -2704,6 +2853,55 @@ static void gr_pointer(HWND h, LPARAM l, int down)
     default: rx = px;     ry = py;     break;
     }
     gr_input_post((GrInputEv){ .kind = 0, .x = (int)rx, .y = (int)ry, .down = down });
+}
+
+static bool g_readback = true;
+static unsigned g_frameSeq;          /* Phase-67: bumps on every new frame */
+
+/* [dll+0xb25670] post hook state */
+typedef struct GrPostCtx { uint8_t *buf; unsigned posts; } GrPostCtx;
+static GrPostCtx g_postctx;
+
+/* Phase-67: live display accessor (see gr_render.h) */
+const uint8_t *gr_render_frame(unsigned *seq, int *w, int *h)
+{
+    if (seq) *seq = qatomic_read(&g_frameSeq);
+    if (w) *w = GR_W;
+    if (h) *h = GR_H;
+    return (g.ready && g.fbHas) || g_postctx.posts ? g.fbBuf : NULL;
+}
+
+/* display interface: the host window the gfxstream display lives in.
+ * Win32 below (the front-end embeds it by HWND), X11 in
+ * gr_display_x11.c.inc (embedded by XID).                            */
+static bool grd_start(void);         /* UI thread + window; true = ready */
+static void grd_kick_layout(void);   /* (re)run gx_show_in on the UI thread */
+static void grd_orientation(int o);  /* rotation changed: title + relayout */
+static void gx_show_in(void *native, int W, int H);
+static void gx_set_rotation(int o);
+static bool g_recreate;              /* UI thread: our window died, build a new one */
+
+#ifdef _WIN32   /* ---- Win32 display (+ the DLL's readback lane) ---- */
+/* ================================================================== */
+/* Phase-75 native display: the DLL presents straight into a child   */
+/* window ("BlueStacksApp") it creates inside the HWND we pass to     */
+/* PgaServerInit - the HD-Player path, GPU-only, no pixel readback.   */
+/* The front-end embeds our top window (found by pid + class) and the */
+/* input arrives here: mouse -> abs pointer + left button (bstvmsg's  */
+/* touch handler), keys -> PS/2 scancodes, both injected on the main  */
+/* loop via a oneshot BH (thread-safe; the BH runs under the BQL).    */
+
+static bool wndclass_registered;
+static HWND g_child;                 /* the DLL's present window       */
+static WNDPROC g_childProc;          /* its original wndproc           */
+static bool g_mouseDown;
+
+
+static void gr_pointer(HWND h, LPARAM l, int down)
+{
+    RECT rc;
+    GetClientRect(h, &rc);
+    gr_pointer_view((short)LOWORD(l), (short)HIWORD(l), rc.right, rc.bottom, down);
 }
 
 /* returns true when the message was an input message we consumed */
@@ -2867,8 +3065,6 @@ static void gr_register_drop(HWND h)
 
 static void gx_layout(HWND parent);
 static void gx_recreate_window(void);
-static bool g_recreate;   /* UI thread: our window died, build a new one */
-static void gx_set_rotation(int o);
 
 static LRESULT CALLBACK gr_child_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -2968,17 +3164,10 @@ static LRESULT CALLBACK gr_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
  * The window title "OpenStacks display r<o>" tells the front-end.        */
 typedef void (*PgaSetRotation_t)(float, float, int);
 
-void gr_render_set_orientation(int o)
+/* the display layer: title + relayout on the UI thread */
+static void grd_orientation(int o)
 {
-    if (o < 0 || o > 3) return;
-    qatomic_set(&g_orient, o);
-    if (gr_gfx()) {
-        gx_set_rotation(o);
-    } else if (g.ready && TAB(0x40)) {
-        ((PgaSetRotation_t)TAB(0x40))(1.0f, 1.0f, o);
-    }
     if (g.hwnd) PostMessageW(g.hwnd, WM_APP + 1, (WPARAM)o, 0);
-    gr_log("orientation -> %d (%d deg)", o, o * 90);
 }
 
 static HWND gr_make_window(int w, int h)
@@ -3000,7 +3189,7 @@ static HWND gr_make_window(int w, int h)
     /* GR_SHOW=1: a normal top-level window (debug / standalone use).
      * Otherwise a hidden borderless popup the front-end reparents.   */
     char b[4] = {0};
-    bool show = GetEnvironmentVariableA("GR_SHOW", b, sizeof(b)) > 0 && b[0] == '1';
+    bool show = gr_getenv("GR_SHOW", b, sizeof(b)) > 0 && b[0] == '1';
     DWORD style = show ? WS_OVERLAPPEDWINDOW : WS_POPUP;
     RECT r = { 0, 0, w, h };
     AdjustWindowRect(&r, style, FALSE);
@@ -3045,12 +3234,6 @@ static DWORD WINAPI gr_ui_thread(LPVOID arg)
     return 0;
 }
 
-static bool g_readback = true;
-static unsigned g_frameSeq;          /* Phase-67: bumps on every new frame */
-
-/* [dll+0xb25670] post hook state */
-typedef struct GrPostCtx { uint8_t *buf; unsigned posts; } GrPostCtx;
-static GrPostCtx g_postctx;
 
 /* exe callback hook slot used by the DLL's own readpixel thread:
  *   [dll+0xb25670] = post(void *dst, u32 bytes, u32 start, u32 end) set
@@ -3073,14 +3256,6 @@ static void gr_pixPost(void *dst, unsigned long long a2,
     qatomic_inc(&g_frameSeq);
 }
 
-/* Phase-67: live display accessor (see gr_render.h) */
-const uint8_t *gr_render_frame(unsigned *seq, int *w, int *h)
-{
-    if (seq) *seq = qatomic_read(&g_frameSeq);
-    if (w) *w = GR_W;
-    if (h) *h = GR_H;
-    return (g.ready && g.fbHas) || g_postctx.posts ? g.fbBuf : NULL;
-}
 
 /* register our frame consumer + start the DLL's readpixel loop       */
 static void post_install(void)
@@ -3161,7 +3336,7 @@ static DWORD WINAPI readpix_engine(LPVOID arg)
         memcpy(g.fbPrev, g.fbBuf, GR_FB_BYTES);
         g.fbHas = true;
         if (!changed) continue;
-        uint64_t now = (uint64_t)GetTickCount64();
+        uint64_t now = (uint64_t)gr_ms();
         if (now - lastMs < 2000) continue;
         lastMs = now;
         if (bmp_write("screen_pga.bmp", g.fbBuf, GR_W, GR_H)) {
@@ -3182,6 +3357,46 @@ static void readpix_spawn(void)
     }
 }
 
+static bool grd_start(void)
+{
+    g_uiReady = CreateEventW(NULL, TRUE, FALSE, NULL);
+    CloseHandle(CreateThread(NULL, 0, gr_ui_thread, NULL, 0, NULL));
+    WaitForSingleObject(g_uiReady, 10000);
+    if (!g.hwnd) {
+        gr_log("CreateWindowExW failed err=%lu", (unsigned long)GetLastError());
+    }
+    return g.hwnd != NULL;
+}
+
+static void grd_kick_layout(void)
+{
+    if (g.hwnd) PostMessageW(g.hwnd, WM_TIMER, 1, 0);    /* gr_layout on the UI thread */
+}
+#else
+#include "gr_display_x11.c.inc"
+#endif /* display */
+
+/* Phase-77 rotation (docs/re/rotation_spec.md): the guest reports
+ * Surface.ROTATION_0..3 via hcal method 7. BlueStacks' DLL rotates through
+ * grApiInit table slot +0x40, gfxstream through its display rotation; the
+ * display layer retitles ("OpenStacks display r<o>": the front-end reads it)
+ * and re-lays out.                                                        */
+void gr_render_set_orientation(int o)
+{
+    if (o < 0 || o > 3) return;
+    qatomic_set(&g_orient, o);
+    if (gr_gfx()) {
+        gx_set_rotation(o);
+    }
+#ifdef _WIN32
+    else if (g.ready && TAB(0x40)) {
+        ((PgaSetRotation_t)TAB(0x40))(1.0f, 1.0f, o);
+    }
+#endif
+    grd_orientation(o);
+    gr_log("orientation -> %d (%d deg)", o, o * 90);
+}
+
 /* ================================================================= */
 /* gfxstream backend (OST_RENDERER=gfxstream, docs/renderer_plan.md)  */
 /* ost_renderer.dll = gfxstream's host renderer behind a C API         */
@@ -3198,7 +3413,7 @@ typedef struct GxConfig {
 } GxConfig;
 
 static struct {
-    HMODULE dll;
+    void *dll;
     int  (*init)(const GxConfig *);
     int  (*show)(void *, int, int, int, int, float);
     void (*set_rotation)(float);
@@ -3211,6 +3426,7 @@ static struct {
     void (*ch_stop)(void *);
     void (*ch_close)(void *);
     void (*drop_window)(void);
+    void (*repaint)(void);           /* optional: re-present the last frame */
     bool shown;
 } gx;
 
@@ -3246,17 +3462,32 @@ static void gx_set_rotation(int o)
     if (gx.set_rotation && g.ready) gx.set_rotation(gx_rot_deg(o));
 }
 
+#ifndef _WIN32
+/* the display window died (and gfxstream's subwindow with it): forget the subwindow */
+static void gx_drop_window(void)
+{
+    gx.shown = false;
+    if (gx.drop_window) gx.drop_window();
+}
+
+/* the window was uncovered or mapped again: the guest only posts frames when its
+ * screen changes, so re-present the last one (else the old pixels stay on screen) */
+static void gx_repaint(void)
+{
+    if (gx.repaint && gx.shown && g.ready) gx.repaint();
+}
+#endif
+
 /* UI thread (WM_SIZE / WM_TIMER via gr_layout): gfxstream creates its
  * display as a child of our window on the calling thread, so this must
  * be the thread that pumps that window's messages.                    */
-static void gx_layout(HWND parent)
+static void gx_show_in(void *native, int W, int H)
 {
-    RECT rc;
+    struct { long right, bottom; } rc = { W, H };
     int o = qatomic_read(&g_orient);
     int fw = (o & 1) ? GR_H : GR_W, fh = (o & 1) ? GR_W : GR_H;   /* guest as shown */
     int cw, ch;
     if (!g.ready || !gx.show) return;
-    GetClientRect(parent, &rc);
     if (rc.right <= 0 || rc.bottom <= 0) return;
     /* letterbox: the largest rect of the guest's aspect, centred (gfxstream
      * stretches the frame over its whole subwindow); our window paints the bars */
@@ -3272,14 +3503,25 @@ static void gx_layout(HWND parent)
         ch = rc.bottom;
     }
     if (cw < 1 || ch < 1) return;
-    if (gx.show(parent, (rc.right - cw) / 2, (rc.bottom - ch) / 2, cw, ch,
-                gx_rot_deg(o)) == 0) {
+    g_cx = (int)(rc.right - cw) / 2;
+    g_cy = (int)(rc.bottom - ch) / 2;
+    g_cw = cw;
+    g_ch = ch;
+    if (gx.show(native, g_cx, g_cy, cw, ch, gx_rot_deg(o)) == 0) {
         if (!gx.shown) {
-            gr_log("gfxstream display in %p (%ldx%ld, content %dx%d)", (void *)parent,
+            gr_log("gfxstream display in %p (%ldx%ld, content %dx%d)", native,
                    rc.right, rc.bottom, cw, ch);
         }
         gx.shown = true;
     }
+}
+
+#ifdef _WIN32
+static void gx_layout(HWND parent)
+{
+    RECT rc;
+    GetClientRect(parent, &rc);
+    gx_show_in((void *)parent, rc.right, rc.bottom);
     InvalidateRect(parent, NULL, TRUE);  /* repaint the bars */
 }
 
@@ -3354,20 +3596,45 @@ static LONG CALLBACK gx_veh(struct _EXCEPTION_POINTERS *ep)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+#endif /* _WIN32: window layout, recreate, crash locator */
+
 #define GX_SYM(f, name) \
-    ((*(FARPROC *)&gx.f = GetProcAddress(gx.dll, name)) != NULL)
+    ((*(void **)&gx.f = gr_dlsym(gx.dll, name)) != NULL)
+
+#ifndef _WIN32
+/* exit() after QEMU's cleanup: leave before the libraries' static destructors. They
+ * tear down Mesa/gfxstream state while gfxstream's render and post threads still run
+ * (Windows' ExitProcess stops the other threads first; Linux does not), which crashes
+ * or hangs the exit. Registered once the renderer is loaded, so it runs before them. */
+static void gx_fast_exit(int status, void *arg)
+{
+    (void)arg;
+    fflush(NULL);
+    _exit(status);
+}
+#endif
 
 static bool gx_init_host(void)
 {
-    char path[MAX_PATH] = {0}, api[8] = {0};
-    if (!GetEnvironmentVariableA("OST_GFXSTREAM_DLL", path, sizeof(path))) {
+    char path[1024] = {0}, api[8] = {0}, err[256];
+    if (!gr_getenv("OST_GFXSTREAM_DLL", path, sizeof(path))) {
+#ifdef _WIN32
         strcpy(path, "ost_renderer.dll");    /* next to qemu (DLL search path) */
+#else
+        /* next to qemu (dlopen only searches LD_LIBRARY_PATH and the system dirs) */
+        ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 32);
+        char *slash = n > 0 ? memrchr(path, '/', n) : NULL;
+        if (slash) {
+            strcpy(slash + 1, "libost_renderer.so");
+        } else {
+            strcpy(path, "libost_renderer.so");
+        }
+#endif
     }
-    gx.dll = LoadLibraryExA(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+    gx.dll = gr_dlopen(path);
     if (!gx.dll) {
-        gr_log("LoadLibraryExA(%s) FAILED err=%lu", path, (unsigned long)GetLastError());
-        fprintf(stderr, "[gr_render] cannot load %s (err=%lu)\n", path,
-                (unsigned long)GetLastError());
+        gr_log("load %s FAILED: %s", path, gr_dlerror(err, sizeof(err)));
+        fprintf(stderr, "[gr_render] cannot load %s (%s)\n", path, err);
         g.failed = true;
         return false;
     }
@@ -3384,41 +3651,45 @@ static bool gx_init_host(void)
         g.failed = true;
         return false;
     }
+    GX_SYM(repaint, "ost_renderer_repaint");
     /* gfxstream only uses the API level for colour buffer ref counting: BlueStacks'
      * gralloc creates, opens and closes each buffer up front (in SurfaceFlinger)
      * and keeps using it, i.e. the pre-O rule "create holds a reference". With
      * O+ (>= 26) rules gfxstream frees it at that first close.               */
     GxConfig cfg = { 1, GR_W, GR_H, 25, gx_log, NULL };
-    if (GetEnvironmentVariableA("OST_GUEST_API", api, sizeof(api)) > 0 && atoi(api) > 0) {
+    if (gr_getenv("OST_GUEST_API", api, sizeof(api)) > 0 && atoi(api) > 0) {
         cfg.guest_api_level = atoi(api);
     }
+#ifdef _WIN32
     AddVectoredExceptionHandler(1, gx_veh);   /* logs where a renderer crash happened */
+#endif
     if (gx.init(&cfg) != 0) {
         gr_log("ost_renderer_init(%dx%d) failed", GR_W, GR_H);
         g.failed = true;
         return false;
     }
+#ifndef _WIN32
+    on_exit(gx_fast_exit, NULL);             /* after init: Mesa etc. are loaded now */
+#endif
     g.fbBuf = (uint8_t *)calloc(1, GR_FB_BYTES);
     g.fbPrev = (uint8_t *)calloc(1, GR_FB_BYTES);
     {
         char rb[4] = {0};
-        g_readback = !(GetEnvironmentVariableA("GR_READBACK", rb, sizeof(rb)) > 0 &&
+        g_readback = !(gr_getenv("GR_READBACK", rb, sizeof(rb)) > 0 &&
                        rb[0] == '0');
     }
-    if (g_readback) gx.set_frame_cb(gx_frame, NULL);
+#ifdef _WIN32
     vt_table_init();
     vt_pure_table_init();
-
-    g_uiReady = CreateEventW(NULL, TRUE, FALSE, NULL);
-    CloseHandle(CreateThread(NULL, 0, gr_ui_thread, NULL, 0, NULL));
-    WaitForSingleObject(g_uiReady, 10000);
-    if (!g.hwnd) {
-        gr_log("CreateWindowExW failed err=%lu", (unsigned long)GetLastError());
+#endif
+    if (!grd_start()) {
         g.failed = true;
         return false;
     }
+    /* after grd_start: a display without a window turns the readback on */
+    if (g_readback) gx.set_frame_cb(gx_frame, NULL);
     g.ready = true;
-    PostMessageW(g.hwnd, WM_TIMER, 1, 0);    /* gr_layout on the UI thread */
+    grd_kick_layout();
     gr_log("READY: gfxstream backend (%s, %dx%d, guest API %d, readback %s)", path,
            GR_W, GR_H, cfg.guest_api_level, g_readback ? "on" : "off");
     return true;
@@ -3430,7 +3701,7 @@ static void gx_notify(void *user)        /* renderer thread, channel lock held *
     S_LOCK(s);
     s->gxWake = true;
     S_UNLOCK(s);
-    WakeAllConditionVariable(S_CNDP(s));
+    S_WAKE(s);
 }
 
 /* pure lane: every guest byte available now (carry, then the window);
@@ -3477,8 +3748,8 @@ static uint32_t gx_take_hpp(GrSock *s, const uint8_t **out)
         tail = hpp_ld(W, 8);
     }
     if (n && head == hpp_ld(W, 8) && hpp_lock(s, W)) {
-        uint8_t c = W[1];                /* ring empty: wake a ring-space waiter */
-        if (c == 2) W[1] = 0;
+        uint8_t c = hpp_bld(W, 1);   /* ring empty: wake a ring-space waiter */
+        if (c == 2) hpp_bst(W, 1, 0);
         hpp_unlock(W);
         if (c == 2) hpp_raise(s);
     }
@@ -3492,24 +3763,24 @@ static void gx_idle(GrSock *s)
     if (s->hpp) {
         uint8_t *W = GR_WIN(s->cid), c;
         if (!W || !hpp_lock(s, W)) return;
-        c = W[1];
-        if (c != 3) W[2] = 2;                /* host asleep: kick me */
+        c = hpp_bld(W, 1);
+        if (c != 3) hpp_bst(W, 2, 2);    /* host asleep: kick me */
         if (hpp_ld(W, 8) != hpp_ld(W, 4)) {  /* raced a publish */
-            W[2] = 0;
+            hpp_bst(W, 2, 0);
             hpp_unlock(W);
             return;
         }
-        if (c == 2) W[1] = 0;
+        if (c == 2) hpp_bst(W, 1, 0);
         hpp_unlock(W);
         if (c == 2) hpp_raise(s);
         S_LOCK(s);
         if (!s->gxWake && !S_RUN(s) && !S_DISC(s)) {
-            SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), c == 3 ? 1 : HPP_WAITMS, 0);
+            S_WAIT(s, c == 3 ? 1 : HPP_WAITMS);
         }
         S_RUN(s) = 0;
         S_UNLOCK(s);
         if (hpp_lock(s, W)) {
-            W[2] = 0;
+            hpp_bst(W, 2, 0);
             hpp_unlock(W);
         }
         return;
@@ -3517,7 +3788,7 @@ static void gx_idle(GrSock *s)
     S_LOCK(s);
     if (!s->gxWake && !S_DISC(s) && S_WCNT(s) <= S_RPOS(s) &&
         s->pCarryLen == s->pCarryPos) {
-        SleepConditionVariableSRW(S_CNDP(s), S_MTXP(s), 10, 0);
+        S_WAIT(s, 10);
     }
     S_UNLOCK(s);
 }
@@ -3535,7 +3806,7 @@ static bool gx_log_on(void)
     static int v = -1;
     if (v < 0) {
         char b[4] = {0};
-        v = GetEnvironmentVariableA("OST_GX_LOG", b, sizeof(b)) > 0 && b[0] == '1';
+        v = gr_getenv("OST_GX_LOG", b, sizeof(b)) > 0 && b[0] == '1';
     }
     return v == 1;
 }
@@ -3577,11 +3848,17 @@ static void gx_fr_feed(GrSock *s, GxFr *f, const uint8_t *p, uint32_t n)
     }
 }
 
-static DWORD WINAPI gx_pump(LPVOID arg)
+#ifdef _WIN32
+#define GX_VTABLE g_vt_pure
+#else
+#define GX_VTABLE NULL
+#endif
+
+static void *gx_pump(void *arg)
 {
     GxFr fr = { .need = 8 };
     GrSock *s = (GrSock *)arg;
-    GrWrapper w = { g_vt_pure, s };
+    GrWrapper w = { GX_VTABLE, s };
     void *ch = NULL;
     uint8_t *rbuf = (uint8_t *)malloc(0x10000);
     uint64_t in = 0, out = 0, replies = 0;
@@ -3662,43 +3939,38 @@ done:
     gr_log("gfxstream cid=%u closed (%s): in %llu B, out %llu B, %llu replies", s->cid,
            why, (unsigned long long)in, (unsigned long long)out,
            (unsigned long long)replies);
-    return 0;
+    return NULL;
 }
 
 /* OP_CONNECT: a fresh session on this cid gets its own pump */
 static bool gx_connect(GrSock *s, uint32_t cid)
 {
-    if (s->gxThread) {                   /* the previous session's pump */
+    if (s->gxThreadOn) {                 /* the previous session's pump */
         S_LOCK(s);
         S_DISC(s) = 1;
         if (s->gxCh) gx.ch_stop(s->gxCh);
         S_UNLOCK(s);
-        WakeAllConditionVariable(S_CNDP(s));
-        if (WaitForSingleObject(s->gxThread, 5000) != WAIT_OBJECT_0) {
-            gr_log("gfxstream cid=%u: previous pump did not exit", cid);
-        }
-        CloseHandle(s->gxThread);
-        s->gxThread = NULL;
+        S_WAKE(s);
+        qemu_thread_join(&s->gxThread);
+        s->gxThreadOn = false;
     }
     sock_prepare(s, cid);
     if (!s->wrapper) {                   /* marks the sock as initialised */
         s->wrapper = calloc(1, sizeof(GrWrapper));
         if (s->wrapper) {
-            ((GrWrapper *)s->wrapper)->vtable = g_vt_pure;
+            ((GrWrapper *)s->wrapper)->vtable = GX_VTABLE;
             ((GrWrapper *)s->wrapper)->sock = s;
         }
     }
     s->gxWake = false;
-    s->gxThread = CreateThread(NULL, 0, gx_pump, s, 0, NULL);
-    if (!s->gxThread) {
-        gr_log("gfxstream cid=%u: CreateThread failed", cid);
-        return false;
-    }
+    qemu_thread_create(&s->gxThread, "gx-pump", gx_pump, s, QEMU_THREAD_JOINABLE);
+    s->gxThreadOn = true;
     ++g.connectOK;
     gr_log("connect cid=%u OK (gfxstream)", cid);
     return true;
 }
 
+#ifdef _WIN32   /* ---- BlueStacks DLL: VEH + init ---- */
 /* ================================================================= */
 /* VEH: capture violations from renderer-side threads                */
 
@@ -3827,7 +4099,7 @@ static bool gr_init_dll_and_host(void)
     {   /* Phase-75: GR_READBACK=0 = native display only (no 30 fps GPU->CPU
          * copy; the VNC console then stays blank). Default on.         */
         char rb[4] = {0};
-        g_readback = !(GetEnvironmentVariableA("GR_READBACK", rb, sizeof(rb)) > 0 &&
+        g_readback = !(gr_getenv("GR_READBACK", rb, sizeof(rb)) > 0 &&
                        rb[0] == '0');
         gr_log("readback %s", g_readback ? "on (VNC console)" : "off (native only)");
     }
@@ -3842,6 +4114,15 @@ static bool gr_init_dll_and_host(void)
     gr_log("READY (HandConn at +0x88)");
     return true;
 }
+
+#else
+static bool gr_init_dll_and_host(void)
+{
+    if (g.ready) return true;
+    if (g.failed) return false;
+    return gx_init_host();       /* only the open renderer exists off Windows */
+}
+#endif /* _WIN32: VEH + DLL init */
 
 /* ================================================================= */
 /* worker dispatch (exe doorbell semantics + mbox/IRQ plumbing)      */
@@ -3871,6 +4152,7 @@ static void worker_dispatch_op(const GrOp *op)
             mbox_set(mb, 0, 0);
             break;
         }
+#ifdef _WIN32
         /* sock+0x208 in the exe is a shared refcount (exe + DLL each
          * hold one); the OLD render thread may still be finishing its
          * protocol with the same object. NEVER free or re-calloc an
@@ -3905,6 +4187,11 @@ static void worker_dispatch_op(const GrOp *op)
                cid, gr_renderer_mode() == 1 ? "1:vlcn" : "2:dx9");
         mbox_set(mb, 0, 0);
         break;
+#else
+        (void)rc;
+        mbox_set(mb, 0, 0);
+        break;
+#endif
     }
     case OP_DISCONNECT:
         /* exe semantics (0x1402ab270 case 2): signal sock destruction
@@ -3914,7 +4201,7 @@ static void worker_dispatch_op(const GrOp *op)
         S_DISC(s) = 1;
         if (s->gxCh) gx.ch_stop(s->gxCh);      /* wakes a pump blocked in gfxstream */
         S_UNLOCK(s);
-        WakeAllConditionVariable(S_CNDP(s));   /* HPP waiters exit (0x68) */
+        S_WAKE(s);   /* HPP waiters exit (0x68) */
         if (gr_trace_on()) gr_trace_dump(s, "close");
         if (s->hpp) {
             char ob[48 * 20 + 1];
@@ -3939,6 +4226,9 @@ static void worker_dispatch_op(const GrOp *op)
             pure_write(s, mb, len);
             return;
         }
+#ifndef _WIN32
+        break;
+#else
         sock_req_prepare(s, mb);
         /* Phase-9: DOORBELL-SCOPED framing (the Phase-3/5 shape, now
          * intended): each sf flush chunk is its own exe-visible record
@@ -4339,11 +4629,15 @@ write_done:                            /* Phase-57: dropped-record exit */
         S_UNLOCK(s);
         stl_le_p(mb + 0x08, 0);
         break;
+#endif
     case OP_READ: {
         if (gr_pure()) {                 /* Phase-64: completed by the DLL's hstSend */
             pure_read(s, len);
             return;
         }
+#ifndef _WIN32
+        break; }
+#else
         uint32_t wantLen, pending, served;
         bool batchLane;
         const char *serveSrc = "exe";   /* Phase-42: src of served bytes */
@@ -4940,6 +5234,7 @@ write_done:                            /* Phase-57: dropped-record exit */
         }
         stl_le_p(mb + 0x08, 0);
         break; }
+#endif
     case OP_HYPERCALL:
         mbox_set(mb, 0, 0);
         break;
@@ -4957,16 +5252,17 @@ write_done:                            /* Phase-57: dropped-record exit */
 /* ================================================================= */
 /* worker thread                                                     */
 
-static DWORD g_workerPad;
+static unsigned g_workerPad;
 
 static void *gr_worker(void *arg)
 {
     (void)arg;
     {
         char b[8] = {0};
-        if (GetEnvironmentVariableA("GR_WORKER_PAD", b, sizeof(b)) > 0) {
-            g_workerPad = (DWORD)atoi(b);
+        if (gr_getenv("GR_WORKER_PAD", b, sizeof(b)) > 0) {
+            g_workerPad = (unsigned)atoi(b);
         }
+#ifdef _WIN32
         /* 1 ms scheduler/timer granularity for every remaining wait in
          * this process (winmm, loaded dynamically: no new link dep). */
         HMODULE wm = LoadLibraryA("winmm.dll");
@@ -4974,6 +5270,9 @@ static void *gr_worker(void *arg)
         tbp_t tbp = wm ? (tbp_t)(void *)GetProcAddress(wm, "timeBeginPeriod") : NULL;
         gr_log("worker: pad=%lu ms, timeBeginPeriod(1)=%u", (unsigned long)g_workerPad,
                tbp ? tbp(1) : 99u);
+#else
+        gr_log("worker: pad=%u ms", g_workerPad);
+#endif
     }
     gr_log("worker thread running");
     gr_init_dll_and_host();
@@ -4987,7 +5286,7 @@ static void *gr_worker(void *arg)
         g.qhead = (g.qhead == GR_QSZ - 1) ? 0 : g.qhead + 1;
         qemu_mutex_unlock(&g.lock);
         worker_dispatch_op(&op);
-        if (g_workerPad) Sleep(g_workerPad);
+        if (g_workerPad) gr_sleep_ms(g_workerPad);
         /* Phase-50 (result-consumption pad): the guest reads the per-cid
          * mbox result [mbox+4] only AFTER its ack flag fires. Any LATER
          * op's completion landing in that wake->read window clobbers the
@@ -5058,7 +5357,7 @@ static int gr_echo_mode(void)
     static int cached = -1;
     if (cached < 0) {
         char buf[8] = {0};
-        DWORD n = GetEnvironmentVariableA("GR_ECHO_MODE", buf, sizeof(buf));
+        unsigned n = gr_getenv("GR_ECHO_MODE", buf, sizeof(buf));
         cached = (n > 0 && buf[0] >= '0' && buf[0] <= '2') ? buf[0] - '0' : 2;
         gr_log("GR_ECHO_MODE=%d", cached);
     }
@@ -5073,7 +5372,7 @@ static int gr_pairarm(void)
     static int cached = -1;
     if (cached < 0) {
         char buf[8] = {0};
-        DWORD n = GetEnvironmentVariableA("GR_PAIRARM", buf, sizeof(buf));
+        unsigned n = gr_getenv("GR_PAIRARM", buf, sizeof(buf));
         cached = (n > 0 && buf[0] == '0') ? 0 : 1;
         gr_log("GR_PAIRARM=%d", cached);
     }
@@ -5087,7 +5386,7 @@ static int gr_windump(void)
     static int cached = -1;
     if (cached < 0) {
         char buf[8] = {0};
-        DWORD n = GetEnvironmentVariableA("GR_WINDUMP", buf, sizeof(buf));
+        unsigned n = gr_getenv("GR_WINDUMP", buf, sizeof(buf));
         cached = (n > 0 && buf[0] == '1') ? 1 : 0;
         gr_log("GR_WINDUMP=%d", cached);
     }
@@ -5097,7 +5396,7 @@ static int gr_windump(void)
 bool gr_render_enabled(void)
 {
     char buf[8];
-    DWORD n = GetEnvironmentVariableA("GR_BRIDGE", buf, sizeof(buf));
+    unsigned n = gr_getenv("GR_BRIDGE", buf, sizeof(buf));
     if (g.devEnabled) return true;
     if (n > 0) return true;
     return false;

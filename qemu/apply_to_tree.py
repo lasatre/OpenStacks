@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_TREE = os.path.normpath(os.path.join(HERE, "..", "deps", "qemu-11.1.0"))
 
 SOURCES = ["bst_vmsg.c", "bst_pgaipc.c", "bst_audio.c", "hvmem.c", "vmmdev.c",
-           "gr_render.c", "gr_render.h"]
+           "gr_render.c", "gr_render.h", "gr_display_x11.c.inc"]
 
 KCONFIG_BLOCK = """
 config BST_VMSG

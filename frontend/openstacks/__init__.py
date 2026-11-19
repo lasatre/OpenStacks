@@ -13,5 +13,13 @@ Deliberately NO Qt imports here, so CLI tools (screenshots, adb, engine
 helper scripts) can import openstacks.* pieces without a display.
 """
 
+import os as _os
+import sys as _sys
+
 __version__ = "0.1.0"
 __all__ = ["__version__"]
+
+# Linux: the native screen is QEMU's X11 window embedded by XID, so Qt must be on X11
+# too (XWayland on Wayland desktops). Before any QApplication exists.
+if _sys.platform.startswith("linux"):
+    _os.environ.setdefault("QT_QPA_PLATFORM", "xcb")

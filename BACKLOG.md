@@ -75,22 +75,24 @@ brackets). Move an item to NOTES when it lands.
   installed. Lawnchair 15 on Pie64 needs a build that fixes Android 9. System apps (e.g.
   com.bluestacks.settings) would need a Root.vhd-level patch path [10r].
 
-## Linux host (open-source gfxstream renderer)
-The renderer swap is done on Windows (docs/renderer_plan.md): gr_render has a gfxstream backend
-(`renderer/`, ost_renderer.dll) that runs all three images without BlueStacks. Left for Linux:
-1. Build gfxstream + the adapter as a .so (CMake, clang/gcc); libshadertranslator.so comes in
-   Google's Linux emulator package (same pinned-download approach).
-2. Vulkan guests: the Vulkan encoder is not mapped or tested yet (GL only so far).
-3. Compatibility gaps not hit yet: BlueStacks' rcGLShaderWorkaround / rcGLHostInfo, the
-   texture-cache GLES opcodes (2478-2480), GLES 3.2 extras (2496+).
-4. Port gr_render's Win32 parts (HWND window, SRWLOCK/CONDITION_VARIABLE, LoadLibrary,
-   timeBeginPeriod) to QEMU primitives and SDL/X11; most of this disappears with gfxstream.
-5. KVM instead of WHPX: native kvm-clock (drop the VMware TSC leaf), AVX without the
-   CPUID 0xD patch, audio via PulseAudio/PipeWire, build.cmd becomes a shell script.
-6. Front-end: native-window embedding works on X11 (QWindow.fromWinId with an XID). Wayland
-   can't embed foreign windows, so share frames (dmabuf / shared Vulkan image) or render in the
-   front-end process.
-7. Assets: the image downloader already works without a BlueStacks install, so it covers Linux.
+## Linux host
+Ported (docs/linux_port_plan.md: QEMU on KVM, libost_renderer.so, the X11 display window, the
+front-end, the AppImage, CI). Left:
+1. Native Wayland: a foreign window can't be embedded there, so share frames (dmabuf / shared
+   Vulkan image) or render in the front-end process; until then the player runs on XWayland.
+2. File drops onto the native screen: XDND targets the player's top-level window, so Qt
+   should route them to the screen's parent widgets (Windows needs QEMU's OLE forwarding);
+   check on a real desktop.
+3. The pop-out window's aspect-locked resizing (Windows: WM_SIZING; X11: size hints).
+4. Guest clock on KVM: the VMware TSC leaf works; kvm-clock in the guest kernel not checked.
+5. Video playback (patch 0004's DMA path) not checked on Linux yet.
 
-Rejected alternatives: the DLL under Wine (cross-process window and GPU plumbing, fragile), and
-writing our own renderer (far too large).
+## Open renderer (gfxstream), both hosts
+1. Vulkan guests: the Vulkan encoder is not mapped or tested yet (GL only so far).
+2. Compatibility gaps not hit yet: BlueStacks' rcGLShaderWorkaround / rcGLHostInfo, the
+   texture-cache GLES opcodes (2478-2480), GLES 3.2 extras (2496+).
+3. The guest's HPP transport gives up on replies slower than ~1 s (seen with llvmpipe): software
+   GL hosts can't run 3D games.
+
+Rejected alternatives: BlueStacks' DLL under Wine (cross-process window and GPU plumbing,
+fragile), and writing our own renderer (far too large).

@@ -399,6 +399,9 @@ class NativeDisplay(QWidget):
         self._layout()
         self._container.show()
         _show(hwnd)
+        # the waiting text stays in the letterbox strips otherwise (X11 keeps our old
+        # pixels: nothing else asks for a repaint once the window is embedded)
+        self.update()
 
     def stop(self) -> None:
         """This display is done (its tab closed): stop polling and hand the window back.
@@ -418,6 +421,7 @@ class NativeDisplay(QWidget):
             self._container.setParent(None)
             self._container.deleteLater()
         self._container, self._win, self._hwnd = None, None, 0
+        self.update()
 
     # -- layout / paint -------------------------------------------------------------
     def rotation(self) -> int:

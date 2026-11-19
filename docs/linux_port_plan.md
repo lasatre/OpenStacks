@@ -89,7 +89,7 @@ XWayland), a real GPU driver, sound through PipeWire/PulseAudio, image download 
 Checked in WSL2:
 - QEMU 11.1 + all devices on KVM; Pie64, Android 11 and 13 boot through gfxstream on GLX.
 - `st_probe` against the Linux `libshadertranslator.so` (same ABI as Windows), smoke test.
-- The 3D Unity test game runs on the D3D12 GPU; video playback not checked yet.
+- The 3D Unity test game runs on the D3D12 GPU (WSL) and on real AMD hardware, video included.
 - X11 display window: shows the guest, rotation, letterbox, clicks, typing, embedding,
   destroy -> recreate, save-set release; the player embeds it, re-adopts a running instance
   after the player died, stops it.
@@ -111,8 +111,27 @@ Findings along the way (each fixed and committed):
 - **PulseAudio**: QEMU refuses to start when its server is unreachable; the engine falls back
   to `-audiodev none` (with a warning) when no PulseAudio socket answers.
 
-Not done / backlog: file drops onto the screen (XDND goes to the player's top-level window, so
-Qt should handle them; unchecked), the pop-out's aspect-locked resizing (Windows' WM_SIZING),
+Found on real hardware (Fedora 45 KDE, XWayland, AMD; each fixed and committed):
+- **HPP store order**: the guest reads the shared window's state words (W[1] guest state, W[2]
+  host state, W[3] reply ready) without the lock. GCC stored W[3] before W[2], so the guest
+  saw "reply ready" with a stale host state and Unity games (Toca Boca, Dinosaur Evolution)
+  died on a white screen. Those words now go through acquire/release atomics (Windows too).
+- **PySide6 6.12's `Signal.emit()`** drops a reference to `True` on every call. Harmless where
+  `True` is immortal (Python 3.12+); a 3.10 build ran it out and aborted at exit ("free():
+  invalid size", KDE's crash dialog). The front-end is built with Python 3.12, and the smoke
+  test checks for the leak.
+- **Port check**: Linux `bind()` fails on a port in TIME_WAIT without `SO_REUSEADDR` (QEMU's
+  slirp sets it), so a just-stopped instance looked "already running" for a minute.
+- **Drops**: a Qt window container forwards drops to the embedded window, which ignores them;
+  the container no longer accepts drops, so APKs dropped on the screen reach the player.
+- **Repaints**: hiding and showing the screen (tab switches) left stale pixels until the next
+  frame; the display window now repaints on Expose of itself and of its subwindows
+  (`ost_renderer_repaint`). The player also repaints after embedding (the waiting text stayed
+  in the letterbox strips).
+- **Process tracking** reads the instance from QEMU's argv (`/proc/<pid>/cmdline`,
+  `CommandLineToArgvW` on Windows) instead of a regex over the command line.
+
+Not done / backlog: the pop-out's aspect-locked resizing (Windows' WM_SIZING),
 native Wayland.
 
 ## Risks

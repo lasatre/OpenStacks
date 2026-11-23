@@ -41,6 +41,7 @@ Exec=OpenStacks
 Icon=openstacks
 Categories=Utility;Emulator;
 Terminal=false
+X-AppImage-Version={version}
 """
 
 APPRUN = """#!/bin/sh
@@ -140,12 +141,18 @@ def qemu_linux(q: Path, qbuild: Path, exe: Path, strip: str) -> bool:
     return True
 
 
-def appimage(out: Path, app_name: str, version: str, tool: str, runtime: str) -> int:
-    """release/OpenStacks.AppDir -> release/OpenStacks-<version>-x86_64.AppImage."""
+def appimage(out: Path, app_name: str, version: str, tool: str, runtime: str,
+             update_info: str = "") -> int:
+    """release/OpenStacks.AppDir -> release/OpenStacks-<version>-x86_64.AppImage.
+
+    update_info is embedded for AppImage updaters (AppManager, AppImageUpdate, Gear Lever...),
+    e.g. gh-releases-zsync|owner|repo|latest|OpenStacks-*x86_64.AppImage.zsync; appimagetool
+    also writes the matching <AppImage>.zsync when zsyncmake is on PATH (published with the
+    release: delta updates)."""
     appdir = out / f"{app_name}.AppDir"
     (appdir / "AppRun").write_text(APPRUN, encoding="utf-8")
     (appdir / "AppRun").chmod(0o755)
-    (appdir / "openstacks.desktop").write_text(DESKTOP, encoding="utf-8")
+    (appdir / "openstacks.desktop").write_text(DESKTOP.format(version=version), encoding="utf-8")
     icon = ROOT / "brand" / "png" / "openstacks-app-icon-512.png"
     if not icon.exists():
         print(f"missing {icon}", file=sys.stderr)
@@ -156,9 +163,18 @@ def appimage(out: Path, app_name: str, version: str, tool: str, runtime: str) ->
     cmd = [tool, "--no-appstream"]
     if runtime:
         cmd += ["--runtime-file", runtime]
+    if update_info:
+        cmd += ["--updateinformation", update_info]
     env = dict(os.environ, ARCH="x86_64", APPIMAGE_EXTRACT_AND_RUN="1")
     subprocess.run(cmd + [str(appdir), str(target)], check=True, env=env)
     print(f"{target}: {target.stat().st_size / 2**20:.0f} MiB")
+    if update_info:
+        zs = target.with_name(target.name + ".zsync")
+        if not zs.exists() and Path(target.name + ".zsync").exists():   # written to the cwd
+            shutil.move(target.name + ".zsync", zs)
+        print(f"update information: {update_info}")
+        print(f"{zs}" if zs.exists() else "no .zsync written (zsyncmake not on PATH): "
+              "updaters will download whole AppImages")
     return 0
 
 
@@ -175,6 +191,7 @@ def main() -> int:
                     "copy of QEMU (Windows: default MSYS2 ucrt64 strip if present)")
     ap.add_argument("--appimagetool", default="", help="Linux: build the AppImage with it")
     ap.add_argument("--runtime", default="", help="Linux: AppImage runtime file (offline)")
+    ap.add_argument("--update-info", default="", help="Linux: AppImage update information")
     a = ap.parse_args()
     version = a.version.lstrip("vV")
 
@@ -222,7 +239,7 @@ def main() -> int:
                                 "zip", root_dir=out, base_dir="OpenStacks")
         print(z)
     if not WINDOWS and a.appimagetool:
-        return appimage(out, "OpenStacks", version, a.appimagetool, a.runtime)
+        return appimage(out, "OpenStacks", version, a.appimagetool, a.runtime, a.update_info)
     return 0
 
 

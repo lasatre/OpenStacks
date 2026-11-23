@@ -12,7 +12,8 @@
 #  (.venv-linux/), WORK_DIR (dist/, build-pyi/, release/: the repo). Tool downloads (pinned, sha256-checked) are cached in DL_DIR
 #  (deps/packaging/). Output: release/OpenStacks-<version>-x86_64.AppImage.
 #  Needs what qemu/build.sh and renderer/build_gfxstream.sh need, plus Python >= 3.12
-#  with venv and a shared libpython (PYTHON, default python3.12), patchelf, file, curl.
+#  with venv and a shared libpython (PYTHON, default python3.12), patchelf, file, curl,
+#  zsync (zsyncmake: the .zsync for AppImage updaters, see UPDATE_INFO).
 #  Not 3.10/3.11: PySide6 6.12's Signal.emit() drops a reference to True on every call,
 #  harmless only where True is immortal (3.12+); on 3.10 True ran out and the app
 #  aborted ("free(): invalid size", usually at exit).
@@ -30,6 +31,9 @@ VENV="${VENV:-$ROOT/.venv-linux}"
 PYTHON="${PYTHON:-python3.12}"
 WORK="${WORK_DIR:-$ROOT}"          # dist/, build-pyi/, release/ go here
 DL="${DL_DIR:-$ROOT/deps/packaging}"
+# AppImage update information (AppManager, AppImageUpdate & co. check the latest GitHub
+# release); set it empty for none. The .zsync next to the AppImage needs zsyncmake (zsync).
+UPDATE_INFO="${UPDATE_INFO-gh-releases-zsync|lasatre|OpenStacks|latest|OpenStacks-*x86_64.AppImage.zsync}"
 
 # pinned packaging tools
 APPIMAGETOOL_URL=https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
@@ -81,7 +85,7 @@ tar -xJf "$DL/7z-linux-x64.tar.xz" -C "$DL" 7zzs
 python3 packaging/assemble.py --version "$VERSION" --qemu "$QEMU_BUILD" \
   --dist "$WORK/dist/OpenStacks" --out "$WORK/release" \
   --sevenzip "$DL/7zzs" --appimagetool "$DL/appimagetool-x86_64.AppImage" \
-  --runtime "$DL/runtime-x86_64"
+  --runtime "$DL/runtime-x86_64" --update-info "$UPDATE_INFO"
 
 # smoke test: the frozen front-end in the AppDir, no display, a throwaway data dir
 SMOKE_HOME="$(mktemp -d)"

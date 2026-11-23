@@ -83,6 +83,9 @@ Linux:
 1. Download the latest `OpenStacks-<version>-x86_64.AppImage` from Releases.
 2. `chmod +x OpenStacks-*.AppImage` and run it.
 
+The AppImage carries update information, so AppImage managers (AppManager, Gear Lever,
+AppImageUpdate) can update it from the latest release, downloading only what changed.
+
 Then:
 
 3. Click **New**, name the instance and pick an Android version.

@@ -205,7 +205,7 @@ jobs:
             build-essential ccache ninja-build pkg-config python3-venv python3-tomli \
             libglib2.0-dev libpixman-1-dev libslirp-dev libfdt-dev zlib1g-dev libpulse-dev \
             clang cmake git libx11-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev \
-            patchelf file curl xz-utils \
+            patchelf file curl xz-utils zsync \
             libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1
 
@@ -244,6 +244,16 @@ jobs:
       - name: Build QEMU, the open renderer, the front-end, the AppImage
         run: STAMP_VERSION=1 PYTHON="${{ steps.py.outputs.python-path }}" bash packaging/build_linux.sh "$VERSION"
 
+      # AppImage updaters (AppManager, AppImageUpdate, Gear Lever...) read the embedded
+      # update information and fetch the .zsync from the latest release
+      - name: Update information and .zsync
+        run: |
+          f="release/OpenStacks-$VERSION-x86_64.AppImage"
+          test -s "$f.zsync" || { echo "$f.zsync missing"; exit 1; }
+          info=$(objcopy -O binary --only-section=.upd_info "$f" /dev/stdout | tr -d '\0')
+          echo "update information: $info"
+          case "$info" in "gh-releases-zsync|"*) ;; *) echo "no update information"; exit 1;; esac
+
       - name: ccache stats
         run: ccache -s
 
@@ -252,6 +262,15 @@ jobs:
           name: OpenStacks-${{ env.VERSION }}-x86_64.AppImage
           path: release/OpenStacks-${{ env.VERSION }}-x86_64.AppImage
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type == 'tag'
+        with:
+          name: release-linux
+          path: |
+            release/OpenStacks-${{ env.VERSION }}-x86_64.AppImage
+            release/OpenStacks-${{ env.VERSION }}-x86_64.AppImage.zsync
+          if-no-files-found: error
+          retention-days: 3
 
   release:
     if: github.ref_type == 'tag'
@@ -264,7 +283,7 @@ jobs:
           path: out
       - uses: actions/download-artifact@v4
         with:
-          name: OpenStacks-${{ needs.linux.outputs.version }}-x86_64.AppImage
+          name: release-linux
           path: out
       - name: GitHub release
         uses: softprops/action-gh-release@v2
@@ -272,5 +291,6 @@ jobs:
           files: |
             out/OpenStacks-${{ needs.linux.outputs.version }}-win64.zip
             out/OpenStacks-${{ needs.linux.outputs.version }}-x86_64.AppImage
+            out/OpenStacks-${{ needs.linux.outputs.version }}-x86_64.AppImage.zsync
           draft: true
           generate_release_notes: true

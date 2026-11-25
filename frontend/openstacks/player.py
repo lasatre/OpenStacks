@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWi
 from .adb import Adb, AdbError, BootState
 from .config import Instance, REPO_ROOT, Store
 from .console import ConsolePane
+from .notify import NotificationWatch, describe, notifier
 from .display import (AdbInputBridge, InputBridge, InputWorker, VncDisplay,
                       VncInputBridge)
 from .qemu_engine import ENGINE as qemu_engine
@@ -302,6 +303,12 @@ class PlayerPane(QWidget):
         self.boot_watch.stateUpdated.connect(self._on_boot_state)
         self.boot_watch.start()
 
+        # Android notifications -> the desktop (QEMU logs them, see notify.py)
+        self.notes: Optional[NotificationWatch] = None
+        if inst.notifications:
+            self.notes = NotificationWatch(qemu_engine.qemu_log_path(inst.name), parent=self)
+            self.notes.received.connect(self._on_notification)
+
     # -- wiring ------------------------------------------------------------------
     def start(self) -> None:
         """(Re)start VNC streaming + adb poll for this instance."""
@@ -320,6 +327,9 @@ class PlayerPane(QWidget):
     def shutdown(self) -> None:
         t, w, b, c, d = (self.vnc_thread, self.input_worker, self.boot_watch,
                          self.console, self.diagnostics)
+        if self.notes is not None:
+            self.notes.stop()
+            self.notes = None
         self.vnc_thread, self.input_worker, self.boot_watch = None, None, None
         if self.native:
             self.display.stop()      # stop polling + hand the renderer window back first
@@ -700,6 +710,15 @@ class PlayerPane(QWidget):
         th.start()
         pane._adb_threads.append(th)
 
+    def _on_notification(self, n: dict) -> None:
+        title, body = describe(n, self.inst.name)
+        shown = notifier().show(title, body)
+        from . import activity
+        what = " - ".join(p for p in (str(n.get("appName") or n.get("packageName") or "?"),
+                                      body.replace("\n", ": ")) if p)
+        activity.append(self.inst.name, f"notification: {what}"
+                        + ("" if shown else " (repeat, not shown again)"))
+
     def flash(self, text: str) -> None:
         self.statusChanged.emit(text)
         from . import activity
@@ -741,7 +760,15 @@ class PlayerWindow(QMainWindow):
         self._bg_threads: list[_CallThread] = []
         self._build_sidebar()
         self.setAcceptDrops(True)       # files dropped anywhere on the player -> the VM
+        notifier().clicked.connect(self._bring_to_front)     # an Android notification
         self.statusBar().showMessage("OpenStacks player ready - launch an instance from the manager.")
+
+    def _bring_to_front(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     # -- drag & drop: Explorer -> current instance -------------------------------------
     def dragEnterEvent(self, ev) -> None:

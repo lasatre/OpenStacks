@@ -39,17 +39,33 @@ if [ -f "$BUILD/build.ninja" ] && ! grep -q "$QEMU_TREE" "$BUILD/build.ninja"; t
   echo "[build] $BUILD belongs to another QEMU tree: reconfiguring"
   rm -rf "$BUILD"; mkdir -p "$BUILD"
 fi
-if [ ! -f "$BUILD/build.ninja" ]; then
+# Optional libraries are off unless needed: configure enables whatever -dev packages the
+# build machine has, and each one becomes a library the user's distro must provide under
+# the same name (the GitHub runner's libbz2 made 0.3.0 need Debian's libbz2.so.1.0, which
+# Fedora lacks). packaging/build_linux.sh checks the result against an allowlist.
+CONF=(--target-list=x86_64-softmmu
+      --enable-kvm --enable-slirp --audio-drv-list=pa
+      --disable-werror --disable-docs --disable-tools --disable-sdl --disable-gtk
+      --disable-curses --disable-vnc-sasl --disable-vnc-jpeg --disable-png
+      --disable-bzip2 --disable-zstd --disable-lzo --disable-snappy --disable-lzfse
+      --disable-gcrypt --disable-nettle --disable-gnutls --disable-selinux
+      --disable-curl --disable-libssh --disable-seccomp --disable-cap-ng --disable-libudev
+      --disable-libusb --disable-usb-redir --disable-numa --disable-rbd --disable-libiscsi
+      --disable-libnfs --disable-vde --disable-linux-io-uring --disable-libkeyutils
+      --disable-u2f --disable-smartcard --disable-opengl --disable-virglrenderer
+      --disable-spice --disable-brlapi --disable-libdw --disable-xkbcommon --disable-libcbor
+      --disable-blkio --disable-libpmem --disable-libdaxctl --disable-fuse
+      --disable-fuse-lseek --disable-capstone --disable-af-xdp
+      ${QEMU_CONFIGURE_EXTRA:-})
+# (re)configure when the flags changed, not only in a fresh build dir
+if [ ! -f "$BUILD/build.ninja" ] || [ "$(cat "$BUILD/.ost-configure" 2>/dev/null)" != "${CONF[*]}" ]; then
   cc=gcc; command -v ccache >/dev/null && cc="ccache gcc"
-  if ! (cd "$BUILD" && "$QEMU_TREE/configure" --target-list=x86_64-softmmu --cc="$cc" \
-      --enable-kvm --enable-slirp --audio-drv-list=pa \
-      --disable-werror --disable-docs --disable-tools --disable-sdl --disable-gtk \
-      --disable-curses --disable-vnc-sasl --disable-vnc-jpeg \
-      ${QEMU_CONFIGURE_EXTRA:-}); then
+  if ! (cd "$BUILD" && "$QEMU_TREE/configure" --cc="$cc" "${CONF[@]}"); then
     echo "configure FAILED - see the messages above"
-    rm -f "$BUILD/build.ninja"
+    rm -f "$BUILD/build.ninja" "$BUILD/.ost-configure"
     exit 1
   fi
+  echo "${CONF[*]}" > "$BUILD/.ost-configure"
 fi
 
 ninja -C "$BUILD" qemu-system-x86_64 -j "$(nproc)"

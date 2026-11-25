@@ -62,6 +62,17 @@ for f in qemu-system-x86_64 libost_renderer.so libshadertranslator.so libc++.so;
 done
 "$QEMU_BUILD/qemu-system-x86_64" -device help | grep -q bstpgaipc \
   || { echo "QEMU lacks the OpenStacks devices"; exit 1; }
+# QEMU's libraries: bundled (assemble.py BUNDLE_LIBS) or on every desktop under this name.
+# Anything else is a library the build machine happened to have (see qemu/build.sh).
+QEMU_LIBS_OK=" libc.so.6 libm.so.6 libz.so.1 libglib-2.0.so.0 libgobject-2.0.so.0
+  libgio-2.0.so.0 libgmodule-2.0.so.0 libpulse.so.0 libpixman-1.so.0 libslirp.so.0 libfdt.so.1 "
+for lib in $(readelf -d "$QEMU_BUILD/qemu-system-x86_64" 2>/dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+  case "$(echo $QEMU_LIBS_OK | sed 's/^/ /; s/$/ /')" in
+    *" $lib "*) ;;
+    *) echo "QEMU links $lib: not on the allowlist (disable it in qemu/build.sh or bundle it)"
+       exit 1;;
+  esac
+done
 
 # front-end
 "$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 12))'   || { echo "$PYTHON: Python 3.12+ needed (see the header)"; exit 1; }

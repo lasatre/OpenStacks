@@ -161,6 +161,7 @@ class Instance:
     renderer: str = "gfxstream"        # gfxstream (open) | bluestacks (libOpenglRender.dll)
     volume: int = 100                  # host-side volume 0..100 (player side bar)
     muted: bool = False
+    notifications: bool = True         # show Android notifications on the desktop
     image: str = "Pie64"               # engine image: Pie64 (Android 9), Rvc64 (11), Nougat*
     magisk: bool = False               # rooted with Magisk (player Root button; magisk.py)
     is_default: bool = False

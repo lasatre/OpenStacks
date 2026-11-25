@@ -58,6 +58,22 @@ def apply(app) -> None:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
         except (AttributeError, OSError):
             pass
+        _register_app_id()
+
+
+def _register_app_id() -> None:
+    """Name and icon for APP_ID (per user). Without them Windows heads notifications with the
+    raw id ("OpenStacks.OpenStacks") and no icon: the id has no Start-menu shortcut."""
+    try:
+        import winreg
+        icon = paths.brand("png", "openstacks-icon-128.png")
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                              rf"Software\Classes\AppUserModelId\{APP_ID}") as k:
+            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "OpenStacks")
+            if icon.exists():
+                winreg.SetValueEx(k, "IconUri", 0, winreg.REG_SZ, str(icon.resolve()))
+    except OSError:
+        pass
 
 
 def accent(dark: bool | None = None) -> QColor:

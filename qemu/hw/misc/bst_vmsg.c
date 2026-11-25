@@ -244,6 +244,32 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
         if (o <= 3) {
             gr_render_set_orientation((int)o);
         }
+    } else if (method == 44) {
+        /* hcallOnAppNotificationReceivedRpc: an Android notification for the
+         * desktop. [44][msglen][len][JSON, len bytes] with JSON
+         * {"packageName","appName","contentTitle","contentText",
+         *  "mSecsFromEpochUTC",...}. Logged as ONE line, which the player
+         * picks up from logs/<name>.qemu.log and shows (notify.py). Control
+         * bytes are blanked so the line stays one line; UTF-8 passes through. */
+        uint32_t n = MIN(buf_len, (uint32_t)(VMSG_IN_SIZE - 0x0c));
+        const uint8_t *j = in + 0x0c;
+        GString *line = g_string_sized_new(n + 32);
+        while (n && j[n - 1] == 0) {
+            n--;
+        }
+        g_string_append(line, "[bstvmsg] notification ");
+        for (uint32_t i = 0; i < n; i++) {
+            g_string_append_c(line, j[i] < 0x20 ? ' ' : (char)j[i]);
+        }
+        g_string_append_c(line, '\n');
+        fputs(line->str, stderr);
+        fflush(stderr);
+        g_string_free(line, TRUE);
+        stl_le_p(out + 0, 0);
+        if (buf_len + 8 <= c->out_size) {
+            stl_le_p(out + buf_len, 0);
+            stl_le_p(out + buf_len + 4, 0);
+        }
     } else if (method == 1 && buf_len != 0 && buf_len <= (VMSG_OUT_SIZE - 0x100u)) {
         memset(out, 0, c->out_size);
         resp_len = (uint32_t)MIN(props_len, buf_len);

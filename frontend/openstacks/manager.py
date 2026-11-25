@@ -17,7 +17,7 @@ from typing import Optional
 
 from PySide6.QtCore import QRect, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QProgressDialog,
                                QFormLayout, QHBoxLayout, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem,
@@ -154,6 +154,10 @@ class InstanceEditDialog(QDialog):
         else:
             self.cb_renderer.hide()
 
+        self.ck_notes = QCheckBox("Show Android notifications on the desktop")
+        self.ck_notes.setChecked(bool(getattr(i, "notifications", True)))
+        form.addRow("Notifications", self.ck_notes)
+
         self.ed_append = QLineEdit(i.extra_append)
         self.ed_append.setPlaceholderText("extra kernel args / KEY=VALUE props for -append")
         form.addRow("Extra -append", self.ed_append)
@@ -176,6 +180,7 @@ class InstanceEditDialog(QDialog):
         inst.devices = self.ed_devices.text().strip()
         inst.extra_append = self.ed_append.text().strip()
         inst.renderer = self.cb_renderer.currentData()
+        inst.notifications = self.ck_notes.isChecked()
         if self.cb_image.isEnabled():
             inst.image = self.cb_image.currentData()
 

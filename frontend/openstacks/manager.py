@@ -561,8 +561,10 @@ class ManagerWindow(QMainWindow):
         th.wait()
         log("ready" if result["ok"] else f"FAILED: {result['err'] or 'cancelled'}")
         if not result["ok"]:
-            QMessageBox.warning(self, "Image not ready",
-                                f"{image}: {result['err'] or 'cancelled'}")
+            box = QMessageBox(QMessageBox.Warning, "Image not ready",
+                              f"{image}: {result['err'] or 'cancelled'}", QMessageBox.Ok, self)
+            box.setTextInteractionFlags(Qt.TextSelectableByMouse)   # URL / path to copy
+            box.exec()
         return result["ok"]
 
     def _set_default(self) -> None:

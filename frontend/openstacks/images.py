@@ -23,10 +23,13 @@ import importlib.util
 import json
 import os
 import shutil
+import socket
 import struct
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from dataclasses import dataclass
@@ -142,6 +145,66 @@ def _check(cancel: Optional[Callable[[], bool]]) -> None:
 
 
 # -- 1. download ----------------------------------------------------------------------
+class _TrackRedirects(urllib.request.HTTPRedirectHandler):
+    """Remembers the last URL a request was redirected to (the CDN 301s to a mirror)."""
+
+    def __init__(self) -> None:
+        self.last_url = ""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self.last_url = newurl
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _probe(host: str, port: int = 443, timeout: float = 10.0) -> list[str]:
+    """Try a TCP connect to every address of host:port; one 'address: result' line each."""
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as e:
+        return [f"{host}: name lookup failed ({e})"]
+    lines, seen = [], set()
+    for family, kind, proto, _canon, addr in infos:
+        if addr[0] in seen or len(seen) >= 6:
+            continue
+        seen.add(addr[0])
+        s = socket.socket(family, kind, proto)
+        s.settimeout(timeout)
+        try:
+            s.connect(addr)
+            lines.append(f"{addr[0]}: ok")
+        except OSError as e:
+            lines.append(f"{addr[0]}: {e.strerror or e}")
+        finally:
+            s.close()
+    return lines
+
+
+def download_hint(info: "ImageInfo", cache: Path = CACHE_DIR) -> str:
+    return (f"You can download it another way (a browser, a download manager) from\n"
+            f"{info.url}\nand save it as\n"
+            f"{cache / f'{info.name}-{info.build}.exe'}\n"
+            f"OpenStacks uses that file the next time you try.")
+
+
+def _open(req: urllib.request.Request, info: "ImageInfo", cache: Path, timeout: float):
+    """urlopen, but a connection failure names the host and what every address of it did:
+    urllib only reports the error from the last address it tried (often an unroutable
+    IPv6 one), which hides the real problem."""
+    track = _TrackRedirects()
+    opener = urllib.request.build_opener(track)
+    try:
+        return opener.open(req, timeout=timeout)
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, OSError) as e:
+        reason = getattr(e, "reason", e)
+        host = urllib.parse.urlsplit(track.last_url or req.full_url).hostname or "?"
+        probe = "\n".join("  " + line for line in _probe(host))
+        raise IOError(f"could not download from {host}: {reason}\n\n"
+                      f"Connecting to each of its addresses:\n{probe}\n\n"
+                      f"{download_hint(info, cache)}") from e
+
+
 def download(info: ImageInfo, cache: Path = CACHE_DIR, progress: Optional[ProgressFn] = None,
              cancel: Optional[Callable[[], bool]] = None) -> Path:
     """Fetch <cache>/<Image>.exe; resumes a .part file; verifies the md5."""
@@ -158,7 +221,7 @@ def download(info: ImageInfo, cache: Path = CACHE_DIR, progress: Optional[Progre
         req = urllib.request.Request(info.url, headers={"User-Agent": UA})
         if have:
             req.add_header("Range", f"bytes={have}-")
-        with urllib.request.urlopen(req, timeout=60) as r:   # follows the 301 to the mirror
+        with _open(req, info, cache, timeout=60) as r:   # follows the 301 to the mirror
             if have and r.status != 206:                       # server ignored Range: restart
                 have = 0
                 part.unlink(missing_ok=True)

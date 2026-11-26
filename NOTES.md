@@ -786,6 +786,41 @@ Game: com.dino.runnergames.adventure.evolution (user's Pie64 data). Measured wit
   capped at the monitor's work area, height-driven when capped). Maximized, it letterboxes in
   the window colour.
 
+## 10w. Game compatibility: GPU buffer read-back (GLMBRH), RAM, broken mods
+
+User-reported problem games (2026-11-25):
+- **io.heseri.car (Ride Evolution / Car Evolve, Unity 6000.3, GLES 3.1): no ground, the car
+  falls out of the map.** EnvKit.GPUTerrainMeshSystem builds the terrain mesh + MeshCollider
+  with a compute shader and reads the SSBO back (glMapBufferRange READ); PhysX logged
+  "cleaning the mesh failed". Host trace (temporary gfxstream instrumentation) showed the
+  compute output was correct on the host but the guest never asked for it: BlueStacks'
+  libGLESv2_enc `GL2Encoder::s_glMapBufferRange` calls `CheckMapBufferRangeHostNeed()` =
+  `BstFilterAppsManager::isGlMapBufferRangeHost(pkg)` (libbinder -> the "bstfilterapps"
+  service, com.bluestacks.server.BstFilterAppsService, rule key `GLMBRH` in
+  /data/downloads/.config.db; ~40 packages set it). When false the map returns the guest's
+  shadow copy (zeros) without a host call. The encoder's own dirty tracking
+  (`postDispatchCompute` -> `setBufferHostMapDirty`, `shouldSkipHostMapBuffer`) exists but this
+  path does not use it. Same in BlueStacks' own GL mode (the user's workaround there was
+  Vulkan). Fix: `patches/all/25_gl_map_host.py` installs /data/downloads/.config_user.db with a
+  `"pkgname": "*"` rule GLMBRH=true (the service re-reads it live; `*` matches every package;
+  logcat "check GLMBRH with pkg[...] with res[1]"). Verified on Pie64, Rvc64 (gfxstream) and
+  Tiramisu64 (BlueStacks DLL): ground + road render, the car drives. Write maps without
+  INVALIDATE now also fetch the old contents (upstream goldfish behaviour); a handful of NFS
+  packages are hard-coded in the encoder to skip that (byte 0xf95).
+- Images re-patch themselves: `images.patch_fingerprint` (patch scripts + helpers + assets)
+  is stored in the manifest; `QemuEngine.start` -> `images.ensure_patched` re-runs the ramdisk
+  patches when it differs (fails soft when another QEMU still maps initramfs.bin).
+- **com.NewFolderGames.IAmMonkey (2.26 GB APK, minSdk 30): "VM freezes while loading" on
+  Android 11** = memory: the game holds ~3.3 GB RSS at the menu (two fully touched 1 GB
+  anonymous regions) and peaks ~3.9 GB; in a 4 GB instance lmkd kills everything else while
+  the guest thrashes for a minute, then kills the game. With 8 GB it loads and plays
+  (MemAvailable ~4.4 GB). On Pie64 it "won't install": INSTALL_FAILED_OLDER_SDK (needs Android
+  11); adb's streamed install hides that message (`adb install --no-streaming` shows it).
+- **com.higame.draw.car ("PreModdedRescueCar signed.apk") crashes after ~10 s**: Kotlin
+  reflection in the InMobi ads SDK throws "Built-in class kotlin.Any is not found"; the
+  re-signed APK has no `kotlin/*.kotlin_builtins` resources (the mod tooling dropped them).
+  An APK problem, not ours; BlueStacks probably never reached that InMobi path.
+
 ## 11. Next
 
 - DONE: good path is the boot.py default; pristine Root.vhd boots (p66A).

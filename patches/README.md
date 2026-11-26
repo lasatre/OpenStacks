@@ -26,3 +26,9 @@ Current patches:
   `brand/openstacks_wallpaper.py --android`), set per instance unless the user picked their own.
 - `all/20_magisk.py` - start Magisk at boot for instances rooted with the player's Root
   button (opt-in per instance via /data/adb/.ost_magisk; no-op otherwise).
+- `all/25_gl_map_host.py` - per-app GL rule GLMBRH for every app (`*` rule in
+  /data/downloads/.config_user.db): mapped GL buffers are read back from the host, so
+  compute-shader output reaches the app (BlueStacks only does this for ~40 listed games).
+
+Installed images are re-patched automatically when an instance starts and the patch files
+changed since the image was patched (`images.ensure_patched`, fingerprint in the manifest).

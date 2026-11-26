@@ -1,0 +1,136 @@
+diff --git a/host/frame_buffer.cpp b/host/frame_buffer.cpp
+index 2ee98a0..fc2695a 100644
+--- a/host/frame_buffer.cpp
++++ b/host/frame_buffer.cpp
+@@ -37,6 +37,7 @@
+ #include "post_worker_gl.h"
+ #include "render_control.h"
+ #include "host/gl/render_thread_info_gl.h"
++#include "host/gl/color_buffer_gl.h"
+ #include "host/gl/yuv_converter.h"
+ #include "gl/gles2_dec/gles2_dec.h"
+ #include "gl/glestranslator/egl/egl_global_info.h"
+@@ -2841,6 +2842,19 @@ AsyncResult FrameBuffer::Impl::postImpl(HandleType p_colorbuffer, Post::Completi
+         return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
+     }
+ 
++#if GFXSTREAM_ENABLE_HOST_GLES
++    // OpenStacks (issue #6): a guest post comes from the thread that finished the frame
++    // (SurfaceFlinger's). Fence that context's work on the buffer now, before binding the
++    // helper context, so the presenter waits for all of it and not only for the last
++    // window-surface blit. A frame drawn into the buffer through an FBO otherwise had no
++    // fence at all. (repaint = a host re-show of an old frame: nothing new to fence.)
++    if (!repaint) {
++        if (auto* cbGl = colorBuffer->getColorBufferGl()) {
++            cbGl->setSyncFromCurrentContext();
++        }
++    }
++#endif
++
+     std::optional<AutoLock> lock;
+ #if GFXSTREAM_ENABLE_HOST_GLES
+     std::optional<RecursiveScopedContextBind> bind;
+diff --git a/host/gl/color_buffer_gl.cpp b/host/gl/color_buffer_gl.cpp
+index b7d5e54..216f623 100644
+--- a/host/gl/color_buffer_gl.cpp
++++ b/host/gl/color_buffer_gl.cpp
+@@ -1035,11 +1035,19 @@ bool ColorBufferGl::blitFromCurrentReadBuffer() {
+             }
+         }
+ 
++        // OpenStacks: the copy above ran in the guest's context, the draw below runs in
++        // the helper's; order them, then fence the draw for the buffer's readers.
++        GLsync copied = (GLsync)s_egl.eglSetImageFenceANDROID(m_display, m_blitEGLImage);
++
+         RecursiveScopedContextBind context(m_helper);
+         if (!context.isOk()) {
+             return false;
+         }
+ 
++        if (copied) {
++            s_egl.eglWaitImageFenceANDROID(m_display, copied);
++        }
++
+         if (!bindFbo(&m_fbo, m_tex, m_needFboReattach)) {
+             return false;
+         }
+@@ -1057,11 +1065,24 @@ bool ColorBufferGl::blitFromCurrentReadBuffer() {
+         // Restore previous viewport.
+         s_gles2.glViewport(vport[0], vport[1], vport[2], vport[3]);
+         unbindFbo();
++        setSync();                       // OpenStacks: the buffer's new contents
+     }
+ 
+     return true;
+ }
+ 
++// OpenStacks (issue #6): cross-context ordering.
++// Every guest GL context is a separate host context, and a colour buffer is written in one
++// and read in another:
++// - an app renders its frame, SurfaceFlinger samples it;
++// - SurfaceFlinger composites, the post thread presents it.
++// The writers put a fence on the buffer's EGLImage (setSync at blit, upload and post), but
++// upstream only waits on it when reading pixels back and posting. The guest's own native
++// fences normally order the rest; the BlueStacks guest stack does not use them and relies
++// on implicit sync. Mesa happens to provide that; NVIDIA's driver runs contexts
++// independently. There, SurfaceFlinger sampled half-drawn app frames (sprites missing
++// for a frame, elements jumping back and forth). So every bind waits on the buffer's
++// last write fence first: a GPU-side glWaitSync, no CPU stall.
+ bool ColorBufferGl::bindToTexture() {
+     if (!m_eglImage) {
+         return false;
+@@ -1076,6 +1097,8 @@ bool ColorBufferGl::bindToTexture() {
+         return false;
+     }
+ 
++    waitSync();
++
+     if (tInfo->currContext->clientVersion() > GLESApi_CM) {
+         s_gles2.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, m_eglImage);
+     } else {
+@@ -1089,6 +1112,8 @@ bool ColorBufferGl::bindToTexture2() {
+         return false;
+     }
+ 
++    waitSync();                          // OpenStacks: see bindToTexture
++
+     s_gles2.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, m_eglImage);
+     return true;
+ }
+@@ -1107,6 +1132,8 @@ bool ColorBufferGl::bindToRenderbuffer() {
+         return false;
+     }
+ 
++    waitSync();                          // OpenStacks: see bindToTexture
++
+     if (tInfo->currContext->clientVersion() > GLESApi_CM) {
+         s_gles2.glEGLImageTargetRenderbufferStorageOES(GL_RENDERBUFFER_OES,
+                                                        m_eglImage);
+@@ -1129,6 +1156,13 @@ void ColorBufferGl::setSync(bool debug) {
+     if (debug) fprintf(stderr, "%s: %u to %p\n", __func__, getHndl(), m_sync);
+ }
+ 
++void ColorBufferGl::setSyncFromCurrentContext() {
++    RenderThreadInfoGl* const tInfo = RenderThreadInfoGl::get();
++    if (m_eglImage && tInfo && tInfo->currContext.get()) {
++        setSync();
++    }
++}
++
+ void ColorBufferGl::waitSync(bool debug) {
+     if (debug) fprintf(stderr, "%s: %u sync %p\n", __func__, getHndl(), m_sync);
+     if (m_sync) {
+diff --git a/host/gl/color_buffer_gl.h b/host/gl/color_buffer_gl.h
+index ac20fac..75852b8 100644
+--- a/host/gl/color_buffer_gl.h
++++ b/host/gl/color_buffer_gl.h
+@@ -213,6 +213,9 @@ class ColorBufferGl {
+ 
+     void setSync(bool debug = false);
+     void waitSync(bool debug = false);
++    // OpenStacks (issue #6): fence the calling render thread's GL work on this buffer
++    // (its own context, if one is current), e.g. at a guest post. See color_buffer_gl.cpp.
++    void setSyncFromCurrentContext();
+     void setDisplay(uint32_t displayId) { m_displayId = displayId; }
+     uint32_t getDisplay() { return m_displayId; }
+     GfxstreamFormat getFormat() { return m_format; }

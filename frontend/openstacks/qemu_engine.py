@@ -55,6 +55,12 @@ MSYS2_BIN = r"C:\msys64\ucrt64\bin"          # DLLs needed by the patched build
 # without it); needs the WHPX CPUID 0xD fix in qemu/apply_to_tree.py.
 QEMU_CPU = "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on,+xsave,+avx,+avx2,+fma,+f16c,+bmi1,+bmi2,+movbe"
 
+def controls_port(inst: Instance) -> int:
+    """Port of the game-controls channel (bstvmsg "input" chardev, controls/channel.py):
+    the monitor port + 2000, so every instance's differs without a new config key."""
+    return int(inst.monitor_port) + 2000
+
+
 def disk_format(path: Path) -> str:
     return {".qcow2": "qcow2", ".vhdx": "vhdx", ".vhd": "vpc",
             ".vdi": "vdi"}.get(path.suffix.lower(), "raw")
@@ -250,6 +256,11 @@ class QemuEngine:
                 from .images import kernel_version
                 if kernel_version(kernel)[0] >= 5:
                     opts += ",touch-mt=on"      # Phase-80: kernel 5.x bstinput (type 5)
+                # game controls channel (docs/keymapping_plan.md): the player's key
+                # mapping engine connects here to inject touches / receive mapped keys
+                argv += ["-chardev", f"socket,id=ostin,host=127.0.0.1,"
+                                     f"port={controls_port(inst)},server=on,wait=off,nodelay=on"]
+                opts += ",input=ostin"
                 # HD-Player-style bst.* host props (oem/version/abi_list/adb gate,
                 # graphics, locale...) from bluestacks.conf (dev/NOTES.md 10h/10i)
                 try:
@@ -343,7 +354,8 @@ class QemuEngine:
         # its ports; QEMU would exit at once with "address in use"
         busy = [f"{what} {port}" for what, port in
                 (("monitor", inst.monitor_port), ("adb", inst.adb_port),
-                 ("vnc", inst.vnc_port)) if _port_in_use(int(port))]
+                 ("vnc", inst.vnc_port), ("game controls", controls_port(inst)))
+                if _port_in_use(int(port))]
         if busy:
             return LaunchResult(False, argv, warnings,
                                 f"{inst.name} looks already running: port(s) in use "

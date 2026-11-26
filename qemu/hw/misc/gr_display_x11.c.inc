@@ -31,7 +31,7 @@ static void gx_repaint(void);
     f(XInitThreads) f(XOpenDisplay) f(XCreateWindow) f(XSelectInput) f(XStoreName) \
     f(XSetClassHint) f(XChangeProperty) f(XInternAtom) f(XMapWindow) f(XPending) \
     f(XNextEvent) f(XFlush) f(XSetErrorHandler) f(XSetInputFocus) f(XResizeWindow) \
-    f(XGetErrorText) f(XSetWMProtocols) f(XUnmapWindow) f(XQueryTree) f(XFree)
+    f(XGetErrorText) f(XSetWMProtocols) f(XUnmapWindow) f(XQueryTree) f(XFree)     f(XGrabPointer) f(XUngrabPointer) f(XWarpPointer) f(XCreateBitmapFromData)     f(XCreatePixmapCursor) f(XFreePixmap)
 
 static struct {
 #define GRX_PTR(n) __typeof__(n) *n;
@@ -43,6 +43,10 @@ static Display *g_xdpy;
 static int g_xpipe[2] = { -1, -1 };  /* wakes the UI thread for requests */
 static int g_xw, g_xh;               /* our window's size */
 static int g_xReqLayout, g_xReqOrient = -1;
+static int g_xReqLock = -1;          /* game controls pointer lock request (0/1) */
+static bool g_xLockOn;
+static Cursor g_xBlank;
+static void grx_wake(void);
 static bool g_xShow, g_xMouseDown;
 static Atom g_xWmDelete;
 static QemuThread g_xThread;
@@ -157,6 +161,50 @@ static void grx_pointer(int x, int y, int down)
     gr_pointer_view(x - (g_cw > 0 ? g_cx : 0), y - (g_ch > 0 ? g_cy : 0), cw, ch, down);
 }
 
+/* another button / the wheel, relative to the picture like grx_pointer (kind 3 / 4) */
+static void grx_button(int kind, int x, int y, int qnum, int down)
+{
+    int cw = g_cw > 0 ? g_cw : g_xw, ch = g_ch > 0 ? g_ch : g_xh;
+    gr_button_view(kind, x - (g_cw > 0 ? g_cx : 0), y - (g_ch > 0 ? g_cy : 0), cw, ch,
+                   qnum, down);
+}
+
+/* Pointer lock (game controls aim mode), on the UI thread: grab the pointer with an
+ * invisible cursor, confined to our window, and keep warping it back to the centre;
+ * each move away from it is a relative motion. XWayland turns the hidden, grabbed,
+ * warped pointer into Wayland relative motion + pointer confinement. */
+static void grx_lock_apply(bool on)
+{
+    if (on == g_xLockOn || !g.hwnd) return;
+    if (on) {
+        if (!g_xBlank) {
+            static char zero[8];
+            XColor c = { 0 };
+            Pixmap pm = x11.XCreateBitmapFromData(g_xdpy, (Window)g.hwnd, zero, 8, 8);
+            g_xBlank = x11.XCreatePixmapCursor(g_xdpy, pm, pm, &c, &c, 0, 0);
+            x11.XFreePixmap(g_xdpy, pm);
+        }
+        if (x11.XGrabPointer(g_xdpy, (Window)g.hwnd, True,
+                             ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+                             GrabModeAsync, GrabModeAsync, (Window)g.hwnd, g_xBlank,
+                             CurrentTime) != GrabSuccess) {
+            gr_log("game controls: pointer grab failed");
+            return;
+        }
+        x11.XWarpPointer(g_xdpy, None, (Window)g.hwnd, 0, 0, 0, 0, g_xw / 2, g_xh / 2);
+        g_xLockOn = true;
+    } else {
+        x11.XUngrabPointer(g_xdpy, CurrentTime);
+        g_xLockOn = false;
+    }
+}
+
+void gr_set_pointer_lock(bool on)
+{
+    qatomic_set(&g_xReqLock, on ? 1 : 0);
+    grx_wake();
+}
+
 static void grx_event(XEvent *e)
 {
     if (e->type == Expose && e->xany.window != (Window)g.hwnd) {
@@ -187,26 +235,42 @@ static void grx_event(XEvent *e)
         if (e->xexpose.count == 0 && gr_gfx()) gx_repaint();
         break;
     case ButtonPress:
-        if (e->xbutton.button == Button1) {
-            x11.XSetInputFocus(g_xdpy, (Window)g.hwnd, RevertToParent, CurrentTime);
-            g_xMouseDown = true;
-            grx_pointer(e->xbutton.x, e->xbutton.y, 1);
+    case ButtonRelease: {
+        bool down = e->type == ButtonPress;
+        unsigned b = e->xbutton.button;
+        if (down) x11.XSetInputFocus(g_xdpy, (Window)g.hwnd, RevertToParent, CurrentTime);
+        if (b == Button1) {
+            g_xMouseDown = down;
+            grx_pointer(e->xbutton.x, e->xbutton.y, down);
+        } else if (b == Button4 || b == Button5) {          /* wheel: presses only */
+            if (down) grx_button(4, e->xbutton.x, e->xbutton.y, b == Button4 ? 120 : -120, 0);
+        } else if (b == Button2 || b == Button3 || b == 8 || b == 9) {
+            grx_button(3, e->xbutton.x, e->xbutton.y,
+                       b == Button3 ? OST_BTN_RIGHT : b == Button2 ? OST_BTN_MIDDLE
+                       : b == 8 ? OST_BTN_X1 : OST_BTN_X2, down);
         }
         break;
-    case ButtonRelease:
-        if (e->xbutton.button == Button1) {
-            g_xMouseDown = false;
-            grx_pointer(e->xbutton.x, e->xbutton.y, 0);
-        }
-        break;
+    }
     case MotionNotify:
-        if (g_xMouseDown) grx_pointer(e->xmotion.x, e->xmotion.y, -1);   /* touch move */
-        break;
-    case FocusOut:
-        /* focus moving inside our window or the pointer-root dance: not a loss */
-        if (e->xfocus.detail != NotifyInferior && e->xfocus.detail != NotifyPointer) {
-            gr_input_post((GrInputEv){ .kind = 3 });    /* release held keys (issue #8) */
+        if (g_xLockOn) {
+            int dx = e->xmotion.x - g_xw / 2, dy = e->xmotion.y - g_xh / 2;
+            if (dx || dy) {
+                gr_input_post((GrInputEv){ .kind = 5, .x = dx, .y = dy });
+                x11.XWarpPointer(g_xdpy, None, (Window)g.hwnd, 0, 0, 0, 0,
+                                 g_xw / 2, g_xh / 2);
+            }
+        } else if (g_xMouseDown) {
+            grx_pointer(e->xmotion.x, e->xmotion.y, -1);    /* touch move */
+        } else if (gr_hover_wanted()) {
+            grx_pointer(e->xmotion.x, e->xmotion.y, -2);
         }
+        break;
+    case FocusIn:
+    case FocusOut:
+        /* focus moving inside our window or the pointer-root dance: not a change */
+        if (e->xfocus.detail == NotifyInferior || e->xfocus.detail == NotifyPointer) break;
+        if (e->type == FocusOut) grx_lock_apply(false);
+        gr_input_post((GrInputEv){ .kind = 6, .down = e->type == FocusIn });
         break;
     case KeyPress:
     case KeyRelease: {
@@ -276,6 +340,8 @@ static void *grx_thread(void *arg)
             grx_layout();                    /* the content aspect flipped */
         }
         if (qatomic_xchg(&g_xReqLayout, 0)) grx_layout();
+        o = qatomic_xchg(&g_xReqLock, -1);
+        if (o >= 0) grx_lock_apply(o != 0);
         x11.XFlush(g_xdpy);
     }
     return NULL;

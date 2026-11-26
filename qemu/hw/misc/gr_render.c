@@ -2802,10 +2802,21 @@ static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win)
 
 typedef struct GrInputEv {
     int kind;                        /* 0 = pointer, 1 = key (qnum), 2 = key (evdev),
-                                        3 = focus lost: release every held key */
-    int x, y, down;                  /* pointer: 0..0x7fff, button     */
+                                        3 = other mouse button (qnum = OST_BTN_*),
+                                        4 = wheel (qnum = delta, 120 a notch, + = up),
+                                        5 = relative motion while locked (x, y),
+                                        6 = focus (down), 7 = orientation (down) */
+    int x, y, down;                  /* pointer: 0..0x7fff panel, button 1/0,
+                                        -1 = move while held, -2 = hover move */
+    int vx, vy;                      /* the same point in view coordinates (0..0x7fff) */
     int qnum;                        /* key: QEMU key number / Linux evdev code */
 } GrInputEv;
+
+/* Game controls routing (docs/keymapping_plan.md): a key or button whose press went
+ * to the front-end's key mapping engine sends its release there too, whatever the
+ * capture set says by then; everything else goes to the guest as before. */
+static uint64_t g_keyFwd[12];        /* evdev keys held down at the front-end */
+static unsigned g_btnFwd;            /* OST_BTN_* held down at the front-end */
 
 /* Keys the guest currently sees held. A key pressed in our window and released in another
  * one (Alt+Tab, a desktop shortcut that moves focus) never sends its release here, so
@@ -2826,6 +2837,32 @@ static void gr_held_set(uint64_t *map, unsigned max, unsigned k, bool down)
     }
 }
 
+static void gr_input_key(unsigned lnx, int qnum, bool evdev, bool down)
+{
+    bool held = lnx && lnx < 768 && (g_keyFwd[lnx / 64] >> (lnx % 64) & 1);
+    if (lnx && lnx < 768 && (down ? ost_input_wants_key(lnx) || held : held)) {
+        if (down) {
+            g_keyFwd[lnx / 64] |= 1ull << (lnx % 64);
+            if (!held) {
+                ost_input_printf("K %u 1", lnx);      /* auto-repeat is dropped */
+            }
+        } else {
+            g_keyFwd[lnx / 64] &= ~(1ull << (lnx % 64));
+            ost_input_printf("K %u 0", lnx);
+        }
+        return;
+    }
+    if (evdev) {
+        gr_held_set(g_heldLinux, 768, lnx, down);
+        qemu_input_event_send_key_linux(NULL, lnx, down);
+    } else {
+        gr_held_set(g_heldQnum, 512, (unsigned)qnum, down);
+        qemu_input_event_send_key_number(NULL, qnum, down);
+    }
+}
+
+/* focus lost: release what the guest holds, and forget what the front-end holds (its
+ * engine lifts its own on "F 0"; a stale bit here would swallow the next press) */
 static void gr_release_all_keys(void)
 {
     for (unsigned k = 0; k < 512; k++) {
@@ -2840,26 +2877,81 @@ static void gr_release_all_keys(void)
     }
     memset(g_heldQnum, 0, sizeof(g_heldQnum));
     memset(g_heldLinux, 0, sizeof(g_heldLinux));
+    memset(g_keyFwd, 0, sizeof(g_keyFwd));
+    g_btnFwd = 0;
 }
 
 static void gr_input_bh(void *opaque)
 {
     GrInputEv *e = (GrInputEv *)opaque;
-    if (e->kind == 3) {
-        gr_release_all_keys();
-    } else if (e->kind == 0) {
+    switch (e->kind) {
+    case 0:
+        if (e->down == 1 && (ost_input_buttons() & OST_BTN_LEFT)) {
+            g_btnFwd |= OST_BTN_LEFT;
+        }
+        if (g_btnFwd & OST_BTN_LEFT) {               /* a captured left button */
+            if (e->down >= 0) {
+                ost_input_printf("B %u %d %d %d", OST_BTN_LEFT, e->down, e->vx, e->vy);
+                if (e->down == 0) {
+                    g_btnFwd &= ~OST_BTN_LEFT;
+                }
+            } else {
+                ost_input_printf("M %d %d", e->vx, e->vy);
+            }
+            break;
+        }
+        if (e->down == -2) {                         /* hover: the front-end only */
+            if (ost_input_buttons() & OST_BTN_HOVER) {
+                ost_input_printf("M %d %d", e->vx, e->vy);
+            }
+            break;
+        }
         qemu_input_queue_abs(NULL, INPUT_AXIS_X, e->x, 0, INPUT_EVENT_ABS_MAX);
         qemu_input_queue_abs(NULL, INPUT_AXIS_Y, e->y, 0, INPUT_EVENT_ABS_MAX);
         if (e->down >= 0) {
             qemu_input_queue_btn(NULL, INPUT_BUTTON_LEFT, e->down != 0);
         }
         qemu_input_event_sync();
-    } else if (e->kind == 2) {
-        gr_held_set(g_heldLinux, 768, (unsigned)e->qnum, e->down != 0);
-        qemu_input_event_send_key_linux(NULL, (unsigned)e->qnum, e->down != 0);
-    } else {
-        gr_held_set(g_heldQnum, 512, (unsigned)e->qnum, e->down != 0);
-        qemu_input_event_send_key_number(NULL, e->qnum, e->down != 0);
+        break;
+    case 1: {
+        int qc = qemu_input_key_number_to_qcode((unsigned)e->qnum);
+        unsigned lnx = qc > 0 && (unsigned)qc < qemu_input_map_qcode_to_linux_len
+                       ? qemu_input_map_qcode_to_linux[qc] : 0;
+        gr_input_key(lnx, e->qnum, false, e->down != 0);
+        break;
+    }
+    case 2:
+        gr_input_key((unsigned)e->qnum, e->qnum, true, e->down != 0);
+        break;
+    case 3: {
+        unsigned b = (unsigned)e->qnum;
+        if (e->down ? (ost_input_buttons() & b) : (g_btnFwd & b)) {
+            if (e->down) {
+                g_btnFwd |= b;
+            } else {
+                g_btnFwd &= ~b;
+            }
+            ost_input_printf("B %u %d %d %d", b, e->down != 0, e->vx, e->vy);
+        }
+        break;
+    }
+    case 4:
+        if (ost_input_buttons() & OST_BTN_WHEEL) {
+            ost_input_printf("W %d %d %d", e->qnum, e->vx, e->vy);
+        }
+        break;
+    case 5:
+        ost_input_printf("R %d %d", e->x, e->y);
+        break;
+    case 6:
+        if (!e->down) {
+            gr_release_all_keys();
+        }
+        ost_input_printf("F %d", e->down);
+        break;
+    case 7:
+        ost_input_printf("O %d", e->down);
+        break;
     }
     g_free(e);
 }
@@ -2877,22 +2969,55 @@ static int g_cx, g_cy, g_cw, g_ch;
 
 /* pointer at (x, y) in a view of w x h pixels -> the guest's absolute pointer, in the
  * UNROTATED panel frame (HD-Player inverts the rotation on the host, EXE 0x1402ec260) */
-static void gr_pointer_view(int x, int y, int w, int h, int down)
+void gr_view_to_panel(int vx, int vy, int *ax, int *ay)
 {
-    int64_t px, py, rx, ry, M = INPUT_EVENT_ABS_MAX;
-    w = w > 1 ? w : 1;
-    h = h > 1 ? h : 1;
-    x = x < 0 ? 0 : x >= w ? w - 1 : x;
-    y = y < 0 ? 0 : y >= h ? h - 1 : y;
-    px = (int64_t)x * M / (w - 1 ? w - 1 : 1);       /* view fraction, 0..M */
-    py = (int64_t)y * M / (h - 1 ? h - 1 : 1);
+    int64_t M = INPUT_EVENT_ABS_MAX, rx, ry;
+    int64_t px = vx < 0 ? 0 : vx > M ? M : vx;
+    int64_t py = vy < 0 ? 0 : vy > M ? M : vy;
     switch (qatomic_read(&g_orient)) {
     case 1:  rx = M - py; ry = px;     break;
     case 2:  rx = M - px; ry = M - py; break;
     case 3:  rx = py;     ry = M - px; break;
     default: rx = px;     ry = py;     break;
     }
-    gr_input_post((GrInputEv){ .kind = 0, .x = (int)rx, .y = (int)ry, .down = down });
+    *ax = (int)rx;
+    *ay = (int)ry;
+}
+
+/* pixel (x, y) in a view of w x h pixels -> view coordinates 0..ABS_MAX */
+static void gr_view_xy(int x, int y, int w, int h, int *vx, int *vy)
+{
+    int64_t M = INPUT_EVENT_ABS_MAX;
+    w = w > 1 ? w : 1;
+    h = h > 1 ? h : 1;
+    x = x < 0 ? 0 : x >= w ? w - 1 : x;
+    y = y < 0 ? 0 : y >= h ? h - 1 : y;
+    *vx = (int)((int64_t)x * M / (w - 1 ? w - 1 : 1));
+    *vy = (int)((int64_t)y * M / (h - 1 ? h - 1 : 1));
+}
+
+static void gr_pointer_view(int x, int y, int w, int h, int down)
+{
+    int vx, vy, ax, ay;
+    gr_view_xy(x, y, w, h, &vx, &vy);
+    gr_view_to_panel(vx, vy, &ax, &ay);
+    gr_input_post((GrInputEv){ .kind = 0, .x = ax, .y = ay, .vx = vx, .vy = vy,
+                               .down = down });
+}
+
+/* another button or the wheel at (x, y) of a w x h view (kind 3 or 4) */
+static void gr_button_view(int kind, int x, int y, int w, int h, int qnum, int down)
+{
+    int vx, vy;
+    gr_view_xy(x, y, w, h, &vx, &vy);
+    gr_input_post((GrInputEv){ .kind = kind, .vx = vx, .vy = vy, .qnum = qnum,
+                               .down = down });
+}
+
+/* the front-end wants hover motion (no button held): skip the BH otherwise */
+static bool gr_hover_wanted(void)
+{
+    return (ost_input_buttons() & OST_BTN_HOVER) != 0;
 }
 
 static bool g_readback = true;
@@ -2944,6 +3069,55 @@ static void gr_pointer(HWND h, LPARAM l, int down)
     gr_pointer_view((short)LOWORD(l), (short)HIWORD(l), rc.right, rc.bottom, down);
 }
 
+static void gr_button(HWND h, LPARAM l, int kind, int qnum, int down)
+{
+    RECT rc;
+    GetClientRect(h, &rc);
+    gr_button_view(kind, (short)LOWORD(l), (short)HIWORD(l), rc.right, rc.bottom, qnum,
+                   down);
+}
+
+/* Pointer lock (game controls aim mode): the cursor is hidden and confined to the
+ * display, kept at its centre, and each move is reported as a relative motion.
+ * Requested from the main loop, applied on the UI thread (WM_APP + 2). */
+static bool g_lockOn;
+static POINT g_lockCenter;
+
+static void gr_lock_apply(HWND h, bool on)
+{
+    HWND t = g_child ? g_child : h;
+    if (on == g_lockOn) return;
+    g_lockOn = on;
+    if (on) {
+        RECT rc;
+        POINT tl = { 0, 0 }, br;
+        GetClientRect(t, &rc);
+        br.x = rc.right;
+        br.y = rc.bottom;
+        ClientToScreen(t, &tl);
+        ClientToScreen(t, &br);
+        RECT clip = { tl.x, tl.y, br.x, br.y };
+        ClipCursor(&clip);
+        g_lockCenter.x = (tl.x + br.x) / 2;
+        g_lockCenter.y = (tl.y + br.y) / 2;
+        SetCursorPos(g_lockCenter.x, g_lockCenter.y);
+        SetCursor(NULL);
+    } else {
+        ClipCursor(NULL);
+        SetCursor(LoadCursor(NULL, IDC_ARROW));
+    }
+}
+
+void gr_set_pointer_lock(bool on)
+{
+    if (g.hwnd) PostMessageW(g.hwnd, WM_APP + 2, (WPARAM)on, 0);
+}
+
+static bool gr_is_ours(HWND o)
+{
+    return o && (o == g.hwnd || o == g_child);
+}
+
 /* returns true when the message was an input message we consumed */
 static bool gr_input_msg(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -2960,8 +3134,51 @@ static bool gr_input_msg(HWND h, UINT m, WPARAM w, LPARAM l)
         gr_pointer(h, l, 0);
         return true;
     case WM_MOUSEMOVE:
+        if (g_lockOn) {
+            POINT p;
+            GetCursorPos(&p);
+            int dx = p.x - g_lockCenter.x, dy = p.y - g_lockCenter.y;
+            if (dx || dy) {
+                gr_input_post((GrInputEv){ .kind = 5, .x = dx, .y = dy });
+                SetCursorPos(g_lockCenter.x, g_lockCenter.y);
+            }
+            return true;
+        }
         if (g_mouseDown) gr_pointer(h, l, -1);    /* drag = touch move */
+        else if (gr_hover_wanted()) gr_pointer(h, l, -2);
         return true;
+    case WM_RBUTTONDOWN: case WM_RBUTTONUP:
+    case WM_MBUTTONDOWN: case WM_MBUTTONUP:
+    case WM_XBUTTONDOWN: case WM_XBUTTONUP: {
+        int b = (m == WM_RBUTTONDOWN || m == WM_RBUTTONUP) ? OST_BTN_RIGHT
+              : (m == WM_MBUTTONDOWN || m == WM_MBUTTONUP) ? OST_BTN_MIDDLE
+              : HIWORD(w) == XBUTTON2 ? OST_BTN_X2 : OST_BTN_X1;
+        bool down = m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN || m == WM_XBUTTONDOWN;
+        if (down) SetFocus(h);
+        gr_button(h, l, 3, b, down);
+        return true;
+    }
+    case WM_MOUSEWHEEL: {
+        POINT p = { (short)LOWORD(l), (short)HIWORD(l) };   /* screen coordinates */
+        ScreenToClient(h, &p);
+        gr_button(h, MAKELPARAM(p.x, p.y), 4, GET_WHEEL_DELTA_WPARAM(w), 0);
+        return true;
+    }
+    case WM_SETCURSOR:
+        if (g_lockOn) {
+            SetCursor(NULL);
+            return true;
+        }
+        return false;
+    case WM_SETFOCUS:
+        if (!gr_is_ours((HWND)w)) gr_input_post((GrInputEv){ .kind = 6, .down = 1 });
+        return false;
+    case WM_KILLFOCUS:
+        if (!gr_is_ours((HWND)w)) {
+            gr_lock_apply(h, false);
+            gr_input_post((GrInputEv){ .kind = 6, .down = 0 });
+        }
+        return false;
     case WM_KEYDOWN: case WM_SYSKEYDOWN:
     case WM_KEYUP: case WM_SYSKEYUP: {
         int sc = (int)((l >> 16) & 0xff);
@@ -2973,13 +3190,6 @@ static bool gr_input_msg(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     case WM_CHAR: case WM_SYSCHAR: case WM_DEADCHAR:
         return true;
-    case WM_KILLFOCUS:
-        /* focus leaving our windows (not just moving between our host window and the
-         * renderer's child): the releases of held keys will go elsewhere */
-        if ((HWND)w != g.hwnd && (HWND)w != g_child) {
-            gr_input_post((GrInputEv){ .kind = 3 });
-        }
-        return false;
     }
     return false;
 }
@@ -3173,6 +3383,10 @@ static LRESULT CALLBACK gr_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (gr_gfx()) gx_layout(h);    /* the content aspect flipped */
         return 0;
     }
+    case WM_APP + 2:                   /* game controls pointer lock */
+        if (w && GetFocus() != h && GetFocus() != g_child) return 0;   /* unfocused */
+        gr_lock_apply(h, w != 0);
+        return 0;
     case WM_TIMER:
         if (!g_child) gr_layout(h);
         else KillTimer(h, 1);
@@ -3432,6 +3646,7 @@ void gr_render_set_orientation(int o)
 {
     if (o < 0 || o > 3) return;
     qatomic_set(&g_orient, o);
+    gr_input_post((GrInputEv){ .kind = 7, .down = o });   /* game controls */
     if (gr_gfx()) {
         gx_set_rotation(o);
     }

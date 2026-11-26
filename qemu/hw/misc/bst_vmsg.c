@@ -53,6 +53,8 @@
 #include "system/system.h"
 #include "hw/misc/gr_render.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/core/qdev-properties-system.h"
+#include "chardev/char-fe.h"
 
 #define TYPE_BST_VMSG "bstvmsg"
 OBJECT_DECLARE_SIMPLE_TYPE(BstVmsgState, BST_VMSG)
@@ -122,6 +124,19 @@ typedef struct BstVmsgState {
     Notifier init_done;
     int tx, ty;
     bool tdown, tdirty;
+
+    /* game controls (docs/keymapping_plan.md): contacts 1..15 injected by the
+     * front-end's key mapping engine over the "input" chardev; contact 0 stays the
+     * host pointer. Frames carry every contact (type 2) or every active slot (type 5). */
+    CharFrontend input;
+    bool input_open;
+    char inbuf[256];
+    unsigned inlen;
+    struct { bool down; uint32_t x, y; } syn[VMSG_TOUCH_SLOTS];
+    bool syn_dirty;
+    bool prev_down[VMSG_TOUCH_SLOTS];
+    uint64_t capkeys[12];           /* evdev codes 0..767 the front-end maps */
+    unsigned capbtn;                /* OST_BTN_* */
 
     /* host props served to the guest's bstconf (GetProps) */
     char *props;            /* extra 'k=v;k=v' (later lines win) */
@@ -391,44 +406,236 @@ static void bst_vmsg_input_event(DeviceState *dev, QemuConsole *src,
     }
 }
 
+/* One touch frame with every contact: slot 0 = the host pointer, slots 1..15 = the
+ * key mapping engine's. A frame where no contact went down or up is a "move" and may
+ * replace a move still waiting in the queue (each frame carries all contacts). */
+static void bst_vmsg_emit(BstVmsgState *s)
+{
+    bool down[VMSG_TOUCH_SLOTS];
+    uint32_t x[VMSG_TOUCH_SLOTS], y[VMSG_TOUCH_SLOTS];
+    bool changed = false;
+    int active = 0;
+    uint8_t m[VMSG_PUSH_MAX];
+
+    down[0] = s->tdown;
+    x[0] = (uint32_t)s->tx;
+    y[0] = (uint32_t)s->ty;
+    for (int i = 1; i < VMSG_TOUCH_SLOTS; i++) {
+        down[i] = s->syn[i].down;
+        x[i] = s->syn[i].x;
+        y[i] = s->syn[i].y;
+    }
+    for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
+        changed |= down[i] != s->prev_down[i];
+        active += down[i] || s->prev_down[i];
+    }
+    if (!active) {
+        return;
+    }
+    if (s->touch_mt) {
+        /* Phase-80: kernel 5.15 bstinput (Tiramisu64) inpMtTouchDispatch:
+         * type 5, [u32 count] + count x {u32 slot, u32 state, u32 x, u32 y};
+         * state 2 = finger up (ABS_MT_TRACKING_ID -1), else down/move at x,y
+         * (0..32767), then BTN_TOUCH + SYN. Type 2 is "unknown" there.
+         * At most 7 entries fit one push; more contacts take several pushes,
+         * which must not be coalesced (each holds only part of the frame). */
+        const int per = (VMSG_PUSH_MAX - 8) / 16;
+        bool coalesce = !changed && active <= per;
+        int n = 0;
+        for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
+            if (!down[i] && !s->prev_down[i]) {
+                continue;
+            }
+            uint8_t *e = m + 8 + 16 * n;
+            stl_le_p(e + 0, (uint32_t)i);
+            stl_le_p(e + 4, down[i] ? 1 : 2);
+            stl_le_p(e + 8, x[i]);
+            stl_le_p(e + 12, y[i]);
+            if (++n == per) {
+                stl_le_p(m + 0, 5);
+                stl_le_p(m + 4, (uint32_t)n);
+                bst_vmsg_push(s, m, 8 + 16 * n, coalesce);
+                n = 0;
+            }
+        }
+        if (n) {
+            stl_le_p(m + 0, 5);
+            stl_le_p(m + 4, (uint32_t)n);
+            bst_vmsg_push(s, m, 8 + 16 * n, coalesce);
+        }
+    } else {
+        stl_le_p(m, 2);                              /* type 2 = touch */
+        for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
+            stl_le_p(m + 4 + 8 * i, down[i] ? x[i] : VMSG_TOUCH_NONE);
+            stl_le_p(m + 8 + 8 * i, down[i] ? y[i] : VMSG_TOUCH_NONE);
+        }
+        bst_vmsg_push(s, m, sizeof(m), !changed);
+    }
+    memcpy(s->prev_down, down, sizeof(down));
+}
+
 static void bst_vmsg_input_sync(DeviceState *dev)
 {
     BstVmsgState *s = BST_VMSG(dev);
-    uint8_t m[VMSG_PUSH_MAX];
-    static bool was_down;
 
     if (!s->tdirty) {
         return;
     }
     s->tdirty = false;
-    if (s->touch_mt) {
-        /* Phase-80: kernel 5.15 bstinput (Tiramisu64) inpMtTouchDispatch:
-         * type 5, [u32 count] + count x {u32 slot, u32 state, u32 x, u32 y};
-         * state 2 = finger up (ABS_MT_TRACKING_ID -1), else down/move at x,y
-         * (0..32767), then BTN_TOUCH + SYN. Type 2 is "unknown" there.  */
-        memset(m, 0, 24);
-        stl_le_p(m + 0, 5);
-        stl_le_p(m + 4, 1);
-        stl_le_p(m + 8, 0);                          /* slot 0 */
-        stl_le_p(m + 12, s->tdown ? 1 : 2);
-        stl_le_p(m + 16, (uint32_t)s->tx);
-        stl_le_p(m + 20, (uint32_t)s->ty);
-        bst_vmsg_push(s, m, 24, s->tdown && was_down);
-        was_down = s->tdown;
+    bst_vmsg_emit(s);
+}
+
+/* ---- game controls channel (docs/keymapping_plan.md) ---- */
+
+static BstVmsgState *g_vmsg;         /* the instance owning the "input" chardev */
+
+bool ost_input_connected(void)
+{
+    return g_vmsg && g_vmsg->input_open;
+}
+
+bool ost_input_wants_key(unsigned evdev)
+{
+    return ost_input_connected() && evdev < 768 &&
+           (g_vmsg->capkeys[evdev / 64] >> (evdev % 64) & 1);
+}
+
+unsigned ost_input_buttons(void)
+{
+    return ost_input_connected() ? g_vmsg->capbtn : 0;
+}
+
+void ost_input_printf(const char *fmt, ...)
+{
+    char line[160];
+    va_list ap;
+    int n;
+
+    if (!ost_input_connected()) {
         return;
     }
-    stl_le_p(m, 2);                                  /* type 2 = touch */
-    for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
-        stl_le_p(m + 4 + 8 * i, VMSG_TOUCH_NONE);
-        stl_le_p(m + 8 + 8 * i, VMSG_TOUCH_NONE);
+    va_start(ap, fmt);
+    n = vsnprintf(line, sizeof(line) - 1, fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        return;
     }
-    if (s->tdown) {
-        stl_le_p(m + 4, (uint32_t)s->tx);
-        stl_le_p(m + 8, (uint32_t)s->ty);
+    n = MIN(n, (int)sizeof(line) - 2);
+    line[n++] = '\n';
+    /* non-blocking: a stalled front-end loses events rather than stalling QEMU */
+    qemu_chr_fe_write(&g_vmsg->input, (const uint8_t *)line, n);
+}
+
+static void ost_input_reset(BstVmsgState *s)
+{
+    bool any = false;
+    for (int i = 1; i < VMSG_TOUCH_SLOTS; i++) {
+        any |= s->syn[i].down;
+        s->syn[i].down = false;
     }
-    /* only a move while already down may be coalesced */
-    bst_vmsg_push(s, m, sizeof(m), s->tdown && was_down);
-    was_down = s->tdown;
+    memset(s->capkeys, 0, sizeof(s->capkeys));
+    s->capbtn = 0;
+    gr_set_pointer_lock(false);
+    if (any) {
+        bst_vmsg_emit(s);
+    }
+}
+
+static void ost_input_line(BstVmsgState *s, char *l)
+{
+    int id, x, y, v;
+
+    switch (l[0]) {
+    case 't':                                    /* t <id> <x> <y>: down / move */
+        if (sscanf(l + 1, "%d %d %d", &id, &x, &y) == 3 &&
+            id > 0 && id < VMSG_TOUCH_SLOTS) {
+            int ax, ay;
+            gr_view_to_panel(x, y, &ax, &ay);
+            s->syn[id].down = true;
+            s->syn[id].x = (uint32_t)ax;
+            s->syn[id].y = (uint32_t)ay;
+            s->syn_dirty = true;
+        }
+        return;
+    case 'u':                                    /* u <id>: up */
+        if (sscanf(l + 1, "%d", &id) == 1 && id > 0 && id < VMSG_TOUCH_SLOTS) {
+            s->syn[id].down = false;
+            s->syn_dirty = true;
+        }
+        return;
+    case 's':                                    /* sync: one frame */
+        if (s->syn_dirty) {
+            s->syn_dirty = false;
+            bst_vmsg_emit(s);
+        }
+        return;
+    case 'r':                                    /* release every synthetic contact */
+        for (int i = 1; i < VMSG_TOUCH_SLOTS; i++) {
+            s->syn[i].down = false;
+        }
+        s->syn_dirty = false;
+        bst_vmsg_emit(s);
+        return;
+    case 'k':                                    /* k <evdev> <0/1>: key into the guest */
+        if (sscanf(l + 1, "%d %d", &x, &v) == 2 && x > 0 && x < 768) {
+            qemu_input_event_send_key_linux(NULL, (unsigned)x, v != 0);
+        }
+        return;
+    }
+    if (!strncmp(l, "cap", 3)) {                 /* cap <evdev...>: keys to capture */
+        char *p = l + 3, *end;
+        memset(s->capkeys, 0, sizeof(s->capkeys));
+        for (;;) {
+            long c = strtol(p, &end, 10);
+            if (end == p) {
+                break;
+            }
+            if (c > 0 && c < 768) {
+                s->capkeys[c / 64] |= 1ull << (c % 64);
+            }
+            p = end;
+        }
+    } else if (!strncmp(l, "btn", 3) && sscanf(l + 3, "%d", &v) == 1) {
+        s->capbtn = (unsigned)v;
+    } else if (!strncmp(l, "lock", 4) && sscanf(l + 4, "%d", &v) == 1) {
+        gr_set_pointer_lock(v != 0);
+    }
+}
+
+static int ost_input_can_read(void *opaque)
+{
+    return 4096;
+}
+
+static void ost_input_read(void *opaque, const uint8_t *buf, int size)
+{
+    BstVmsgState *s = opaque;
+
+    for (int i = 0; i < size; i++) {
+        char c = (char)buf[i];
+        if (c == '\n') {
+            s->inbuf[s->inlen] = 0;
+            ost_input_line(s, s->inbuf);
+            s->inlen = 0;
+        } else if (c != '\r' && s->inlen < sizeof(s->inbuf) - 1) {
+            s->inbuf[s->inlen++] = c;
+        }
+    }
+}
+
+static void ost_input_event(void *opaque, QEMUChrEvent ev)
+{
+    BstVmsgState *s = opaque;
+
+    if (ev == CHR_EVENT_OPENED) {
+        s->input_open = true;
+        s->inlen = 0;
+        fprintf(stderr, "[bstvmsg] game controls connected\n");
+    } else if (ev == CHR_EVENT_CLOSED) {
+        s->input_open = false;
+        ost_input_reset(s);
+        fprintf(stderr, "[bstvmsg] game controls disconnected\n");
+    }
 }
 
 static const QemuInputHandler bst_vmsg_touch_handler = {
@@ -617,12 +824,19 @@ static void bst_vmsg_realize(PCIDevice *pdev, Error **errp)
     qemu_input_handler_activate(s->ihs);
     s->init_done.notify = bst_vmsg_init_done;
     qemu_add_machine_init_done_notifier(&s->init_done);
+
+    if (qemu_chr_fe_backend_connected(&s->input)) {
+        g_vmsg = s;
+        qemu_chr_fe_set_handlers(&s->input, ost_input_can_read, ost_input_read,
+                                 ost_input_event, NULL, s, NULL, true);
+    }
 }
 
 static const Property bst_vmsg_props[] = {
     DEFINE_PROP_STRING("props", BstVmsgState, props),
     DEFINE_PROP_STRING("propsfile", BstVmsgState, propsfile),
     DEFINE_PROP_BOOL("touch-mt", BstVmsgState, touch_mt, false),
+    DEFINE_PROP_CHR("input", BstVmsgState, input),
 };
 
 static void bst_vmsg_class_init(ObjectClass *klass, const void *data)

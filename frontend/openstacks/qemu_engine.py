@@ -330,7 +330,9 @@ class QemuEngine:
 
     # -- lifecycle -----------------------------------------------------------
     def start(self, inst: Instance, g: GlobalSettings) -> LaunchResult:
+        notes = self._refresh_patches(inst, g)
         argv, warnings = self.build_argv(inst, g)
+        warnings = notes + warnings
         fatal = [w for w in warnings if w.startswith("missing kernel")
                  or w.startswith("missing initramfs")]
         if fatal:
@@ -417,6 +419,23 @@ class QemuEngine:
         except OSError:
             pass
         return LaunchResult(True, argv, warnings)
+
+    @staticmethod
+    def _refresh_patches(inst: Instance, g: GlobalSettings) -> list[str]:
+        """Re-patch the image's boot ramdisk when this OpenStacks patches it differently from
+        the version that installed it (images.ensure_patched). Fails soft: e.g. another
+        instance of the same image keeps initramfs.bin open on Windows."""
+        if not inst.image:
+            return []
+        asset_dir = Path(g.resolved_assets_dir(inst.image))
+        if asset_dir.name != inst.image:
+            return []
+        try:
+            from . import images
+            done = images.ensure_patched(inst.image, out_root=asset_dir.parent)
+        except Exception as e:      # noqa: BLE001 - the old ramdisk still boots
+            return [f"{inst.image}: could not apply updated image patches ({e})"]
+        return [f"{inst.image}: image patches updated"] if done is not None else []
 
     def get(self, name: str) -> "QemuInstance | None":
         return self.instances.get(name)

@@ -254,6 +254,37 @@ def apply_patches(staging: Path, image: str, progress: Optional[ProgressFn] = No
     return done
 
 
+def patch_fingerprint(image: str) -> str:
+    """Hash of everything the patches of `image` are made of (scripts, helpers, assets), so
+    an installed image can tell that a newer OpenStacks patches it differently."""
+    h = hashlib.sha256()
+    files: list[Path] = []
+    for sub in ("all", image, "assets"):
+        d = PATCH_DIR / sub
+        if d.is_dir():
+            files += sorted(p for p in d.iterdir() if p.is_file() and p.suffix != ".pyc")
+    files += sorted(p for p in PATCH_DIR.glob("_*.py") if p.is_file())
+    for p in files:
+        h.update(f"{p.parent.name}/{p.name}|{p.stat().st_size}|".encode())
+        h.update(p.read_bytes())
+    return h.hexdigest()
+
+
+def ensure_patched(image: str, out_root: Path = ASSETS_ROOT) -> Optional[list[str]]:
+    """Re-run the ramdisk patches when they changed since the image was patched (an
+    OpenStacks update). Returns the patches applied, or None when nothing was needed.
+    Only images patched by OpenStacks (manifest with a patch list) are touched."""
+    out = out_root / image
+    man_path = out / "manifest.json"
+    if not man_path.exists():
+        return None
+    man = json.loads(man_path.read_text(encoding="utf-8"))
+    src = man.get("source", {})
+    if "patches" not in src or src.get("patch_fingerprint") == patch_fingerprint(image):
+        return None
+    return repatch(image, out_root=out_root)
+
+
 # -- 4. assets --------------------------------------------------------------------------
 def read_vdi(path: Path, max_bytes: int) -> bytes:
     """Flatten the first max_bytes of a VirtualBox VDI (fixed or dynamic)."""
@@ -422,7 +453,7 @@ def install_image(name: str, progress: Optional[ProgressFn] = None,
     cut_boot_files(staging)
     patches = apply_patches(staging, name, progress=progress)
     src = {"from": "download", "url": info.url, "client_build": info.build,
-           "md5": info.md5, "patches": patches}
+           "md5": info.md5, "patches": patches, "patch_fingerprint": patch_fingerprint(name)}
     out = build_assets(staging, name, out_root=out_root, move=True, source=src,
                        progress=progress)
     shutil.rmtree(staging, ignore_errors=True)
@@ -466,6 +497,7 @@ def repatch(image: str, out_root: Path = ASSETS_ROOT,
     man_path = out / "manifest.json"
     man = json.loads(man_path.read_text(encoding="utf-8")) if man_path.exists() else {}
     man.setdefault("source", {})["patches"] = patches
+    man["source"]["patch_fingerprint"] = patch_fingerprint(image)
     man["patched"] = time.strftime("%Y-%m-%d %H:%M:%S")
     man.setdefault("files", {})["initramfs.bin"] = _sha256(out / "initramfs.bin")
     man_path.write_text(json.dumps(man, indent=2), encoding="utf-8")

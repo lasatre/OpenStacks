@@ -3699,6 +3699,11 @@ static struct {
 
 static void gx_imgd_bh(void *opaque)     /* main loop: one "T <gen> <index...>" line */
 {
+    static unsigned logged;
+    if (logged < 400 && ((const char *)opaque)[0] == 'T') {                  /* the first changes, for diagnosis */
+        logged++;
+        gr_log("imgd: %s", (const char *)opaque);
+    }
     ost_input_send_line((const char *)opaque);
     g_free(opaque);
 }
@@ -3749,6 +3754,8 @@ void gr_imgd_line(const char *l)
         if (have) {
             gx.imgd_commit();
         }
+        gr_log("imgd: image list gen %u committed (%s)", gen,
+               have ? "detecting" : "no detection in this renderer");
         ost_input_printf("I %u %d", gen, have ? 1 : 0);
     }
 }
@@ -4033,6 +4040,9 @@ static bool gx_init_host(void)
     /* after grd_start: a display without a window turns the readback on */
     if (g_readback) gx.set_frame_cb(gx_frame, NULL);
     g.ready = true;
+    if (gx.imgd_begin) {                 /* image lists sent before now were refused */
+        aio_bh_schedule_oneshot(qemu_get_aio_context(), gx_imgd_bh, g_strdup("I r"));
+    }
     grd_kick_layout();
     gr_log("READY: gfxstream backend (%s, %dx%d, guest API %d, readback %s)", path,
            GR_W, GR_H, cfg.guest_api_level, g_readback ? "on" : "off");

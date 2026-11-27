@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -46,8 +46,26 @@ class Overlay(QWidget):
         self._owner = owner_provider
         self.opacity = 0.75
         self.wanted = True
+        # the owner's move/resize events reposition it at once (no visible lag while the
+        # window is dragged); the timer catches layout changes inside the window
+        self._watched: Optional[QObject] = None
         self._follow = QTimer(self, interval=150)
         self._follow.timeout.connect(self.sync)
+
+    def eventFilter(self, obj, ev) -> bool:
+        if ev.type() in (QEvent.Move, QEvent.Resize, QEvent.WindowStateChange, QEvent.Show,
+                         QEvent.Hide):
+            self.sync()
+        return False
+
+    def _watch(self, owner: Optional[QWidget]) -> None:
+        if owner is self._watched:
+            return
+        if self._watched is not None:
+            self._watched.removeEventFilter(self)
+        self._watched = owner
+        if owner is not None:
+            owner.installEventFilter(self)
 
     def start(self) -> None:
         self._follow.start()
@@ -55,11 +73,13 @@ class Overlay(QWidget):
 
     def stop(self) -> None:
         self._follow.stop()
+        self._watch(None)
         self.hide()
 
     def sync(self) -> None:
         """Follow the picture: position, size and visibility."""
         owner = self._owner()
+        self._watch(owner)
         if owner is not None and self.parentWidget() is not owner:
             self.hide()
             self.setParent(owner, self.FLAGS)        # the screen was popped out / back

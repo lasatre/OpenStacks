@@ -110,6 +110,7 @@ From QEMU to the front-end:
 | `F <0/1>` | the display window gained or lost focus (the engine releases everything on loss) |
 | `O <orientation>` | orientation changed |
 | `I <gen> <0/1>` | after `I c`: whether the renderer detects images (gfxstream ost_renderer only) |
+| `I r` | the renderer became ready: lists sent before were refused, send it again |
 | `T <gen> <index...>` | the images matched in a frame changed (indices of the `I i` lines) |
 
 Key codes are Linux evdev numbers everywhere. Windows scancodes are converted in QEMU with

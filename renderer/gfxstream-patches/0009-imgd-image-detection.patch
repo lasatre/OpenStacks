@@ -12,10 +12,10 @@ index d72eb78..3faf334 100644
    object_name_space.cpp
 diff --git a/host/gl/glestranslator/common/imgd.cpp b/host/gl/glestranslator/common/imgd.cpp
 new file mode 100644
-index 0000000..48345ab
+index 0000000..4a47922
 --- /dev/null
 +++ b/host/gl/glestranslator/common/imgd.cpp
-@@ -0,0 +1,341 @@
+@@ -0,0 +1,382 @@
 +// OpenStacks: BlueStacks-compatible image detection, GL-free core. See common/imgd.h.
 +#include "common/imgd.h"
 +
@@ -24,6 +24,9 @@ index 0000000..48345ab
 +#include <cmath>
 +#include <cstring>
 +#include <mutex>
++#include <cstdarg>
++#include <cstdio>
++#include <cstdlib>
 +
 +namespace imgd {
 +
@@ -150,6 +153,44 @@ index 0000000..48345ab
 +}
 +
 +bool armed() { return g_armed.load(std::memory_order_acquire); }
++
++static int envInt(const char* name, int dflt) {
++    const char* v = getenv(name);
++    return v && *v ? atoi(v) : dflt;
++}
++
++bool hashing() {
++    static const bool on = envInt("OST_IMGD", 1) != 0;
++    return on;
++}
++
++bool compressedCrc() {
++    static const bool on = envInt("OST_IMGD_COMPRESSED", 0) != 0;
++    return on;
++}
++
++int logLevel() {
++    static const int lvl = envInt("OST_IMGD_LOG", 0);
++    return lvl;
++}
++
++void logOnce(uint32_t crc, const char* fmt, ...) {
++    if (logLevel() < 1) return;
++    static std::mutex mu;
++    static std::unordered_map<std::string, int> seen;
++    char msg[256];
++    va_list ap;
++    va_start(ap, fmt);
++    vsnprintf(msg, sizeof(msg), fmt, ap);
++    va_end(ap);
++    std::string key = std::to_string(crc) + msg;
++    {
++        std::lock_guard<std::mutex> l(mu);
++        if (seen.size() > 20000 || seen[key]++) return;
++    }
++    fprintf(stderr, "[imgd] crc 0x%08X %s\n", crc, msg);
++    fflush(stderr);
++}
 +
 +std::shared_ptr<const Config> current() { return state().cfg; }
 +
@@ -359,10 +400,10 @@ index 0000000..48345ab
 +}  // namespace imgd
 diff --git a/host/gl/glestranslator/common/include/common/imgd.h b/host/gl/glestranslator/common/include/common/imgd.h
 new file mode 100644
-index 0000000..e9f6c8c
+index 0000000..0db1af5
 --- /dev/null
 +++ b/host/gl/glestranslator/common/include/common/imgd.h
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,106 @@
 +// OpenStacks: BlueStacks-compatible image detection ("Smart" game controls).
 +//
 +// BlueStacks recognises on-screen UI by texture: a controls scheme lists images
@@ -413,6 +454,11 @@ index 0000000..e9f6c8c
 +void add(const Image& im);
 +void commit();                     // publish the staged list; an empty list turns detection off
 +bool armed();                      // a non-empty config is published (cheap)
++bool hashing();                    // hash texture uploads (always, unless OST_IMGD=0)
++bool compressedCrc();              // CRC of compressed bytes (bst.imgd_compressed_tex, OST_IMGD_COMPRESSED=1)
++int logLevel();                    // OST_IMGD_LOG: 1 = configured CRCs seen, 2 = every upload
++// log once per (crc, what) at level >= 1 (stderr, the QEMU log)
++void logOnce(uint32_t crc, const char* fmt, ...);
 +std::shared_ptr<const Config> current();   // this thread's snapshot of the published config
 +
 +using ReportFn = void (*)(void* user, uint32_t gen, const int32_t* idx, int n);
@@ -478,7 +524,7 @@ index 9e41fdf..7d475f9 100644
                  unsigned int globalName) const override;
      void restore(ObjectLocalName localName,
 diff --git a/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp b/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp
-index 63efd84..17ed9f3 100644
+index 63efd84..0d41fee 100644
 --- a/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp
 +++ b/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp
 @@ -37,6 +37,7 @@
@@ -489,17 +535,29 @@ index 63efd84..17ed9f3 100644
  #include "common/saveable_texture.h"
  #include "common/texture_data.h"
  #include "common/texture_utils.h"
-@@ -477,6 +478,23 @@ static TextureData* getTextureTargetData(GLenum target){
+@@ -477,6 +478,35 @@ static TextureData* getTextureTargetData(GLenum target){
      return getTextureData(ctx->getTextureLocalName(target,tex));
  }
  
 +// OpenStacks image detection: texture CRCs (common/imgd.h; the draw side is s_imgdDraw)
 +static thread_local bool t_imgdInCompressed = false;   // the decompressing glTexImage2D call
 +
-+static void s_imgdSetCrc(GLEScontext* ctx, GLenum target, GLint level, uint32_t crc) {
++static void s_imgdSetCrc(GLEScontext* ctx, GLenum target, GLint level, uint32_t crc,
++                         const char* how = "", unsigned w = 0, unsigned h = 0, unsigned fmt = 0,
++                         unsigned type = 0) {
++    if (imgd::logLevel() >= 3)
++        imgd::logOnce(crc, "%s %ux%u fmt 0x%x type 0x%x level %d target 0x%x (any)", how, w, h,
++                      fmt, type, level, target);
 +    if (target != GL_TEXTURE_2D || level != 0 || !ctx->shareGroup().get()) return;
 +    TextureData* texData = getTextureTargetData(target);
 +    if (texData) texData->imgdCrc = crc;
++    if (crc && imgd::logLevel() >= 1) {
++        auto cfg = imgd::current();
++        bool wanted = cfg && cfg->byCrc.count(crc);
++        if (wanted || imgd::logLevel() >= 2)
++            imgd::logOnce(crc, "%s %ux%u fmt 0x%x type 0x%x level %d target 0x%x%s", how, w, h,
++                          fmt, type, level, target, wanted ? " (an image's texture)" : "");
++    }
 +}
 +
 +static uint32_t s_imgdPixelsCrc(GLEScontext* ctx, GLsizei w, GLsizei h, GLenum format,
@@ -513,7 +571,7 @@ index 63efd84..17ed9f3 100644
  namespace translator {
  namespace gles2 {
  
-@@ -925,6 +943,7 @@ GL_APICALL void  GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
+@@ -925,6 +955,7 @@ GL_APICALL void  GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
  
      auto funcPtr = translator::gles2::glTexImage2D;
  
@@ -521,34 +579,40 @@ index 63efd84..17ed9f3 100644
      if (shouldPassthroughCompressedFormat(ctx, internalformat)) {
          doCompressedTexImage2DNative(ctx, target, level, internalformat,
                                            width, height, border, imageSize, data);
-@@ -933,6 +952,13 @@ GL_APICALL void  GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
+@@ -933,6 +964,17 @@ GL_APICALL void  GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
                                      width, height, border,
                                      imageSize, data, funcPtr);
      }
 +    t_imgdInCompressed = false;
-+    // imgdUpdateCompressedTextureCRC: the compressed bytes as uploaded
-+    if (imgd::armed()) {
++    // imgdUpdateCompressedTextureCRC: the compressed bytes as uploaded, only with
++    // bst.imgd_compressed_tex (off in BlueStacks' shipped config); otherwise the texture keeps
++    // the CRC of its decompressed upload (the glTexImage2D call above)
++    if (imgd::hashing() && imgd::compressedCrc()) {
++        bool pbo = ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER);
 +        s_imgdSetCrc(ctx, target, level,
-+                     data && imageSize > 0 && !ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER)
-+                             ? imgd::crc32(data, (size_t)imageSize) : 0);
++                     data && imageSize > 0 && !pbo ? imgd::crc32(data, (size_t)imageSize) : 0,
++                     pbo ? "CompressedTexImage2D(PBO)" : "CompressedTexImage2D", width, height,
++                     internalformat, imageSize);
 +    }
  
      TextureData* texData = getTextureTargetData(target);
      if (texData) {
-@@ -970,6 +996,12 @@ GL_APICALL void  GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint leve
+@@ -970,6 +1012,14 @@ GL_APICALL void  GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint leve
              SET_ERROR_IF(format != texData->compressedFormat, GL_INVALID_OPERATION);
          }
          SET_ERROR_IF(ctx->getMajorVersion() < 3 && !data, GL_INVALID_OPERATION);
-+        if (imgd::armed()) {
++        if (imgd::hashing() && imgd::compressedCrc()) {
++            bool pbo = ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER);
 +            s_imgdSetCrc(ctx, target, level,
-+                         data && imageSize > 0 && !ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER)
-+                                 ? imgd::crc32(data, (size_t)imageSize) : 0);
++                         data && imageSize > 0 && !pbo ? imgd::crc32(data, (size_t)imageSize) : 0,
++                         pbo ? "CompressedTexSubImage2D(PBO)" : "CompressedTexSubImage2D",
++                         width, height, format, imageSize);
 +        }
 +        t_imgdInCompressed = true;
          if (shouldPassthroughCompressedFormat(ctx, format)) {
              doCompressedTexSubImage2DNative(ctx, target, level, xoffset, yoffset,
                                                   width, height, format, imageSize, data);
-@@ -984,6 +1016,7 @@ GL_APICALL void  GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint leve
+@@ -984,6 +1034,7 @@ GL_APICALL void  GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint leve
                              width, height, format, type, data);
                      });
          }
@@ -556,7 +620,7 @@ index 63efd84..17ed9f3 100644
      }
  }
  
-@@ -1587,10 +1620,180 @@ static void s_glDrawPost(GLESv2Context* ctx, GLenum mode) {
+@@ -1587,10 +1638,184 @@ static void s_glDrawPost(GLESv2Context* ctx, GLenum mode) {
      }
  }
  
@@ -703,6 +767,10 @@ index 63efd84..17ed9f3 100644
 +        if (imgd::isFound(idx)) continue;
 +        const imgd::Image& im = cfg->images[idx];
 +        imgd::Attr texAttr = s_imgdAttr(ctx, im.texAttr);
++        if (imgd::logLevel() >= 1)
++            imgd::logOnce(crc, "drawn (unit %d, mode 0x%x, %s, attr %d: %s type 0x%x size %d)",
++                          unit, mode, elements ? "elements" : "arrays", im.texAttr,
++                          texAttr.data ? "data" : "NO DATA", texAttr.type, texAttr.size);
 +        if (!texAttr.data) continue;
 +        const bool useRect = im.hasRect && cfg->emu == imgd::EMU_UNITY;
 +        imgd::Attr posAttr;
@@ -737,7 +805,7 @@ index 63efd84..17ed9f3 100644
  
      if (ctx->vertexAttributesBufferBacked()) {
          s_glDrawPre(ctx, mode);
-@@ -1626,6 +1829,7 @@ GL_APICALL void  GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum t
+@@ -1626,6 +1851,7 @@ GL_APICALL void  GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum t
      GET_CTX_V2();
      SET_ERROR_IF(count < 0,GL_INVALID_VALUE)
      SET_ERROR_IF(!(GLESv2Validate::drawMode(mode) && GLESv2Validate::drawType(type)),GL_INVALID_ENUM);
@@ -745,25 +813,33 @@ index 63efd84..17ed9f3 100644
  
      if (ctx->isBindedBuffer(GL_ELEMENT_ARRAY_BUFFER) &&
          ctx->vertexAttributesBufferBacked()) {
-@@ -4051,6 +4255,10 @@ static void sPrepareTexImage2D(GLenum target, GLsizei level, GLint internalforma
+@@ -4051,6 +4277,13 @@ static void sPrepareTexImage2D(GLenum target, GLsizei level, GLint internalforma
  
  GL_APICALL void  GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid* pixels){
      GET_CTX();
 +    // imgdUpdateTextureCRC: bpp * w * h bytes of the level-0 upload (0 without pixels)
-+    if (imgd::armed() && !t_imgdInCompressed) {
-+        s_imgdSetCrc(ctx, target, level, s_imgdPixelsCrc(ctx, width, height, format, type, pixels));
++    if (imgd::hashing()) {
++        s_imgdSetCrc(ctx, target, level, s_imgdPixelsCrc(ctx, width, height, format, type, pixels),
++                     t_imgdInCompressed ? "TexImage2D(decompressed)"
++                     : ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER) ? "TexImage2D(PBO)" : "TexImage2D",
++                     width, height, format, type);
 +    }
      // clear previous error
      GLint err = ctx->dispatcher().glGetError();
      if (err != GL_NO_ERROR) {
-@@ -4315,6 +4523,11 @@ GL_APICALL void GL_APIENTRY glPopDebugGroupKHR(void) {
+@@ -4315,6 +4548,16 @@ GL_APICALL void GL_APIENTRY glPopDebugGroupKHR(void) {
  
  GL_APICALL void  GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid* pixels){
      GET_CTX();
 +    // a level-0 sub-upload replaces the texture's CRC with its own (0x1402b4340)
-+    if (imgd::armed() && !t_imgdInCompressed && pixels) {
++    if (imgd::hashing() && pixels) {
 +        uint32_t crc = s_imgdPixelsCrc(ctx, width, height, format, type, pixels);
-+        if (crc) s_imgdSetCrc(ctx, target, level, crc);
++        if (crc || imgd::logLevel() >= 3)
++            s_imgdSetCrc(ctx, target, level, crc,
++                         t_imgdInCompressed ? "TexSubImage2D(decompressed)"
++                         : ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER) ? "TexSubImage2D(PBO)"
++                                                                       : "TexSubImage2D",
++                         width, height, format, type);
 +    }
      SET_ERROR_IF(!(GLESv2Validate::textureTarget(ctx, target) ||
                     GLESv2Validate::textureTargetEx(ctx, target)), GL_INVALID_ENUM);

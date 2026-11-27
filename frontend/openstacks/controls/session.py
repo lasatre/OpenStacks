@@ -124,7 +124,8 @@ class ControlsSession(QObject):
     def _overlay_controls(self) -> list[dict]:
         if not self.engine.enabled or not self.engine.scheme:
             return []
-        return [c.raw for c in self.engine.controls]
+        # only controls whose conditions hold (a Smart scheme shows what the screen allows)
+        return [c.raw for c in self.engine.controls if c.active]
 
     def _aiming(self) -> bool:
         return any(isinstance(c, Pan) and c.captures_mouse() for c in self.engine.controls)

@@ -1009,7 +1009,10 @@ bound to the active unit:
   `imgdComputePixelSize` 0x1402ba6c0); NULL pixels -> 0;
 * `glTexSubImage2D` (0x1402b4340): the texture's CRC becomes the sub-upload's crc32(w * h * bpp);
 * `glCompressedTexImage2D` (0x1402b3930) / `glCompressedTexSubImage2D` (0x1402b3ae0):
-  crc32 of the compressed bytes (`imageSize`).
+  crc32 of the compressed bytes (`imageSize`), but only when `bst.imgd_compressed_tex` is set
+  (0x1402b2c20, hook table 0x1402b2d00); BlueStacks ships it as "0" (`bst.imgd_min_tex_size`
+  "64"), so a compressed texture keeps the CRC of the translator's decompressed upload [I: that
+  the decompressing call reaches the glTexImage2D hook].
 
 **Per draw** (`imageDetect` 0x1402b09d0, from the draw hook 0x1402b0020):
 1. The sampler unit: per-package uniform name (table below; `glGetUniformLocation` on the current
@@ -1054,6 +1057,12 @@ GroupA (`imgdNormalizedScreenPositionGroupA` 0x1402b8d60), Unity HLSLcc: O2W =
 `glGetUniformfv`); if a location is missing, from uniform blocks `UnityPerDraw` (float 0) and
 `UnityPerFrame` (float 76) (`FUN_1402ba130`). world = O2W[0]*x + O2W[1]*y + O2W[2]*z + O2W[3];
 clip = VP[0]*wx + VP[1]*wy + VP[2]*wz + VP[3]*ww. The other emulations were not analysed.
+
+Environment (OpenStacks): `OST_IMGD=0` no hashing at all, `OST_IMGD_COMPRESSED=1` the compressed
+CRC, `OST_IMGD_LOG=1` log uploads/draws of an image's texture (2: every texture, 3: every call).
+Seen on Free Fire 1.132.1 (Android 13): ETC1 (0x8d64) and ETC2 RGBA8 (0x9278) textures plus
+uncompressed GL_ALPHA sub-uploads; none of the lobby's textures are in the Smart scheme (its
+images are the in-match HUD), so a match is still to be observed.
 
 **OpenStacks:** gfxstream patch 0009 (translator hooks + `glestranslator/common/imgd.cpp`), the
 `ost_imgd_*` API of ost_renderer, QEMU `I`/`T` lines (keymapping_plan.md), engine `imgd.py`.

@@ -420,6 +420,9 @@ class Engine(QObject):
             elif kind == "O":
                 self.orient = int(p[1]) & 3
                 self.changed.emit()
+            elif kind == "I" and p[1] == "r":    # the renderer (re)started: resend
+                self.send_images()
+                self.refresh_enabled()
             elif kind == "I":
                 self._on_images_ready(int(p[1]), p[2] == "1")
             elif kind == "T":

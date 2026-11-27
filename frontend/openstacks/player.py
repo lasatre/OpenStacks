@@ -301,6 +301,7 @@ class PlayerPane(QWidget):
             from .controls.session import ControlsSession
             self.controls = ControlsSession(inst, self.adb, self.display, parent=self)
             self.controls.status.connect(self.flash)
+            self.controls.editor_requested.connect(self.open_controls_editor)
 
         self._vnc_state = f"vnc 127.0.0.1:{inst.vnc_port}: idle"
         self._adb_threads: list[_CallThread] = []
@@ -560,6 +561,20 @@ class PlayerPane(QWidget):
             self.flash("game controls need the native display (display=native)")
             return
         self.controls.menu(self).exec(QCursor.pos())
+
+    def open_controls_editor(self) -> None:
+        if self.controls is None:
+            return
+        panel = self.controls.open_editor()
+        if panel is None:
+            return
+        win = self.window()
+        if hasattr(win, "attach_side_panel"):
+            win.attach_side_panel(panel)
+        else:                                # screen popped out: a floating panel
+            panel.setParent(None)
+            panel.setWindowFlag(Qt.Tool, True)
+            panel.show()
 
     def multitouch(self) -> None:
         self.flash("multi-touch gestures: not implemented yet (WIP)")
@@ -877,6 +892,13 @@ class PlayerWindow(QMainWindow):
         row.addWidget(rail)
         self.setCentralWidget(holder)
         self.sidebar = rail
+        self._side_row = row
+
+    def attach_side_panel(self, panel: QWidget) -> None:
+        """Dock a panel (the controls editor) at the window's right edge, BlueStacks-style."""
+        self._side_row.addWidget(panel)
+        panel.show()
+        panel.closed.connect(lambda: self._side_row.removeWidget(panel))
 
     # -- pane helpers -----------------------------------------------------------------
     def current_pane(self) -> Optional[PlayerPane]:

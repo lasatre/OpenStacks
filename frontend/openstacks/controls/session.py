@@ -63,6 +63,7 @@ class PackageWatch(QThread):
 
 class ControlsSession(QObject):
     status = Signal(str)
+    editor_requested = Signal()
 
     def __init__(self, inst, adb, display, parent=None):
         super().__init__(parent)
@@ -79,6 +80,7 @@ class ControlsSession(QObject):
         self.watch.package.connect(self._on_package)
         self.overlay = Overlay(self._screen_rect, self._overlay_controls, self._aiming,
                                lambda: self.display.window())
+        self.editor = None
         self._view = QTimer(self, interval=250)
         self._view.timeout.connect(self._sync_view)
 
@@ -90,6 +92,9 @@ class ControlsSession(QObject):
         self._view.start()
 
     def stop(self) -> None:
+        if self.editor is not None:
+            self.editor.dirty = False
+            self.editor.close_editor()
         self._view.stop()
         self.watch.stop()
         self.overlay.stop()
@@ -124,7 +129,9 @@ class ControlsSession(QObject):
         self.package = pkg
         self.reload()
 
-    def reload(self) -> None:
+    def reload(self, keep_disabled: bool = False) -> None:
+        if self.editor is not None and not keep_disabled:
+            return                       # the editor owns the controls until it closes
         path = store.find(self.package)
         cfg = None
         if path:
@@ -134,6 +141,8 @@ class ControlsSession(QObject):
                 self.status.emit(f"game controls: {path.name}: {e}")
         self.cfg_path = path
         self.engine.load(cfg)
+        if self.editor is not None:
+            self.engine.set_enabled(False)
         self.overlay.sync()
         self.status.emit(self.describe())
 
@@ -150,6 +159,32 @@ class ControlsSession(QObject):
             s += "; smart conditions ignored (on-screen detection not implemented)"
         return s
 
+    # -- the controls editor
+    def open_editor(self):
+        """The editor side panel for the game in front (None if no game is known)."""
+        if self.editor is not None:
+            return self.editor
+        if not self.package:
+            self.status.emit("game controls: open a game first")
+            return None
+        from .editor import ControlsEditor
+        self._was_enabled = self.engine.enabled
+        self.engine.set_enabled(False)
+        self.overlay.wanted, self._overlay_was = False, self.overlay.wanted
+        self.overlay.sync()
+        self.editor = ControlsEditor(self)
+        self.editor.closed.connect(self._editor_closed)
+        return self.editor
+
+    def _editor_closed(self) -> None:
+        ed, self.editor = self.editor, None
+        if ed is not None:
+            ed.setParent(None)
+            ed.deleteLater()
+        self.engine.set_enabled(getattr(self, "_was_enabled", True))
+        self.overlay.wanted = getattr(self, "_overlay_was", True)
+        self.reload()
+
     def _type_text(self, text: str) -> None:
         try:
             self.adb.shell("input", "text", text.replace(" ", "%s"), timeout=10)
@@ -160,6 +195,8 @@ class ControlsSession(QObject):
     def menu(self, parent) -> QMenu:
         m = QMenu(parent)
         e = self.engine
+        m.addAction("Controls editor...", lambda: self.editor_requested.emit())
+        m.addSeparator()
         a = m.addAction("Game controls on")
         a.setCheckable(True)
         a.setChecked(e.enabled)

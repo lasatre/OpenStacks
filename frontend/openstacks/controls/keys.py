@@ -124,3 +124,28 @@ def label(name: str) -> str:
     if n.startswith("Gamepad"):
         return n[len("Gamepad"):]
     return n
+
+
+# Windows scan codes of E0-extended keys (Qt: nativeScanCode | 0x100) -> evdev
+_WIN_EXT = {0x1C: 96, 0x1D: 97, 0x35: 98, 0x37: 99, 0x38: 100, 0x47: 102, 0x48: 103,
+            0x49: 104, 0x4B: 105, 0x4D: 106, 0x4F: 107, 0x50: 108, 0x51: 109, 0x52: 110,
+            0x53: 111, 0x5B: 125, 0x5C: 126, 0x5D: 127}
+
+
+def evdev_from_native(scan: int, windows: bool) -> int:
+    """A Qt key event's nativeScanCode() -> evdev code (0 if unknown).
+    X11 keycodes are evdev + 8. Windows set-1 scan codes equal evdev for plain keys;
+    E0-extended ones (bit 0x100 in Qt's value) are mapped by table."""
+    if not windows:
+        return scan - 8 if scan >= 8 else 0
+    if scan & 0x100 or scan & 0xE000 == 0xE000:
+        return _WIN_EXT.get(scan & 0xFF, 0)
+    return scan if 0 < scan < 0x80 else 0
+
+
+def name_from_native(scan: int, windows: bool) -> str:
+    names = names_for_code(evdev_from_native(scan, windows))
+    return names[0] if names else ""
+
+
+MODIFIERS = ("Ctrl", "Shift", "Alt")

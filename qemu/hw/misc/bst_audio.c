@@ -297,17 +297,33 @@ static void bst_audio_start(BstAudStream *st)
 static bool bst_audio_config(BstAudioState *s, BstAudStream *st,
                              uint32_t cnt_off, const uint8_t *c)
 {
-    st->rate = ldl_le_p(c + 0x0c);
-    st->bits = ldl_le_p(c + 0x10);
-    st->channels = ldl_le_p(c + 0x14);
-    st->buffer_bytes = ldl_le_p(c + 0x18);
-    st->period_bytes = ldl_le_p(c + 0x1c);
-    st->bytes_per_sec = ldl_le_p(c + 0x20);
-    st->frame_bytes = ldl_le_p(c + 0x24);
+    /* Android 13's driver (kernel 5.15, Tiramisu64) puts one more u32 at +0x0c (28 seen),
+     * so its fields start 4 bytes later (issue #9: it was read as "28 Hz, 48000 bit" and
+     * refused). Kernel 4.x images put the sample rate at +0x0c. Tell them apart by
+     * whether +0x0c or +0x10 holds a sample rate. */
+    uint32_t b = 0x0c;
+    uint32_t r0 = ldl_le_p(c + 0x0c), r1 = ldl_le_p(c + 0x10);
+    if (r0 < 8000 && r1 >= 8000 && r1 <= 384000) {
+        b = 0x10;
+    }
+    st->rate = ldl_le_p(c + b);
+    st->bits = ldl_le_p(c + b + 0x04);
+    st->channels = ldl_le_p(c + b + 0x08);
+    st->buffer_bytes = ldl_le_p(c + b + 0x0c);
+    st->period_bytes = ldl_le_p(c + b + 0x10);
+    st->bytes_per_sec = ldl_le_p(c + b + 0x14);
+    st->frame_bytes = ldl_le_p(c + b + 0x18);
+    fprintf(stderr, "[bstaudio] config %u Hz, %u bit, %u ch, ring %u, period %u, %u B/s, "
+            "frame %u\n", st->rate, st->bits, st->channels, st->buffer_bytes,
+            st->period_bytes, st->bytes_per_sec, st->frame_bytes);
     if (!st->buffer_bytes || st->buffer_bytes > AUD_RING_MAX ||
         !st->period_bytes || st->period_bytes > st->buffer_bytes) {
-        fprintf(stderr, "[bstaudio] bad config buffer=%u period=%u\n",
+        fprintf(stderr, "[bstaudio] bad config buffer=%u period=%u, raw:",
                 st->buffer_bytes, st->period_bytes);
+        for (int i = 0; i < 0x40; i += 4) {
+            fprintf(stderr, " %08x", ldl_le_p(c + i));
+        }
+        fprintf(stderr, "\n");
         st->configured = false;
         return false;
     }

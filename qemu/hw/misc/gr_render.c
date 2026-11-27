@@ -3659,6 +3659,17 @@ static void gx_fast_exit(int status, void *arg)
     fflush(NULL);
     _exit(status);
 }
+#else
+/* Windows: ExitProcess kills the other threads, then runs every DLL's DLL_PROCESS_DETACH.
+ * With gfxstream on the NVIDIA GL driver that detach waits for driver work that died with
+ * its thread: QEMU sits at exit forever with one thread (and the guest's RAM) left, and
+ * cannot be killed. QEMU has flushed and closed its disks before calling exit(), so the
+ * process ends here, before the DLL detach (atexit handlers run last-registered first). */
+static void gx_fast_exit_win(void)
+{
+    fflush(NULL);
+    TerminateProcess(GetCurrentProcess(), 0);
+}
 #endif
 
 static bool gx_init_host(void)
@@ -3717,6 +3728,10 @@ static bool gx_init_host(void)
     }
 #ifndef _WIN32
     on_exit(gx_fast_exit, NULL);             /* after init: Mesa etc. are loaded now */
+#else
+    if (gr_gfx()) {
+        atexit(gx_fast_exit_win);            /* after init: the GL driver is loaded now */
+    }
 #endif
     g.fbBuf = (uint8_t *)calloc(1, GR_FB_BYTES);
     g.fbPrev = (uint8_t *)calloc(1, GR_FB_BYTES);

@@ -95,6 +95,7 @@ From the front-end to QEMU:
 | `lock <0/1>` | pointer lock: hide, confine and report relative motion |
 | `k <evdev> <0/1>` | inject a key into the guest (SendOriginalKeys, Script `text` fallback) |
 | `a <x> <y> <z>` | accelerometer (Tilt): gravity as HD-Player sends it, `-g * 1e6`; QEMU completes the guest's parked `gcal` request with gcall 0x3fc |
+| `g <opcode> <args...>` | any gcall host call (docs/re/kmm_controls.md 3.16.1); NativeCursor sends the mouse (0x3f8 enable, 0x3fd data, 0x40a pointer). Queued in QEMU; accelerometer values and consecutive mouse moves coalesce |
 
 From QEMU to the front-end:
 
@@ -132,9 +133,9 @@ the existing qnum tables.
 
 Status:
 - Milestones 1 and 3 are done.
-- Milestone 2 is done except SmartScroll, GenericSwipe and Callback (their HD-Player runtimes
-  are not yet analysed). Tilt drives the guest accelerometer through the `gcal` host-call
-  channel (verified on Pie64: `BstGCallService` reports the values and the sensor follows).
+- Milestone 2 is done: all 24 HD-Player control types have a runtime. Tilt (accelerometer)
+  and NativeCursor (Android mouse) go through the `gcal` host-call channel; both verified on
+  Pie64. GenericSwipe's extraData.txt logging is not reproduced.
 - The runtime follows docs/re/kmm_controls.md: a 16 ms tick, speeds in percent per second,
   HD-Player's dispatch and combo shadowing, parse defaults on load and editor defaults on
   create.

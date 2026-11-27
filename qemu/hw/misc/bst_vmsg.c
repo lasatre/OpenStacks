@@ -101,6 +101,8 @@ typedef struct BstVmsgConn {
 #define VMSG_PUSH_SLOTS         64
 #define VMSG_PUSH_MAX           132             /* touch frame = largest */
 #define VMSG_TOUCH_SLOTS        16
+#define VMSG_GCAL_SLOTS         32
+#define VMSG_GCAL_WORDS         16      /* opcode, length, up to 14 arguments */
 #define VMSG_TOUCH_NONE         0x7fffffffu
 
 typedef struct BstVmsgState {
@@ -124,11 +126,11 @@ typedef struct BstVmsgState {
      * raising the line until the guest's hard ISR clears it (BAR0+0x28) */
     bool irq_busy;
     /* gcal (host->guest calls, HD-Player gcall/Gcall.cpp): the guest parks a method-0
-     * request; a host call completes it with the message in the out window. Only the
-     * accelerometer call (Tilt control) is sent; the latest value wins. */
+     * request; a host call completes it with the message in the out window. Calls come
+     * from the controls channel (Tilt: accelerometer 0x3fc, NativeCursor: mouse 0x3fd). */
     int gcal_wait;                  /* cid of the parked request, -1 = none */
-    bool accel_pending;
-    int32_t accel[3];
+    uint32_t gq[VMSG_GCAL_SLOTS][VMSG_GCAL_WORDS];
+    unsigned gq_h, gq_t;
     QemuInputHandlerState *ihs;
     Notifier init_done;
     int tx, ty;
@@ -193,22 +195,44 @@ static BstVmsgConn *bst_vmsg_get_conn(BstVmsgState *s, uint32_t cid)
     return &s->conn[cid];
 }
 
-/* write the next host call into a gcal out window; false = nothing to send */
+/* write the next host call into a gcal out window; false = nothing to send.
+ * A message is {u32 opcode, u32 length in bytes (header included), u32 args...}, as
+ * HD-Player's GcallEnc.cpp writes them and libgcall_jni gcallDecode reads them. */
 static bool bst_vmsg_gcal_fill(BstVmsgState *s, uint8_t *out)
 {
-    if (!s->accel_pending) {
+    if (s->gq_h == s->gq_t) {
         return false;
     }
-    s->accel_pending = false;
-    /* gcallSendAccelerometerDataRpc (HD-Player 0x1402a4c70): {opcode 0x3fc, length 20,
-     * x, y, z}, gravity in units of -1e-6 g; libgcall_jni gcallDecode passes the three
-     * words to gcallSendAccelerometerDataClbk */
-    stl_le_p(out + 0x00, 0x3fc);
-    stl_le_p(out + 0x04, 0x14);
-    stl_le_p(out + 0x08, (uint32_t)s->accel[0]);
-    stl_le_p(out + 0x0c, (uint32_t)s->accel[1]);
-    stl_le_p(out + 0x10, (uint32_t)s->accel[2]);
+    uint32_t *m = s->gq[s->gq_h++ % VMSG_GCAL_SLOTS];
+    for (uint32_t i = 0; i < m[1] / 4; i++) {
+        stl_le_p(out + 4 * i, m[i]);
+    }
     return true;
+}
+
+static bool gcal_is_move(const uint32_t *m)
+{
+    return m[0] == 0x3fd && m[2] == 0;      /* gcallSendMouseDataRpc, action 0 = move */
+}
+
+/* queue a host call; the latest accelerometer value and consecutive mouse moves replace
+ * the queued ones */
+static void bst_vmsg_gcal_queue(BstVmsgState *s, const uint32_t *args, unsigned n)
+{
+    uint32_t m[VMSG_GCAL_WORDS] = { args[0], 4 * (n + 1) };
+    memcpy(m + 2, args + 1, 4 * (n - 1));
+    for (unsigned i = s->gq_h; i != s->gq_t; i++) {
+        uint32_t *q = s->gq[i % VMSG_GCAL_SLOTS];
+        if ((m[0] == 0x3fc && q[0] == 0x3fc) ||
+            (gcal_is_move(m) && gcal_is_move(q) && i + 1 == s->gq_t)) {
+            memcpy(q, m, sizeof(m));
+            return;
+        }
+    }
+    if (s->gq_t - s->gq_h >= VMSG_GCAL_SLOTS) {
+        s->gq_h++;                          /* full: drop the oldest */
+    }
+    memcpy(s->gq[s->gq_t++ % VMSG_GCAL_SLOTS], m, sizeof(m));
 }
 
 /* complete the parked gcal request if there is a call to send and the IRQ slot is free
@@ -217,7 +241,7 @@ static bool bst_vmsg_gcal_fill(BstVmsgState *s, uint8_t *out)
 static void bst_vmsg_gcal_kick(BstVmsgState *s)
 {
     int cid = s->gcal_wait;
-    if (cid < 0 || s->irq_busy || !s->accel_pending) {
+    if (cid < 0 || s->irq_busy || s->gq_h == s->gq_t) {
         return;
     }
     BstVmsgConn *c = &s->conn[cid];
@@ -630,11 +654,24 @@ static void ost_input_line(BstVmsgState *s, char *l)
         s->syn_dirty = false;
         bst_vmsg_emit(s);
         return;
-    case 'a': {                                  /* a <x> <y> <z>: accelerometer (Tilt) */
-        int32_t g[3];
-        if (sscanf(l + 1, "%d %d %d", &g[0], &g[1], &g[2]) == 3) {
-            memcpy(s->accel, g, sizeof(g));
-            s->accel_pending = true;
+    case 'a':                                    /* a <x> <y> <z>: accelerometer (Tilt) */
+    case 'g': {                                  /* g <opcode> <args...>: a host call */
+        uint32_t w[VMSG_GCAL_WORDS - 1];
+        unsigned n = 0;
+        char *p = l + 1, *end;
+        if (l[0] == 'a') {
+            w[n++] = 0x3fc;
+        }
+        while (n < VMSG_GCAL_WORDS - 1) {
+            long v = strtol(p, &end, 10);
+            if (end == p) {
+                break;
+            }
+            w[n++] = (uint32_t)v;
+            p = end;
+        }
+        if (n >= 1 && w[0] >= 0x3e8 && w[0] <= 0x412) {     /* gcallDecode's range */
+            bst_vmsg_gcal_queue(s, w, n);
             bst_vmsg_gcal_kick(s);
         }
         return;

@@ -80,6 +80,7 @@ class Engine(QObject):
         self._pos: dict[int, tuple[int, int]] = {}
         self._focused = True
         self.orient = 0                  # guest display rotation (QEMU "O" line)
+        self._native_mouse: Optional[int] = None   # guest uinput mouse flag, None = none
         self._lock = False
         self._caps = None
         self._timer = QTimer(self, interval=TICK_MS)
@@ -197,6 +198,7 @@ class Engine(QObject):
 
     def _on_connected(self) -> None:
         self._caps = None
+        self._native_mouse = None
         self.status.emit("game controls: connected")
         self.update_capture()
 
@@ -248,6 +250,16 @@ class Engine(QObject):
         x, y, z = math.sin(rx), math.sin(ry), math.cos(rx) * math.cos(ry)
         x, y = {0: (-x, -y), 1: (-y, x), 2: (x, y), 3: (y, -x)}[self.orient]
         self.ch.send(f"a {int(x * -1e6)} {int(y * -1e6)} {int(z * -1e6)}")
+
+    def native_mouse(self, flag: int) -> None:
+        """Create the guest's uinput mouse (gcallEnableNativeMouseRpc(1, flag)) once per
+        connection: Android takes a moment to add a new device, and events sent to one
+        being re-created are lost. flag: 0 in HD-Player's relative (native pan) path."""
+        if self._native_mouse != flag:
+            if self._native_mouse is not None:
+                self.ch.send("g 1016 0 0")
+            self.ch.send(f"g 1016 1 {flag}")
+            self._native_mouse = flag
 
     def send_key_guest(self, name: str, down: bool) -> None:
         for code in keys.evdev_codes(name)[:1]:

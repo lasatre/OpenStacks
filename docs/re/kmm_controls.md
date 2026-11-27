@@ -876,11 +876,76 @@ after `SpeedUpWaitTime` ms the velocity is multiplied by `SpeedUpFactor`; when t
 the view border it is lifted and re-pressed (`ResetDelay` ms); leaving the margin releases.
 Gated by `EdgeScrollEnabled` and a global toggle ("Scroll edge enabled: {}", 0x1402e81c0).
 
-### 3.16 SmartScroll, GenericSwipe, NativeCursor, Callback — not analysed (TODO)
+### 3.16 SmartScroll, GenericSwipe, NativeCursor, Callback [C unless marked]
 
-Only the parsers are known (section 2). SmartScroll is configured through its own editor
-view-model (`KmmSmartScrollViewModel`); NativeCursor toggles the host cursor/`RelativeNorm` mode;
-Callback emits `Id`/`Action` to the UI layer.
+**SmartScroll** (ImapSmartScroll.cpp; onKey 0x1404af4b0, onMouse 0x1404af580, tick 0x1404af6b0,
+reset 0x1404aee40, activateSwipe 0x1404aee70). Besides X/Y/Speed the control has `Swipes[]`:
+`{X1, Y1, X2, Y2, Speed, Name, EnableCondition, Key}` (control item 0x80 bytes: doubles at
++0..+0x20, condition at +0x48, key at +0x68). The runtime keeps per entry `{Speed, (X2,Y2),
+(X1,Y1)}` and an enable flag from the entry's EnableCondition.
+* key down: the first entry whose `Key` matches; if enabled, activate it;
+* wheel (only while no swipe runs): index += (delta > 0 ? -1 : +1) * (|delta/120| mod n), modulo
+  n; then step one at a time in the same direction past disabled entries (none enabled:
+  nothing); activate the result;
+* activate(i): touch down at (X1,Y1), target (X2,Y2), speed = the entry's Speed (%/s); the
+  control-level Speed is not used;
+* tick: step = unit(target - cur) * Speed * 16/1000 (`FUN_140301490`); move while the distance
+  is >= 0.01 and the step does not overshoot either axis, else lift (so X1,Y1 = X2,Y2 is a
+  one-tick tap). Free Fire's bundled Smart scheme uses it for weapon slots (keys 1/2/3, wheel).
+
+**GenericSwipe** (ImapGenericSwipe.cpp; onKey 0x1404ad390, onMouse 0x1404adfb0, tick no-op) is a
+calibration tool. Keys (control +0xf0.. in order): Activate, Deactivate, Left, Right, Up, Down,
+Diff1, Diff2, Diff3. Activate (idle): touch down at X,Y, native mouse touch off (manager+0x19).
+While active, Diff1/2/3 set the step to 1.0/1.5/2.0 (default 0.5) and Left/Right/Up/Down move
+the touch by -x/+x/-y/+y step. Mouse moves (type 4 while active) record (touch - origin, mouse -
+first mouse) samples. Deactivate: lift, native touch on, and write the samples as
+`"ExtraData": [...]` to `Engine/UserData/InputMapper/extraData.txt`.
+
+**NativeCursor** (ImapNativeCursor.cpp; onKey 0x1404ac670, onMouse 0x1404ac6c0, setActive
+0x1404ac910, abort 0x1404ac420): the host mouse becomes an Android mouse.
+* every mouse event -> `gcallSendMouseDataRpc(action, x, y, wheel)` (gcall 0x3fd); action from
+  the event type (`FUN_140300820`): 3 move -> 0, 4/5 L -> 1/2, 6/7 M -> 3/4, 8/9 R -> 5/6;
+  x, y = view percent * 327.67 (0..32767);
+* Key (down) toggles manager+0x308 (relative mode); with Tweaks bit 1 and relative mode the sent
+  position is (pct - last pct) / RelativeNorm; Tweaks bit 0 rate-limits moves (rt+200 Hz);
+* ShowNativeMousePointer: R down/up (8/9) show/hide the host cursor;
+* setActive(true) with Tweaks bit 1 and relative: `imapEnableNativeMousePan(1)` (0x1402e7d50:
+  `gcallEnableNativeMouseRpc` (0, -), (1, 0), cursor lock); abort: the reverse ((0, 1), (1, -));
+* guest: `gcallEnableNativeMouseClbk(enable, flag)` opens /dev/uinput and creates "Bluestacks
+  Mouse Device" (enable 0 destroys it; flag stored next to the fd);
+  `gcallshowNativeMousePointerClbk(show)` (0x40a). Verified: moves and clicks arrive as
+  MotionEvents. A device being re-created drops events, so OpenStacks creates it once.
+
+**Callback** overrides no runtime hook (only dtor and `control()`): Id/Action are read by the UI.
+
+### 3.16.1 gcall opcodes (libgcall_jni `gcallDecode`, jump table 0x34be4) [C]
+
+Host -> guest calls on the 'gcal' channel, `{u32 opcode, u32 length incl. header, args}`:
+
+| op | callback | op | callback |
+|---|---|---|---|
+| 0x3e8 | SetDeviceProfile | 0x3fe | SynchronizeTime |
+| 0x3e9 | SetCustomDeviceProfile | 0x3ff | SetVolume |
+| 0x3ea | SetLocale | 0x400 | LaunchAppStoreSearch |
+| 0x3eb | RootDevice | 0x401 | SetGamepadState |
+| 0x3ec | EnableInputDebugging | 0x402 | (disconnect) |
+| 0x3ed | SetPreferredOrientation | 0x403 | AffiliateTrackingForPackage |
+| 0x3ee | SetMaxFps | 0x404..0x406 | Get/Add/RemoveNowggAccount(s) |
+| 0x3ef | InstallApk | 0x407 | EnableSignInPopup |
+| 0x3f0 | InstallStudioApkZip | 0x408 | EnableClickSound |
+| 0x3f1 | UninstallApp | 0x409 | StopApp |
+| 0x3f2 | TakeScreenshot | 0x40a | showNativeMousePointer (bool) |
+| 0x3f3 | LaunchActivity | 0x40b | SetDifferentImagesPkg |
+| 0x3f4 | LaunchUrl | 0x40c | SetCustomAppOrientation |
+| 0x3f5 | ImportFiles | 0x40d | SetAirplaneMode |
+| 0x3f6 | ExportFiles | 0x40e | StartRecording |
+| 0x3f7 | EnableAdb | 0x40f | EnableAndroidAds |
+| 0x3f8 | EnableNativeMouse (enable, flag) | 0x410 | AndroidInterstitialAdSetting |
+| 0x3f9 | SetClipboardText | 0x411 | CommonCommand |
+| 0x3fa | ClearAppData | 0x412 | OnUnzipFileCompleted |
+| 0x3fb | LaunchAppStore | | |
+| 0x3fc | SendAccelerometerData (x, y, z) | | |
+| 0x3fd | SendMouseData (action, x, y, wheel) | | |
 
 ### 3.17 Key-routing controls [C]
 
@@ -985,7 +1050,7 @@ when creating a control.
 4. Gamepad: stick naming (`GamepadStick` parse `FUN_1402ff3b0`), stick value scale (assumed
    [-1,1] floats at event+0x14..+0x20), trigger handling, the gamepad-mode keys 0x8e/0x90/0x94/0x95
    and `FUN_140304a90` were not analysed; MOBASkill gamepad aiming (0x1404a8e40) not analysed.
-5. SmartScroll, GenericSwipe, NativeCursor, Callback runtimes; Scroll hold/release timing and
+5. NativeCursor relative-mode units and the wheel argument of gcall 0x3fd; Scroll hold/release timing and
    `Override`; MouseZoom/EdgeScroll details (partial above).
 6. Tweaks bits beyond those listed for Tap (bit0), Dpad (bit0 jitter, bit1 snap-to-centre on
    direction change), Rotate (bit0 no anchor), Zoom (bit0 cursor-centred, bit1 one finger),

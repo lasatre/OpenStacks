@@ -1308,6 +1308,141 @@ class Tilt(Control):
             self.e.send_tilt(0.0, 0.0)
 
 
+# ------------------------------------------------------------------ SmartScroll (§3.16)
+class SmartScroll(Control):
+    """A list of `Swipes` (weapon slots and the like): a key picks its entry, the wheel
+    steps through the enabled entries; the pick is a swipe X1,Y1 -> X2,Y2 at the entry's
+    Speed (a tap when both points match). ImapSmartScroll.cpp activateSwipe 0x1404aee70."""
+
+    def __init__(self, e, raw):
+        super().__init__(e, raw)
+        self.items = [w for w in raw.get("Swipes", []) if isinstance(w, dict)]
+        self.item_keys = [combos(w, "Key") for w in self.items]
+        self.index = 0
+        self.cid = 0
+        self.cur = self.target = (0.0, 0.0)
+        self.speed = 0.0
+
+    def all_combos(self):
+        return [cb for ks in self.item_keys for cb in ks]
+
+    def bound_names(self):
+        return super().bound_names() | set(keys.MOUSE_WHEEL)
+
+    def enabled(self, i: int) -> bool:
+        return self.e.condition(self.items[i].get("EnableCondition", ""))
+
+    def on_key(self, name, down):
+        if not down:
+            return
+        for i, ks in enumerate(self.item_keys):          # the first entry bound to the key
+            if any((cb == [name] and not self.e.suppressed(name)) or
+                   (len(cb) > 1 and name in cb and all(k in self.e.held for k in cb))
+                   for cb in ks):
+                if self.enabled(i):
+                    self.activate(i)
+                return
+
+    def on_mouse(self, ev, d):
+        n = len(self.items)
+        if ev != "wheel" or not d.get("delta") or self.cid or not n:
+            return
+        up = d["delta"] > 0
+        steps = int(abs(d["delta"] / 120)) % n
+        self.index = (self.index + (-steps if up else steps)) % n
+        start = self.index
+        while not self.enabled(self.index):
+            self.index = (self.index + (-1 if up else 1)) % n
+            if self.index == start:
+                return
+        self.activate(self.index)
+
+    def activate(self, i: int) -> None:
+        w = self.items[i]
+        self.index = i
+        self.cur = (fnum(w, "X1", 50.0), fnum(w, "Y1", 50.0))
+        self.target = (fnum(w, "X2", self.cur[0]), fnum(w, "Y2", self.cur[1]))
+        self.speed = fnum(w, "Speed", 30.0)
+        if self.cid:
+            self.e.touch_move(self.cid, *self.cur)
+        else:
+            self.cid = self.e.touch_down(*self.cur)
+
+    def tick(self, t):
+        if not self.cid:
+            return
+        dx, dy = self.target[0] - self.cur[0], self.target[1] - self.cur[1]
+        dist = math.hypot(dx, dy)
+        if dist >= 0.01:
+            sx, sy = dx / dist * self.speed * STEP, dy / dist * self.speed * STEP
+            if abs(sx) <= abs(dx) and abs(sy) <= abs(dy):
+                self.cur = (self.cur[0] + sx, self.cur[1] + sy)
+                self.e.touch_move(self.cid, *self.cur)
+                return
+        self.reset()                                   # arrived (or a tap): lift
+
+    def reset(self):
+        if self.cid:
+            self.e.touch_up(self.cid)
+            self.cid = 0
+
+
+# ------------------------------------------------------------------ GenericSwipe (§3.16)
+class GenericSwipe(Control):
+    """HD-Player's position-calibration tool (ImapGenericSwipe.cpp onKeyEvent 0x1404ad390):
+    Activate holds a touch at X,Y with the native mouse touch off; Left/Right/Up/Down nudge
+    it by 0.5 % (Diff1/2/3: 1, 1.5, 2); Deactivate lifts it. (HD-Player also logs mouse/touch
+    offsets to InputMapper/extraData.txt on Deactivate; not reproduced.)"""
+    key_fields = ("Activate", "Deactivate", "Left", "Right", "Up", "Down",
+                  "Diff1", "Diff2", "Diff3")
+
+    def __init__(self, e, raw):
+        super().__init__(e, raw)
+        self.cid = 0
+        self.step = 0.5
+        self.p = self.xy()
+
+    def on_key(self, name, down):
+        if not down:
+            return
+        hit = {f: self.relevant(f, name, down) for f in self.key_fields}
+        if hit["Activate"] and not self.cid:
+            self.p = self.xy()
+            self.cid = self.e.touch_down(*self.p)
+            self.e.native_touch = False
+        if hit["Deactivate"] and self.cid:
+            self.reset()
+            self.step = 0.5
+        if not self.cid:
+            return
+        for f, v in (("Diff1", 1.0), ("Diff2", 1.5), ("Diff3", 2.0)):
+            if hit[f]:
+                self.step = v
+        x, y = self.p
+        if hit["Left"]:
+            x -= self.step
+        elif hit["Right"]:
+            x += self.step
+        elif hit["Up"]:
+            y -= self.step
+        elif hit["Down"]:
+            y += self.step
+        else:
+            return
+        self.p = (x, y)
+        self.e.touch_move(self.cid, x, y)
+
+    def reset(self):
+        if self.cid:
+            self.e.touch_up(self.cid)
+            self.cid = 0
+            self.e.native_touch = True
+
+
+class Callback(Control):
+    """Id/Action for BlueStacks' UI layer; HD-Player's runtime overrides no hook."""
+
+
 # ------------------------------------------------------------------ wheel family (§3.13-15)
 class Scroll(Control):
     """Mouse wheel: a vertical swipe at the cursor, Amplitude % per notch."""
@@ -1555,9 +1690,75 @@ class LockCursor(Control):
 
 
 class NativeCursor(Control):
-    """Cursor presentation flags (RelativeNorm, ShowNativeMousePointer): no touch of its
-    own. Runtime not analysed (§3.16); kept so its Key is not lost."""
+    """The host mouse as an Android mouse (ImapNativeCursor.cpp, §3.16): while active, the
+    guest's "Bluestacks Mouse Device" (gcall 0x3f8) gets every move, button and wheel as
+    gcallSendMouseDataRpc (0x3fd: action, x, y, wheel; x/y 0..32767 of the view). Key toggles
+    relative mode (Tweaks bit 1): the pointer is locked and motion is sent as offsets
+    divided by RelativeNorm."""
     key_fields = ("Key",)
+    # HD-Player event type -> action (0x140300820): move 0, L 1/2, M 3/4, R 5/6
+    _BTN = {1: (1, 2), 4: (3, 4), 2: (5, 6)}
+
+    def __init__(self, e, raw):
+        super().__init__(e, raw)
+        self.norm = fnum(raw, "RelativeNorm", 1.0) or 1.0
+        self.show = bool(raw.get("ShowNativeMousePointer", False))
+        self.rel_allowed = bool(self.tweaks & 2)
+        self.relative = False
+        self.on = False
+
+    def mouse_buttons(self):
+        return keys.MOUSE_BUTTONS["MouseLButton"] | keys.MOUSE_BUTTONS["MouseRButton"] |             keys.MOUSE_BUTTONS["MouseMButton"]
+
+    def bound_names(self):
+        return super().bound_names() | set(keys.MOUSE_WHEEL)
+
+    def wants_hover(self):
+        return True
+
+    def wants_lock(self):
+        return self.relative
+
+    def _device(self, on: bool) -> None:
+        if on != self.on:
+            self.on = on
+            if on:
+                self.e.native_mouse(0 if self.relative else 1)
+            self.e.ch.send(f"g 1034 {int(on and self.show and not self.relative)}")
+            self.e.native_touch = not on
+
+    def set_active(self, on):
+        super().set_active(on)
+        self._device(on and self.e.enabled)
+
+    def _send(self, action: int, x: float, y: float, wheel: int = 0) -> None:
+        self.e.ch.send(f"g 1021 {action} {int(x * 327.67)} {int(y * 327.67)} {wheel}")
+
+    def on_key(self, name, down):
+        if down and self.rel_allowed and self.relevant("Key", name, down):
+            self.relative = not self.relative
+            self.on = False                              # re-create in the other mode
+            self._device(True)
+
+    def on_mouse(self, ev, d):
+        if not self.on:
+            self._device(True)
+        cx, cy = self.e.cursor
+        if ev == "rel" and self.relative:
+            vw, vh = self.e.view_px
+            self._send(0, d.get("dx", 0) * 100 / vw / self.norm, d.get("dy", 0) * 100 / vh / self.norm)
+        elif ev == "move" and not self.relative:
+            self._send(0, cx, cy)
+        elif ev in ("ldown", "lup"):
+            self._send(self._BTN[1][ev == "lup"], cx, cy)
+        elif ev in ("down", "up") and d.get("button") in self._BTN:
+            self._send(self._BTN[d["button"]][ev == "up"], cx, cy)
+        elif ev == "wheel":
+            self._send(0, cx, cy, int(d.get("delta", 0) / 120))     # [I] wheel notches
+
+    def reset(self):
+        self.relative = False
+        self._device(False)
 
 
 # ------------------------------------------------------------------ Script (§3.9)
@@ -1830,7 +2031,8 @@ class Script(Control):
 TYPES = {
     "Tap": Tap, "TapRepeat": TapRepeat, "Dpad": Dpad, "Pan": Pan, "Swipe": Swipe,
     "Zoom": Zoom, "MOBADpad": MOBADpad, "MOBASkill": MOBASkill, "FreeLook": FreeLook,
-    "Rotate": Rotate, "Tilt": Tilt, "Scroll": Scroll, "MouseZoom": MouseZoom, "EdgeScroll": EdgeScroll,
+    "Rotate": Rotate, "Tilt": Tilt, "SmartScroll": SmartScroll, "Callback": Callback,
+    "GenericSwipe": GenericSwipe, "Scroll": Scroll, "MouseZoom": MouseZoom, "EdgeScroll": EdgeScroll,
     "State": State, "Alias": Alias, "SendOriginalKeys": SendOriginalKeys,
     "DontForwardKeys": DontForwardKeys, "LockCursor": LockCursor, "NativeCursor": NativeCursor,
     "Script": Script,

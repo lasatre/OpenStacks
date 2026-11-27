@@ -33,15 +33,19 @@ TRIGGER_PRESS = 0.3
 
 def _load() -> Optional[ctypes.CDLL]:
     names = []
+    bundle = getattr(sys, "_MEIPASS", "")        # the frozen build carries its own copy
     if sys.platform == "win32":
+        if bundle:
+            names.append(os.path.join(bundle, "SDL2.dll"))
         try:
             import sdl2dll                       # pysdl2-dll wheel
             names.append(os.path.join(sdl2dll.get_dllpath(), "SDL2.dll"))
         except Exception:
             pass
-        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.argv[0] or ".")))
-        names += [os.path.join(base, "SDL2.dll"), "SDL2.dll"]
+        names.append("SDL2.dll")
     else:
+        if bundle:
+            names.append(os.path.join(bundle, "libSDL2-2.0.so.0"))
         names += ["libSDL2-2.0.so.0", ctypes.util.find_library("SDL2") or ""]
     for n in names:
         if not n:

@@ -207,7 +207,8 @@ jobs:
             clang cmake git libx11-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev \
             patchelf file curl xz-utils zsync \
             libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
-            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 \
+            libsdl2-2.0-0
 
       # the front-end needs Python 3.12+ (see packaging/build_linux.sh: PySide6's
       # Signal.emit leaks references to True, fatal before 3.12's immortal objects)

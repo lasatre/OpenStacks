@@ -1,0 +1,176 @@
+diff --git a/host/frame_buffer.cpp b/host/frame_buffer.cpp
+index fc2695a..e195cbf 100644
+--- a/host/frame_buffer.cpp
++++ b/host/frame_buffer.cpp
+@@ -24,7 +24,10 @@
+ #include <time.h>
+ 
+ #include <iomanip>
++#include <condition_variable>
+ #include <mutex>
++#include <thread>
++#include <unordered_map>
+ #include <optional>
+ #include <string>
+ #include <string_view>
+@@ -859,6 +862,21 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
+     std::optional<Post> m_ostMailbox;
+     bool m_ostMailboxQueued = false;
+     void ostDrainMailbox();
++    // OpenStacks (issue #6): cross-connection ordering of window-surface writes. A colour
++    // buffer bound to a window surface (rcSetWindowColorBuffer) has a pending write until
++    // that surface is flushed. Readers on other threads (rcBindTexture, rcFBPost) wait for
++    // the flush first.
++    struct OstPendingWrite {
++        HandleType surface;
++        std::thread::id writer;
++    };
++    std::mutex m_ostWriteLock;
++    std::condition_variable m_ostWriteCv;
++    std::unordered_map<HandleType, OstPendingWrite> m_ostPendingWrites;   // cb -> writer
++    std::unordered_map<HandleType, HandleType> m_ostSurfaceTarget;        // surface -> cb
++    void ostMarkWrite(HandleType surface, HandleType cb);
++    void ostWriteDone(HandleType surface);
++    void ostWaitWritten(HandleType cb);
+     bool postImplSync(HandleType p_colorbuffer, bool needLockAndBind = true, bool repaint = false);
+     void setGuestPostedAFrame() {
+         m_guestPostedAFrameTime = std::chrono::steady_clock::now();
+@@ -2783,6 +2801,7 @@ bool FrameBuffer::Impl::updateColorBufferDeprecated(HandleType colorbuffer, int
+ }
+ 
+ bool FrameBuffer::Impl::post(HandleType p_colorbuffer, bool needLockAndBind) {
++    ostWaitWritten(p_colorbuffer);               // SurfaceFlinger's frame is flushed
+     if (OstVsyncPresent() && !postOnlyOnMainThread() && !m_displayVk) {
+         AsyncResult res = postImpl(p_colorbuffer, nullptr, needLockAndBind, false,
+                                    /*mailbox=*/true);
+@@ -4405,8 +4424,88 @@ void FrameBuffer::Impl::destroySharedTrivialContext(EGLContext context,
+ bool FrameBuffer::Impl::setEmulatedEglWindowSurfaceColorBuffer(
+     HandleType p_surface, HandleType p_colorbuffer) NO_THREAD_SAFETY_ANALYSIS {
+     ENSURE_GL_EMULATION_VALUE(false);
+-    AutoLock mutex(m_lock);
+-    return m_emulationGl->setEmulatedEglWindowSurfaceColorBuffer(p_surface, p_colorbuffer);
++    bool ok;
++    {
++        AutoLock mutex(m_lock);
++        ok = m_emulationGl->setEmulatedEglWindowSurfaceColorBuffer(p_surface, p_colorbuffer);
++    }
++    if (ok) ostMarkWrite(p_surface, p_colorbuffer);
++    return ok;
++}
++
++// OpenStacks (issue #6): BlueStacks' Android 9 guest presents a frame with
++// rcFlushWindowColorBufferAsync. The command has no reply, so the guest does not wait
++// for it. The guest also has no native fences. So once the app queues the buffer,
++// SurfaceFlinger can bind it (rcBindTexture, on its own connection, i.e. its own host
++// thread) before the app's connection has delivered or executed the flush. It then
++// composites the buffer's previous contents: frames that jump back to an older state,
++// sprites missing.
++// AOSP's EGL avoids this by using the synchronous flush when it has no native sync ("an
++// old frame can be processed by surfaceflinger, resulting in out of order frames",
++// b/34396294); this guest does not.
++// So the host keeps the order: a buffer set as a window surface's target has a pending
++// write until that surface's next flush, and binding or posting it from another thread
++// waits for that flush. The wait is bounded, so a surface that never flushes stalls
++// nothing for long. OST_FLUSH_ORDER=0 turns it off.
++static bool ostFlushOrder() {
++    static const bool on = [] {
++        const char* v = getenv("OST_FLUSH_ORDER");
++        return !(v && *v == '0');
++    }();
++    return on;
++}
++
++void FrameBuffer::Impl::ostMarkWrite(HandleType surface, HandleType cb) {
++    if (!ostFlushOrder()) return;
++    std::lock_guard<std::mutex> lock(m_ostWriteLock);
++    auto prev = m_ostSurfaceTarget.find(surface);
++    if (prev != m_ostSurfaceTarget.end() && prev->second != cb) {
++        auto it = m_ostPendingWrites.find(prev->second);
++        if (it != m_ostPendingWrites.end() && it->second.surface == surface) {
++            m_ostPendingWrites.erase(it);        // retargeted without a flush: no frame came
++        }
++    }
++    m_ostSurfaceTarget[surface] = cb;
++    m_ostPendingWrites[cb] = {surface, std::this_thread::get_id()};
++    m_ostWriteCv.notify_all();
++}
++
++void FrameBuffer::Impl::ostWriteDone(HandleType surface) {
++    if (!ostFlushOrder()) return;
++    std::lock_guard<std::mutex> lock(m_ostWriteLock);
++    auto t = m_ostSurfaceTarget.find(surface);
++    if (t == m_ostSurfaceTarget.end()) return;
++    auto it = m_ostPendingWrites.find(t->second);
++    if (it != m_ostPendingWrites.end() && it->second.surface == surface) {
++        m_ostPendingWrites.erase(it);
++        m_ostWriteCv.notify_all();
++    }
++}
++
++void FrameBuffer::Impl::ostWaitWritten(HandleType cb) {
++    if (!ostFlushOrder()) return;
++    std::unique_lock<std::mutex> lock(m_ostWriteLock);
++    auto it = m_ostPendingWrites.find(cb);
++    if (it == m_ostPendingWrites.end() || it->second.writer == std::this_thread::get_id()) {
++        return;
++    }
++    const HandleType surface = it->second.surface;
++    const bool done = m_ostWriteCv.wait_for(lock, std::chrono::milliseconds(100), [&] {
++        auto i = m_ostPendingWrites.find(cb);
++        return i == m_ostPendingWrites.end() || i->second.surface != surface;
++    });
++    if (!done) {
++        // the writer never flushed (an abandoned frame): later reads must not wait too
++        auto i = m_ostPendingWrites.find(cb);
++        if (i != m_ostPendingWrites.end() && i->second.surface == surface) {
++            m_ostPendingWrites.erase(i);
++        }
++        static std::atomic<int> logged{0};
++        if (logged++ < 5) {
++            GFXSTREAM_WARNING("flush order: colour buffer %u read before surface %u flushed "
++                              "(gave up after 100 ms)", cb, surface);
++        }
++    }
+ }
+ 
+ std::string FrameBuffer::Impl::getEglString(EGLenum name) {
+@@ -4483,6 +4582,7 @@ void FrameBuffer::Impl::destroyEmulatedEglWindowSurface(HandleType p_surface) {
+     if (m_shuttingDown) {
+         return;
+     }
++    ostWriteDone(p_surface);
+     AutoLock mutex(m_lock);
+     destroyEmulatedEglWindowSurfaceLocked(p_surface);
+ }
+@@ -4621,8 +4721,13 @@ bool FrameBuffer::Impl::destroyEmulatedEglImage(HandleType imageHandle) NO_THREA
+ bool FrameBuffer::Impl::flushEmulatedEglWindowSurfaceColorBuffer(HandleType p_surface)
+     NO_THREAD_SAFETY_ANALYSIS {
+     ENSURE_GL_EMULATION_VALUE(false);
+-    AutoLock mutex(m_lock);
+-    return m_emulationGl->flushEmulatedEglWindowSurfaceColorBuffer(p_surface);
++    bool ok;
++    {
++        AutoLock mutex(m_lock);
++        ok = m_emulationGl->flushEmulatedEglWindowSurfaceColorBuffer(p_surface);
++    }
++    ostWriteDone(p_surface);                     // the blit (and its fence) is issued
++    return ok;
+ }
+ 
+ void FrameBuffer::Impl::fillGLESUsages(android_studio::EmulatorGLESUsages* usages) {
+@@ -4677,6 +4782,7 @@ ContextHelper* FrameBuffer::Impl::getPbufferSurfaceContextHelper() const {
+ bool FrameBuffer::Impl::bindColorBufferToTexture(HandleType colorBufferHandle) {
+     ENSURE_GL_EMULATION_VALUE(false);
+ 
++    ostWaitWritten(colorBufferHandle);
+     IColorBufferRef colorBuffer = findColorBuffer(colorBufferHandle);
+ 
+     AutoLock mutex(m_lock);
+@@ -4686,6 +4792,7 @@ bool FrameBuffer::Impl::bindColorBufferToTexture(HandleType colorBufferHandle) {
+ bool FrameBuffer::Impl::bindColorBufferToTexture2(HandleType colorBufferHandle) {
+     ENSURE_GL_EMULATION_VALUE(false);
+ 
++    ostWaitWritten(colorBufferHandle);
+     IColorBufferRef colorBuffer = findColorBuffer(colorBufferHandle);
+ 
+     // This is only called when using multi window display

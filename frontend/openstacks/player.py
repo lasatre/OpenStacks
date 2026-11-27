@@ -822,6 +822,7 @@ class PlayerWindow(QMainWindow):
         def button(method: str, icon_name: str, tip: str, key: str,
                    slot=None) -> QToolButton:
             act = QAction(icon(icon_name), tip, self)
+            act.setProperty("ostIcon", icon_name)   # redrawn on a theme change
             if key:
                 act.setShortcut(QKeySequence(key))
                 tip = f"{tip} ({key})"
@@ -859,6 +860,22 @@ class PlayerWindow(QMainWindow):
         row.addWidget(rail)
         self.setCentralWidget(holder)
         self.sidebar = rail
+
+    def changeEvent(self, ev) -> None:
+        """Light/dark switch (system or Settings > Theme): redraw the rail icons, which are
+        painted in the palette's text colour."""
+        from PySide6.QtCore import QEvent
+        if ev.type() == QEvent.PaletteChange and hasattr(self, "_rail_buttons"):
+            from .icons import icon
+            for act in self.actions():
+                name = act.property("ostIcon")
+                if name:
+                    act.setIcon(icon(name))
+            pane = self.current_pane()
+            if pane is not None:
+                self._vol_btn.defaultAction().setIcon(
+                    icon("volume_muted" if pane.inst.muted else "volume"))
+        super().changeEvent(ev)
 
     # -- pane helpers -----------------------------------------------------------------
     def current_pane(self) -> Optional[PlayerPane]:

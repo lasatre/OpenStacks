@@ -106,6 +106,11 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
   - gfxstream's render thread reads a u32 `clientFlags` first; the BlueStacks guest does not
     send it (no framing loss after the 0x100 handshake in the trace), so the pump injects 0.
   - Logs: warnings and errors by default, `OST_RENDERER_VERBOSE=1` for gfxstream's info lines.
+  - Present (patch 0005, issue #6): `OST_VSYNC` (default on for Linux, off elsewhere). Guest
+    posts go into a one-slot mailbox and return at once. The post thread draws the newest frame
+    and then swaps vsync'd (GLX interval 1). The guest is held only for the draw, never the
+    vblank wait. Upstream's unsynced swap lost frames in bursts under XWayland + KWin when the
+    guest's 60 Hz phase sat at the compositor's deadline. `OST_VSYNC=0` restores it.
 - **M3 (first cut):** `OST_RENDERER=gfxstream` in gr_render.c: `ost_renderer.dll` (or
   `OST_GFXSTREAM_DLL`) instead of libOpenglRender.dll. Per connection a pump thread
   (`gx_pump`): handshake via the pure lane's createFinish, guest bytes (pure window or HPP

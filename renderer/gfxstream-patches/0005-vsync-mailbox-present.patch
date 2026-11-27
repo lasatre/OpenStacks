@@ -1,0 +1,240 @@
+diff --git a/host/common/include/gfxstream/host/post_worker.h b/host/common/include/gfxstream/host/post_worker.h
+index c901819..a36da30 100644
+--- a/host/common/include/gfxstream/host/post_worker.h
++++ b/host/common/include/gfxstream/host/post_worker.h
+@@ -32,6 +32,17 @@
+ namespace gfxstream {
+ namespace host {
+ 
++// OpenStacks (issue #6): mailbox present. FrameBuffer sets this on the post thread around
++// PostWorker::post(); the display backend calls it once the frame is drawn and flushed, just
++// before the (possibly vsync-blocking) swap, so FrameBuffer can let the next guest post in
++// without waiting for the swap.
++void SetPostDrawnHook(std::function<void()>* hook);
++void RunPostDrawnHook();
++
++// OST_VSYNC: present the guest's frames vblank-synced, through the mailbox. Default on for
++// Linux (GLX under a compositor drops unsynced frames), off elsewhere; OST_VSYNC=0/1 overrides.
++bool OstVsyncPresent();
++
+ class PostWorker {
+    public:
+     PostWorker(bool mainThreadPostingOnly, GlobalState* globalState, Compositor* compositor);
+diff --git a/host/common/post_worker.cpp b/host/common/post_worker.cpp
+index 0327bdb..ddee728 100644
+--- a/host/common/post_worker.cpp
++++ b/host/common/post_worker.cpp
+@@ -15,6 +15,7 @@
+  */
+ #include "gfxstream/host/post_worker.h"
+ 
++#include <stdlib.h>
+ #include <string.h>
+ 
+ #include <chrono>
+@@ -28,6 +29,32 @@
+ namespace gfxstream {
+ namespace host {
+ 
++namespace {
++thread_local std::function<void()>* t_postDrawnHook = nullptr;
++}  // namespace
++
++void SetPostDrawnHook(std::function<void()>* hook) { t_postDrawnHook = hook; }
++
++void RunPostDrawnHook() {
++    if (auto* hook = t_postDrawnHook) {
++        t_postDrawnHook = nullptr;
++        (*hook)();
++    }
++}
++
++bool OstVsyncPresent() {
++    static const bool on = [] {
++        const char* v = getenv("OST_VSYNC");
++        if (v && *v) return atoi(v) != 0;
++#ifdef __linux__
++        return true;
++#else
++        return false;
++#endif
++    }();
++    return on;
++}
++
+ PostWorker::PostWorker(bool mainThreadPostingOnly, gfxstream::host::GlobalState* globalState,
+                        Compositor* compositor)
+     : m_globalState(globalState),
+diff --git a/host/frame_buffer.cpp b/host/frame_buffer.cpp
+index cb989a6..2ee98a0 100644
+--- a/host/frame_buffer.cpp
++++ b/host/frame_buffer.cpp
+@@ -848,7 +848,16 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
+     void eraseDelayedCloseColorBufferLocked(HandleType cb, uint64_t ts);
+ 
+     AsyncResult postImpl(HandleType p_colorbuffer, Post::CompletionCallback callback,
+-                         bool needLockAndBind = true, bool repaint = false);
++                         bool needLockAndBind = true, bool repaint = false,
++                         bool mailbox = false);
++    // OpenStacks mailbox present (OST_VSYNC): the latest guest post not yet drawn, and
++    // whether a PostCmd::Post marker for it is queued on the post thread. The post thread
++    // holds m_ostMailboxLock while drawing, so a guest post (and the guest's reuse of the
++    // previously posted buffer) waits for that draw but never for the swap.
++    std::mutex m_ostMailboxLock;
++    std::optional<Post> m_ostMailbox;
++    bool m_ostMailboxQueued = false;
++    void ostDrainMailbox();
+     bool postImplSync(HandleType p_colorbuffer, bool needLockAndBind = true, bool repaint = false);
+     void setGuestPostedAFrame() {
+         m_guestPostedAFrameTime = std::chrono::steady_clock::now();
+@@ -1694,9 +1703,31 @@ WorkerProcessingResult FrameBuffer::Impl::sendReadbackWorkerCmd(const Readback&
+     return WorkerProcessingResult::Stop;
+ }
+ 
++void FrameBuffer::Impl::ostDrainMailbox() {
++    std::unique_lock<std::mutex> mailboxLock(m_ostMailboxLock);
++    m_ostMailboxQueued = false;
++    if (!m_ostMailbox) return;
++    Post post = std::move(*m_ostMailbox);
++    m_ostMailbox.reset();
++    // Held through the draw, released by DisplayGl just before the swap (or below when the
++    // draw path returned early, e.g. no surface bound).
++    std::function<void()> releaseMailbox = [&mailboxLock] { mailboxLock.unlock(); };
++    SetPostDrawnHook(&releaseMailbox);
++    m_postWorker->post(post.cb,
++                       std::make_unique<Post::CompletionCallback>([](std::shared_future<void>) {}),
++                       post.colorTransform);
++    SetPostDrawnHook(nullptr);
++    if (mailboxLock.owns_lock()) mailboxLock.unlock();
++    decColorBufferRefCountNoDestroy(post.cbHandle);
++}
++
+ WorkerProcessingResult FrameBuffer::Impl::postWorkerFunc(Post& post) {
+     switch (post.cmd) {
+         case PostCmd::Post: {
++            if (!post.cb && !post.cbHandle && !post.completionCallback) {
++                ostDrainMailbox();
++                break;
++            }
+             // We wrap the callback like this to workaround a bug in the MS STL implementation.
+             auto packagePostCmdCallback =
+                 std::shared_ptr<Post::CompletionCallback>(std::move(post.completionCallback));
+@@ -2751,6 +2782,12 @@ bool FrameBuffer::Impl::updateColorBufferDeprecated(HandleType colorbuffer, int
+ }
+ 
+ bool FrameBuffer::Impl::post(HandleType p_colorbuffer, bool needLockAndBind) {
++    if (OstVsyncPresent() && !postOnlyOnMainThread() && !m_displayVk) {
++        AsyncResult res = postImpl(p_colorbuffer, nullptr, needLockAndBind, false,
++                                   /*mailbox=*/true);
++        if (res.Succeeded()) setGuestPostedAFrame();
++        return res.Succeeded();
++    }
+     auto res = postImplSync(p_colorbuffer, needLockAndBind);
+     if (res) setGuestPostedAFrame();
+     return res;
+@@ -2789,7 +2826,7 @@ bool FrameBuffer::Impl::postImplSync(HandleType p_colorbuffer, bool needLockAndB
+ }
+ 
+ AsyncResult FrameBuffer::Impl::postImpl(HandleType p_colorbuffer, Post::CompletionCallback callback,
+-                                        bool needLockAndBind, bool repaint) {
++                                        bool needLockAndBind, bool repaint, bool mailbox) {
+     ColorBufferPtr colorBuffer = nullptr;
+     {
+         AutoLock colorBufferMapLock(m_colorBufferMapLock);
+@@ -2821,7 +2858,32 @@ AsyncResult FrameBuffer::Impl::postImpl(HandleType p_colorbuffer, Post::Completi
+     m_lastPostedColorBuffer = p_colorbuffer;
+ 
+     colorBuffer->touch();
+-    if (m_subWin) {
++    if (m_subWin && mailbox) {
++        Post postCmd;
++        postCmd.cmd = PostCmd::Post;
++        postCmd.cb = colorBuffer.get();
++        postCmd.cbHandle = p_colorbuffer;
++        postCmd.colorTransform = GetColorTransformForColorBuffer(p_colorbuffer);
++        std::optional<Post> replaced;
++        bool queue = false;
++        {
++            std::lock_guard<std::mutex> mailboxLock(m_ostMailboxLock);
++            replaced = std::move(m_ostMailbox);
++            m_ostMailbox = std::move(postCmd);
++            queue = !m_ostMailboxQueued;
++            m_ostMailboxQueued = true;
++        }
++        // A frame replaced before it was drawn is never shown; drop its post reference.
++        if (replaced) decColorBufferRefCountNoDestroy(replaced->cbHandle);
++        if (queue) {
++            Post marker;
++            marker.cmd = PostCmd::Post;
++            marker.cb = nullptr;
++            marker.cbHandle = 0;
++            sendPostWorkerCmd(std::move(marker));
++        }
++        ret = AsyncResult::OK_AND_CALLBACK_NOT_SCHEDULED;
++    } else if (m_subWin) {
+         Post postCmd;
+         postCmd.cmd = PostCmd::Post;
+         postCmd.cb = colorBuffer.get();
+diff --git a/host/gl/display_gl.cpp b/host/gl/display_gl.cpp
+index fe04628..1f8e2e3 100644
+--- a/host/gl/display_gl.cpp
++++ b/host/gl/display_gl.cpp
+@@ -14,6 +14,8 @@
+ 
+ #include "display_gl.h"
+ 
++#include "gfxstream/host/post_worker.h"
++
+ #include "OpenGLESDispatch/DispatchTables.h"
+ #include "OpenGLESDispatch/EGLDispatch.h"
+ #include "color_buffer_gl.h"
+@@ -74,6 +76,12 @@ std::shared_future<void> DisplayGl::post(const Post& post) {
+         mTextureDraw->cleanupForDrawLayer();
+     }
+ 
++    // OpenStacks mailbox present: the draw above has sampled the guest's buffer; once it is
++    // submitted the guest may reuse that buffer, so release the next post before the swap
++    // (which can block until vblank).
++    s_gles2.glFlush();
++    RunPostDrawnHook();
++
+     s_egl.eglSwapBuffers(surfaceGl->mDisplay, surfaceGl->mSurface);
+ 
+     return getCompletedFuture();
+diff --git a/host/gl/glestranslator/egl/egl_os_api_glx.cpp b/host/gl/glestranslator/egl/egl_os_api_glx.cpp
+index eb952dc..25a1e3f 100644
+--- a/host/gl/glestranslator/egl/egl_os_api_glx.cpp
++++ b/host/gl/glestranslator/egl/egl_os_api_glx.cpp
+@@ -43,6 +43,16 @@
+ 
+ namespace {
+ 
++// Same switch as gfxstream::host::OstVsyncPresent() (post_worker.cpp); kept local so the
++// translator does not depend on the host common library. This file is the GLX (Linux) backend.
++bool ostVsyncPresent() {
++    static const bool on = [] {
++        const char* v = getenv("OST_VSYNC");
++        return (v && *v) ? atoi(v) != 0 : true;
++    }();
++    return on;
++}
++
+ typedef Display X11Display;
+ 
+ #define IS_SUCCESS(a) \
+@@ -571,7 +581,14 @@ public:
+                 auto it = mDisabledVsyncWindows.find(draw);
+                 bool notPresent = it == mDisabledVsyncWindows.end();
+                 if (notPresent || !it->second) {
+-                    mSwapInterval(mDisplay, GlxSurface::drawableFor(draw), 0);
++                    // OpenStacks (issue #6): upstream always disables vsync here. Under a
++                    // compositor (XWayland + KWin, measured on NVIDIA) an unsynced 60 Hz
++                    // post stream whose phase sits at the compositor's latch deadline gets
++                    // frames replaced before they reach the screen (16/33 ms judder). With
++                    // OST_VSYNC (default on Linux) FrameBuffer presents through a mailbox, so
++                    // a vblank-blocking swap no longer holds up the guest.
++                    mSwapInterval(mDisplay, GlxSurface::drawableFor(draw),
++                                  ostVsyncPresent() ? 1 : 0);
+                     if (notPresent) {
+                         mDisabledVsyncWindows[draw] = true;
+                     } else {

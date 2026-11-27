@@ -2801,15 +2801,53 @@ static void rcTryParse(GrSock *s, uint32_t relocBytes, uint8_t *win)
 /* input, rotation and frame state shared by every display backend    */
 
 typedef struct GrInputEv {
-    int kind;                        /* 0 = pointer, 1 = key (qnum), 2 = key (evdev) */
+    int kind;                        /* 0 = pointer, 1 = key (qnum), 2 = key (evdev),
+                                        3 = focus lost: release every held key */
     int x, y, down;                  /* pointer: 0..0x7fff, button     */
     int qnum;                        /* key: QEMU key number / Linux evdev code */
 } GrInputEv;
 
+/* Keys the guest currently sees held. A key pressed in our window and released in another
+ * one (Alt+Tab, a desktop shortcut that moves focus) never sends its release here, so
+ * the guest keeps it held: a stuck Alt makes every letter type its AltGr symbol ('s' ->
+ * 'ss', issue #8) until a restart. On focus loss each held key gets its release, as QEMU's
+ * own UIs do (qkbd_state_lift_all_keys). */
+static uint64_t g_heldQnum[8];       /* QEMU key numbers 0..511 (Win32 scan codes) */
+static uint64_t g_heldLinux[12];     /* evdev codes 0..767 (X11) */
+
+static void gr_held_set(uint64_t *map, unsigned max, unsigned k, bool down)
+{
+    if (k < max) {
+        if (down) {
+            map[k / 64] |= 1ull << (k % 64);
+        } else {
+            map[k / 64] &= ~(1ull << (k % 64));
+        }
+    }
+}
+
+static void gr_release_all_keys(void)
+{
+    for (unsigned k = 0; k < 512; k++) {
+        if (g_heldQnum[k / 64] >> (k % 64) & 1) {
+            qemu_input_event_send_key_number(NULL, (int)k, false);
+        }
+    }
+    for (unsigned k = 0; k < 768; k++) {
+        if (g_heldLinux[k / 64] >> (k % 64) & 1) {
+            qemu_input_event_send_key_linux(NULL, k, false);
+        }
+    }
+    memset(g_heldQnum, 0, sizeof(g_heldQnum));
+    memset(g_heldLinux, 0, sizeof(g_heldLinux));
+}
+
 static void gr_input_bh(void *opaque)
 {
     GrInputEv *e = (GrInputEv *)opaque;
-    if (e->kind == 0) {
+    if (e->kind == 3) {
+        gr_release_all_keys();
+    } else if (e->kind == 0) {
         qemu_input_queue_abs(NULL, INPUT_AXIS_X, e->x, 0, INPUT_EVENT_ABS_MAX);
         qemu_input_queue_abs(NULL, INPUT_AXIS_Y, e->y, 0, INPUT_EVENT_ABS_MAX);
         if (e->down >= 0) {
@@ -2817,8 +2855,10 @@ static void gr_input_bh(void *opaque)
         }
         qemu_input_event_sync();
     } else if (e->kind == 2) {
+        gr_held_set(g_heldLinux, 768, (unsigned)e->qnum, e->down != 0);
         qemu_input_event_send_key_linux(NULL, (unsigned)e->qnum, e->down != 0);
     } else {
+        gr_held_set(g_heldQnum, 512, (unsigned)e->qnum, e->down != 0);
         qemu_input_event_send_key_number(NULL, e->qnum, e->down != 0);
     }
     g_free(e);
@@ -2933,6 +2973,13 @@ static bool gr_input_msg(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     case WM_CHAR: case WM_SYSCHAR: case WM_DEADCHAR:
         return true;
+    case WM_KILLFOCUS:
+        /* focus leaving our windows (not just moving between our host window and the
+         * renderer's child): the releases of held keys will go elsewhere */
+        if ((HWND)w != g.hwnd && (HWND)w != g_child) {
+            gr_input_post((GrInputEv){ .kind = 3 });
+        }
+        return false;
     }
     return false;
 }

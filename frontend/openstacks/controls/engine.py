@@ -29,7 +29,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from . import expr, keys
+from . import expr, imgd, keys
 from .bscfg import ControlsFile, Scheme, control_type
 from .channel import InputChannel
 from .gamepad import Gamepads
@@ -64,7 +64,13 @@ class Engine(QObject):
         self.held: set[str] = set()
         self.states: dict[str, bool] = {}
         self.enabled = True
-        self.unknown_is_true = True  # conditions on image tags we cannot detect yet
+        self.unknown_is_true = True  # image conditions while detection is unavailable
+        # on-screen image detection ("Smart" schemes, docs/re/kmm_controls.md 3.20)
+        self.package = ""            # the game in front (picks the sampler, imgd.PACKAGES)
+        self.detecting = False       # QEMU's renderer matches this scheme's images
+        self.tags: set[str] = set()  # image ids matched in the last frame
+        self._img_gen = 0
+        self._img_ids: list[str] = []
         # geometry: the view in host pixels, the guest framebuffer as currently oriented
         self.view_px = (1600, 900)
         self.fb = (1600, 900)
@@ -135,6 +141,7 @@ class Engine(QObject):
                 if len(combo) > 1:
                     for k in combo:
                         self._partners.setdefault(k, set()).update(x for x in combo if x != k)
+        self.send_images()
         self.refresh_enabled()
         self.update_capture()
         self.changed.emit()
@@ -150,7 +157,57 @@ class Engine(QObject):
     def lookup(self, name: str):
         if name in self.states:
             return self.states[name]
+        if self.detecting:
+            return name in self.tags # images are variables while on screen (imapSetTags)
         return None                  # an image tag: unknown without screen detection
+
+    def tag_lookup(self, name: str):
+        """StartCondition identifiers: the image tags only (imapSetTags)."""
+        return (name in self.tags) if self.detecting else None
+
+    # ------------------------------------------------------------------ images (§3.20)
+    def send_images(self) -> None:
+        """Hand the scheme's Images to QEMU's renderer (or turn detection off)."""
+        self._img_gen += 1
+        self.detecting = False
+        self.tags = set()
+        if not self.ch.is_open:
+            self._img_ids = []
+            return
+        lines, self._img_ids = imgd.config_lines(
+            self._img_gen, self.package, self.scheme.images if self.scheme else [])
+        for line in lines:
+            self.ch.send(line)
+        self.ch.flush()
+
+    def _on_images_ready(self, gen: int, ok: bool) -> None:
+        if gen != self._img_gen:
+            return
+        self.detecting = ok and bool(self._img_ids)
+        if self._img_ids:
+            self.status.emit("game controls: on-screen detection " + (
+                f"on ({len(self._img_ids)} images)" if self.detecting else
+                "unavailable (needs the gfxstream renderer); smart conditions ignored"))
+        self._apply_tags()
+
+    def _on_tags(self, gen: int, idx: list[int]) -> None:
+        if gen != self._img_gen or not self.detecting:
+            return
+        tags = {self._img_ids[i] for i in idx if 0 <= i < len(self._img_ids)}
+        if tags != self.tags:
+            self.tags = tags
+            self._apply_tags()
+
+    def _apply_tags(self) -> None:
+        """imapSetTags: StartConditions (tags only), then every EnableCondition."""
+        for c in self.controls:
+            sc = c.raw.get("StartCondition", "")
+            if sc:
+                v = expr.evaluate(sc, self.tag_lookup)
+                c.on_start_condition(bool(v))
+        self.refresh_enabled()
+        self.update_capture()
+        self.changed.emit()
 
     def condition(self, src: str) -> bool:
         v = expr.evaluate(src, self.lookup)
@@ -200,6 +257,8 @@ class Engine(QObject):
         self._caps = None
         self._native_mouse = None
         self.status.emit("game controls: connected")
+        self.send_images()
+        self.refresh_enabled()
         self.update_capture()
 
     # ------------------------------------------------------------------ touches
@@ -361,6 +420,10 @@ class Engine(QObject):
             elif kind == "O":
                 self.orient = int(p[1]) & 3
                 self.changed.emit()
+            elif kind == "I":
+                self._on_images_ready(int(p[1]), p[2] == "1")
+            elif kind == "T":
+                self._on_tags(int(p[1]), [int(x) for x in p[2:]])
         except (IndexError, ValueError):
             return
         self.update_capture()

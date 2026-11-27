@@ -87,6 +87,7 @@ bool ost_input_connected(void);
 bool ost_input_wants_key(unsigned evdev);
 unsigned ost_input_buttons(void);    /* OST_BTN_* the front-end captures */
 void ost_input_printf(const char *fmt, ...) G_GNUC_PRINTF(1, 2);
+void ost_input_send_line(const char *line);   /* any length; adds the newline */
 
 /* gr_render.c */
 /* view coordinates (0..INPUT_EVENT_ABS_MAX across the display as shown) -> the
@@ -95,5 +96,7 @@ void gr_view_to_panel(int vx, int vy, int *ax, int *ay);
 /* pointer lock for aim/pan controls: hide + confine the cursor, report relative
  * motion ("R dx dy") instead of positions */
 void gr_set_pointer_lock(bool on);
+/* an image detection line from the controls front-end ("I ...", without the "I") */
+void gr_imgd_line(const char *l);
 
 #endif /* HW_MISC_GR_RENDER_H */

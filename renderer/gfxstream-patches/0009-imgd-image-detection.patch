@@ -1,0 +1,805 @@
+diff --git a/host/gl/glestranslator/common/CMakeLists.txt b/host/gl/glestranslator/common/CMakeLists.txt
+index d72eb78..3faf334 100644
+--- a/host/gl/glestranslator/common/CMakeLists.txt
++++ b/host/gl/glestranslator/common/CMakeLists.txt
+@@ -23,6 +23,7 @@ add_library(
+   gles_pointer.cpp
+   gles_validate.cpp
+   gl_utils.cpp
++  imgd.cpp
+   named_object.cpp
+   object_data.cpp
+   object_name_space.cpp
+diff --git a/host/gl/glestranslator/common/imgd.cpp b/host/gl/glestranslator/common/imgd.cpp
+new file mode 100644
+index 0000000..48345ab
+--- /dev/null
++++ b/host/gl/glestranslator/common/imgd.cpp
+@@ -0,0 +1,341 @@
++// OpenStacks: BlueStacks-compatible image detection, GL-free core. See common/imgd.h.
++#include "common/imgd.h"
++
++#include <algorithm>
++#include <atomic>
++#include <cmath>
++#include <cstring>
++#include <mutex>
++
++namespace imgd {
++
++namespace {
++
++std::mutex g_mu;
++Config g_staged;
++std::shared_ptr<const Config> g_cfg;   // published
++std::atomic<uint32_t> g_seq{0};          // bumped on every commit
++std::atomic<bool> g_armed{false};
++ReportFn g_report = nullptr;
++void* g_reportUser = nullptr;
++std::vector<int32_t> g_lastSent;         // last report (for the current seq)
++bool g_sentAny = false;
++
++struct ThreadState {
++    uint32_t seq = 0;
++    std::shared_ptr<const Config> cfg;
++    std::vector<uint8_t> found;
++    int nfound = 0;
++    bool sticky = false;                 // this thread has matched something (sendFoundImages)
++};
++thread_local ThreadState t_state;
++
++ThreadState& state() {
++    ThreadState& t = t_state;
++    uint32_t s = g_seq.load(std::memory_order_acquire);
++    if (t.seq != s || !t.cfg) {
++        std::lock_guard<std::mutex> l(g_mu);
++        t.cfg = g_cfg;
++        t.seq = g_seq.load(std::memory_order_relaxed);
++        t.found.assign(t.cfg ? t.cfg->images.size() : 0, 0);
++        t.nfound = 0;
++        t.sticky = false;
++    }
++    return t;
++}
++
++uint32_t g_crcTab[8][256];
++std::once_flag g_crcOnce;
++
++void crcInit() {
++    for (uint32_t i = 0; i < 256; i++) {
++        uint32_t c = i;
++        for (int k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
++        g_crcTab[0][i] = c;
++    }
++    for (uint32_t i = 0; i < 256; i++)
++        for (int t = 1; t < 8; t++)
++            g_crcTab[t][i] = (g_crcTab[t - 1][i] >> 8) ^ g_crcTab[0][g_crcTab[t - 1][i] & 0xff];
++}
++
++// one component of vertex `vtx` as HD-Player reads it: float, or unsigned short
++// (normalized: * 1/65536, the constant 1.5258789e-05 HD-Player uses)
++bool readComp(const Attr& a, int vtx, int comp, float* out) {
++    int esz = a.type == 0x1406 ? 4 : a.type == 0x1403 ? 2 : 0;
++    if (!esz || !a.data || vtx < 0 || comp >= a.size) return false;
++    size_t stride = a.stride ? (size_t)a.stride : (size_t)(esz * a.size);
++    size_t off = (size_t)vtx * stride + (size_t)comp * esz;
++    if (off + esz > a.avail) return false;
++    if (esz == 4) {
++        float f;
++        memcpy(&f, a.data + off, 4);
++        *out = f;
++    } else {
++        uint16_t s;
++        memcpy(&s, a.data + off, 2);
++        *out = (float)s;
++        if (a.normalized) *out *= 1.5258789e-05f;
++    }
++    return true;
++}
++
++bool vertexAt(const Order& o, int i, int* vtx) {
++    if (!o.data) {
++        *vtx = o.first + i;
++        return true;
++    }
++    size_t esz = o.type == 0x1401 ? 1 : o.type == 0x1403 ? 2 : o.type == 0x1405 ? 4 : 0;
++    if (!esz || i < 0 || (size_t)(i + 1) * esz > o.avail) return false;
++    const uint8_t* p = o.data + (size_t)i * esz;
++    if (esz == 1) {
++        *vtx = p[0];
++    } else if (esz == 2) {
++        uint16_t s;
++        memcpy(&s, p, 2);
++        *vtx = s;
++    } else {
++        uint32_t s;
++        memcpy(&s, p, 4);
++        if (s > 0x7fffffff) return false;
++        *vtx = (int)s;
++    }
++    return true;
++}
++
++}  // namespace
++
++// ------------------------------------------------------------------ configuration
++void begin(uint32_t gen, int emu, const char* sampler, const char* sampler2) {
++    std::lock_guard<std::mutex> l(g_mu);
++    g_staged = Config();
++    g_staged.gen = gen;
++    g_staged.emu = emu;
++    g_staged.sampler = sampler ? sampler : "";
++    g_staged.sampler2 = sampler2 ? sampler2 : "";
++}
++
++void add(const Image& im) {
++    std::lock_guard<std::mutex> l(g_mu);
++    if (g_staged.images.size() >= 4096) return;
++    g_staged.byCrc.emplace(im.crc, (int)g_staged.images.size());
++    g_staged.images.push_back(im);
++}
++
++void commit() {
++    std::lock_guard<std::mutex> l(g_mu);
++    bool on = !g_staged.images.empty();
++    g_cfg = on ? std::make_shared<const Config>(g_staged) : nullptr;
++    g_lastSent.clear();
++    g_sentAny = false;
++    g_seq.fetch_add(1, std::memory_order_release);
++    g_armed.store(on, std::memory_order_release);
++}
++
++bool armed() { return g_armed.load(std::memory_order_acquire); }
++
++std::shared_ptr<const Config> current() { return state().cfg; }
++
++void setReport(ReportFn fn, void* user) {
++    std::lock_guard<std::mutex> l(g_mu);
++    g_report = fn;
++    g_reportUser = user;
++}
++
++// ------------------------------------------------------------------ per thread
++bool isFound(int idx) {
++    ThreadState& t = state();
++    return idx >= 0 && (size_t)idx < t.found.size() && t.found[idx];
++}
++
++void markFound(int idx) {
++    ThreadState& t = state();
++    if (idx >= 0 && (size_t)idx < t.found.size() && !t.found[idx]) {
++        t.found[idx] = 1;
++        t.nfound++;
++    }
++}
++
++void frameEnd() {
++    if (!armed()) return;
++    ThreadState& t = state();
++    if (!t.cfg) return;
++    if (t.nfound) t.sticky = true;
++    if (!t.sticky) return;               // threads that never matched (SurfaceFlinger...) stay quiet
++    std::vector<int32_t> ids;
++    ids.reserve(t.nfound);
++    for (size_t i = 0; i < t.found.size(); i++) {
++        if (t.found[i]) ids.push_back((int32_t)i);
++    }
++    std::fill(t.found.begin(), t.found.end(), 0);
++    t.nfound = 0;
++    std::lock_guard<std::mutex> l(g_mu);
++    if (g_seq.load(std::memory_order_relaxed) != t.seq) return;   // a new config arrived
++    if (g_sentAny && ids == g_lastSent) return;                  // imapSetTags: same tags
++    g_lastSent = ids;
++    g_sentAny = true;
++    if (g_report) g_report(g_reportUser, t.cfg->gen, ids.data(), (int)ids.size());
++}
++
++// ------------------------------------------------------------------ helpers
++uint32_t crc32(const void* data, size_t len) {
++    std::call_once(g_crcOnce, crcInit);
++    const uint8_t* p = static_cast<const uint8_t*>(data);
++    uint32_t c = 0xFFFFFFFFu;
++    while (len >= 8) {
++        uint32_t a, b;
++        memcpy(&a, p, 4);
++        memcpy(&b, p + 4, 4);
++        a ^= c;
++        c = g_crcTab[7][a & 0xff] ^ g_crcTab[6][(a >> 8) & 0xff] ^
++            g_crcTab[5][(a >> 16) & 0xff] ^ g_crcTab[4][a >> 24] ^
++            g_crcTab[3][b & 0xff] ^ g_crcTab[2][(b >> 8) & 0xff] ^
++            g_crcTab[1][(b >> 16) & 0xff] ^ g_crcTab[0][b >> 24];
++        p += 8;
++        len -= 8;
++    }
++    while (len--) c = (c >> 8) ^ g_crcTab[0][(c ^ *p++) & 0xff];
++    return ~c;
++}
++
++int pixelSize(unsigned f, unsigned t) {      // imgdComputePixelSize (ImgdUtils.cpp)
++    switch (t) {
++    case 0x8033: case 0x8034: case 0x8363: case 0x8365: case 0x8366: return 2;   // packed 16
++    case 0x8368: case 0x84fa: case 0x8c3b: case 0x8c3e: return 4;                 // packed 32
++    case 0x8dad: return 8;
++    case 0x1401:                                                                  // UNSIGNED_BYTE
++        switch (f) {
++        case 0x1903: case 0x1906: case 0x1909: case 0x803c: case 0x8040: case 0x8229:
++        case 0x8232: case 0x8d94: return 1;
++        case 0x190a: case 0x8045: case 0x8227: case 0x8228: case 0x822b: case 0x8238: return 2;
++        case 0x1907: case 0x8051: case 0x8c41: case 0x8d7d: case 0x8d98: return 3;
++        case 0x1908: case 0x8058: case 0x80e1: case 0x8c43: case 0x8d7c: case 0x8d99:
++        case 0x93a1: return 4;
++        }
++        return 0;
++    case 0x1400:                                                                  // BYTE
++        switch (f) {
++        case 0x1903: case 0x8229: case 0x8231: case 0x8d94: case 0x8f94: return 1;
++        case 0x8227: case 0x8228: case 0x822b: case 0x8237: case 0x8f95: return 2;
++        case 0x1907: case 0x8051: case 0x8d8f: case 0x8d98: case 0x8f96: return 3;
++        case 0x1908: case 0x8058: case 0x8d8e: case 0x8d99: case 0x8f97: return 4;
++        }
++        return 0;
++    case 0x1403:                                                                  // UNSIGNED_SHORT
++        switch (f) {
++        case 0x1902: case 0x81a5: case 0x8234: case 0x8d94: return 2;
++        case 0x8228: case 0x823a: return 4;
++        case 0x8d77: case 0x8d98: return 6;
++        case 0x8d76: case 0x8d99: return 8;
++        }
++        return 0;
++    case 0x1402:                                                                  // SHORT
++        switch (f) {
++        case 0x8233: case 0x8d94: return 2;
++        case 0x8228: case 0x8239: return 4;
++        case 0x8d89: case 0x8d98: return 6;
++        case 0x8d88: case 0x8d99: return 8;
++        }
++        return 0;
++    case 0x1405:                                                                  // UNSIGNED_INT
++        switch (f) {
++        case 0x1902: case 0x81a5: case 0x81a6: case 0x81a7: case 0x8236: case 0x8d94: return 4;
++        case 0x8228: case 0x823c: return 8;
++        case 0x8d71: case 0x8d98: return 12;
++        case 0x8d70: case 0x8d99: return 16;
++        }
++        return 0;
++    case 0x1404:                                                                  // INT
++        switch (f) {
++        case 0x8235: case 0x8d94: return 4;
++        case 0x8228: case 0x823b: return 8;
++        case 0x8d83: case 0x8d98: return 12;
++        case 0x8d82: case 0x8d99: return 16;
++        }
++        return 0;
++    case 0x1406:                                                                  // FLOAT
++        switch (f) {
++        case 0x1902: case 0x1903: case 0x1906: case 0x1909: case 0x822e: case 0x8816:
++        case 0x8818: case 0x8cac: return 4;
++        case 0x190a: case 0x8227: case 0x8230: case 0x8819: return 8;
++        case 0x1907: case 0x8815: return 12;
++        case 0x1908: case 0x8814: return 16;
++        }
++        return 0;
++    case 0x140b: case 0x8d61:                                                     // HALF_FLOAT(_OES)
++        switch (f) {
++        case 0x1903: case 0x1906: case 0x1909: case 0x822d: case 0x881c: case 0x881e: return 2;
++        case 0x190a: case 0x8227: case 0x822f: case 0x881f: return 4;
++        case 0x1907: case 0x881b: return 6;
++        case 0x1908: case 0x881a: return 8;
++        }
++        return 0;
++    }
++    return 0;
++}
++
++bool findTriangle(const Attr& tex, const Order& ord, float u, float v, int* cursor, int tri[3]) {
++    const int step = ord.mode == 5 ? 1 : 3;      // GL_TRIANGLE_STRIP : everything else
++    int c = *cursor;
++    for (; c + 2 < ord.count; c += step) {
++        float tu[3], tv[3];
++        bool ok = true;
++        for (int k = 0; k < 3 && ok; k++) {
++            int vtx;
++            ok = vertexAt(ord, c + k, &vtx) && readComp(tex, vtx, 0, &tu[k]) &&
++                 readComp(tex, vtx, 1, &tv[k]);
++        }
++        if (!ok) break;                              // out of the data: stop
++        const float eps = 1e-05f;
++        if (!((std::fabs(tu[1] - tu[0]) >= eps || std::fabs(tu[2] - tu[0]) >= eps) &&
++              (std::fabs(tv[1] - tv[0]) >= eps || std::fabs(tv[2] - tv[0]) >= eps)))
++            continue;                                // degenerate in u or v
++        bool in01 = true;
++        for (int k = 0; k < 3; k++)
++            in01 &= tu[k] >= 0.0f && tu[k] <= 1.0f && tv[k] >= 0.0f && tv[k] <= 1.0f;
++        if (!in01) continue;
++        float umin = std::min({tu[0], tu[1], tu[2]}), umax = std::max({tu[0], tu[1], tu[2]});
++        float vmin = std::min({tv[0], tv[1], tv[2]}), vmax = std::max({tv[0], tv[1], tv[2]});
++        if (!(umin <= u && u <= umax && vmin <= v && v <= vmax)) continue;
++        float e1 = (tv[1] - tv[0]) * (tu[1] - u) - (tu[1] - tu[0]) * (tv[1] - v);
++        float e2 = (tv[2] - tv[1]) * (tu[2] - u) - (tu[2] - tu[1]) * (tv[2] - v);
++        float e3 = (tv[0] - tv[2]) * (tu[0] - u) - (tu[0] - tu[2]) * (tv[0] - v);
++        if ((e1 >= 0 && e2 >= 0 && e3 >= 0) || (e1 <= 0 && e2 <= 0 && e3 <= 0)) {
++            tri[0] = c;
++            tri[1] = c + 1;
++            tri[2] = c + 2;
++            *cursor = c + 3;
++            return true;
++        }
++    }
++    *cursor = c;
++    return false;
++}
++
++bool centroid(const Attr& pos, const Order& ord, const int tri[3], float out[4]) {
++    float s[4] = {0, 0, 0, 0};
++    int n = std::min(pos.size, 4);
++    for (int k = 0; k < 3; k++) {
++        int vtx;
++        if (!vertexAt(ord, tri[k], &vtx)) return false;
++        for (int j = 0; j < n; j++) {
++            float f;
++            if (!readComp(pos, vtx, j, &f)) return false;
++            s[j] += f;
++        }
++    }
++    out[0] = s[0] / 3.0f;
++    out[1] = s[1] / 3.0f;
++    out[2] = s[2] / 3.0f;
++    out[3] = 1.0f;
++    return true;
++}
++
++void unityClip(const float m[16], const float vp[16], const float p[4], float out[4]) {
++    float w[4];
++    for (int i = 0; i < 4; i++)
++        w[i] = m[i] * p[0] + m[4 + i] * p[1] + m[8 + i] * p[2] + m[12 + i];
++    for (int i = 0; i < 4; i++)
++        out[i] = vp[i] * w[0] + vp[4 + i] * w[1] + vp[8 + i] * w[2] + vp[12 + i] * w[3];
++}
++
++}  // namespace imgd
+diff --git a/host/gl/glestranslator/common/include/common/imgd.h b/host/gl/glestranslator/common/include/common/imgd.h
+new file mode 100644
+index 0000000..e9f6c8c
+--- /dev/null
++++ b/host/gl/glestranslator/common/include/common/imgd.h
+@@ -0,0 +1,101 @@
++// OpenStacks: BlueStacks-compatible image detection ("Smart" game controls).
++//
++// BlueStacks recognises on-screen UI by texture: a controls scheme lists images
++// {TextureCRC, TextureIndex, VertexIndex, TextureCoord, VertexRect}; HD-Player's Imgd.cpp
++// hashes every level-0 texture upload (zlib CRC32) and, for each draw, checks whether the
++// texture bound to the game's sampler has a listed CRC and a drawn triangle covers the
++// image's texture coordinate (optionally with its screen centre inside VertexRect).
++// The ids matched during a frame become the scheme's tags. Spec: docs/re/kmm_controls.md 3.20.
++//
++// This file is the GL-free core (also built by the unit test); the translator supplies
++// the vertex data and uniforms.
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++namespace imgd {
++
++enum Emu {             // how the screen position of a vertex is computed (ImgdShaderEmul.cpp)
++    EMU_NONE = 0,      // no VertexRect test (packages without a shader emulation)
++    EMU_UNITY = 1,     // GroupA: MatrixVP * (ObjectToWorld * pos), Unity HLSLcc uniforms
++};
++
++struct Image {
++    uint32_t crc = 0;
++    int texAttr = 0;   // TextureIndex: vertex attribute holding the texture coordinates
++    int posAttr = 0;   // VertexIndex: vertex attribute holding the position
++    float u = 0, v = 0;
++    bool hasRect = false;
++    float rect[4] = {0, 0, 0, 0};   // x1 y1 x2 y2, percent of the surface
++};
++
++struct Config {
++    uint32_t gen = 0;
++    int emu = EMU_NONE;
++    std::string sampler;           // sampler uniform naming the texture unit ("" = unit 0)
++    std::string sampler2;          // fallback uniform name ("" = none)
++    std::vector<Image> images;
++    std::unordered_multimap<uint32_t, int> byCrc;
++};
++
++// ---- configuration (any thread) ----------------------------------------------------------
++void begin(uint32_t gen, int emu, const char* sampler, const char* sampler2);
++void add(const Image& im);
++void commit();                     // publish the staged list; an empty list turns detection off
++bool armed();                      // a non-empty config is published (cheap)
++std::shared_ptr<const Config> current();   // this thread's snapshot of the published config
++
++using ReportFn = void (*)(void* user, uint32_t gen, const int32_t* idx, int n);
++void setReport(ReportFn fn, void* user);
++
++// ---- per render thread --------------------------------------------------------------------
++bool isFound(int idx);
++void markFound(int idx);
++void frameEnd();                   // a window surface was flushed on this thread
++
++// ---- helpers ------------------------------------------------------------------------------
++uint32_t crc32(const void* data, size_t len);
++// bytes per pixel of an uncompressed upload (imgdComputePixelSize), 0 if unknown
++int pixelSize(unsigned format, unsigned type);
++
++// A vertex attribute as the draw sees it.
++struct Attr {
++    const uint8_t* data = nullptr; // first byte of vertex 0 (buffer data + offset, or client)
++    size_t avail = 0;              // readable bytes from `data`
++    int size = 0;                  // components
++    unsigned type = 0;             // GL_FLOAT / GL_UNSIGNED_SHORT supported
++    bool normalized = false;
++    int stride = 0;                // 0 = tightly packed
++};
++// The draw's vertex order: indices (ubyte/ushort/uint) or, with data == nullptr, first + i.
++struct Order {
++    const uint8_t* data = nullptr;
++    size_t avail = 0;
++    unsigned type = 0;
++    int first = 0;
++    int count = 0;
++    unsigned mode = 4;             // GL_TRIANGLES (step 3) / GL_TRIANGLE_STRIP (step 1)
++};
++
++// Next triangle from *cursor whose texture coordinates (all in [0,1], not degenerate)
++// contain (u, v); tri[] gets its three draw positions. FUN_1402b6d20.
++bool findTriangle(const Attr& tex, const Order& ord, float u, float v, int* cursor, int tri[3]);
++// Mean of the triangle's positions, w = 1. FUN_1402b7d80.
++bool centroid(const Attr& pos, const Order& ord, const int tri[3], float out[4]);
++// Unity GroupA: clip = VP * (O2W * p); matrices as 4 vec4 columns. FUN_1402b8d60.
++void unityClip(const float o2w[16], const float vp[16], const float p[4], float out[4]);
++// clip x/y -> percent of the surface, as HD-Player computes it (no perspective divide)
++inline void clipToPercent(const float c[4], float* x, float* y) {
++    *x = (c[0] * 0.5f + 0.5f) * 100.0f;
++    *y = (0.5f - c[1] * 0.5f) * 100.0f;
++}
++inline bool inRect(const float r[4], float x, float y) {   // strict (FUN_1402b8240)
++    return r[0] < x && x < r[2] && r[1] < y && y < r[3];
++}
++
++}  // namespace imgd
+diff --git a/host/gl/glestranslator/common/include/common/texture_data.h b/host/gl/glestranslator/common/include/common/texture_data.h
+index 9e41fdf..7d475f9 100644
+--- a/host/gl/glestranslator/common/include/common/texture_data.h
++++ b/host/gl/glestranslator/common/include/common/texture_data.h
+@@ -72,6 +72,8 @@ public:
+     // both GLES2 and 3.
+     unsigned int texStorageLevels = 0;
+     int samples;
++    // OpenStacks image detection (common/imgd.h): CRC32 of the last level-0 upload, 0 = none
++    uint32_t imgdCrc = 0;
+     void onSave(gfxstream::Stream* stream,
+                 unsigned int globalName) const override;
+     void restore(ObjectLocalName localName,
+diff --git a/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp b/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp
+index 63efd84..17ed9f3 100644
+--- a/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp
++++ b/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp
+@@ -37,6 +37,7 @@
+ #include "gles_v2_validate.h"
+ #include "common/framebuffer_data.h"
+ #include "common/gl_utils.h"
++#include "common/imgd.h"
+ #include "common/saveable_texture.h"
+ #include "common/texture_data.h"
+ #include "common/texture_utils.h"
+@@ -477,6 +478,23 @@ static TextureData* getTextureTargetData(GLenum target){
+     return getTextureData(ctx->getTextureLocalName(target,tex));
+ }
+ 
++// OpenStacks image detection: texture CRCs (common/imgd.h; the draw side is s_imgdDraw)
++static thread_local bool t_imgdInCompressed = false;   // the decompressing glTexImage2D call
++
++static void s_imgdSetCrc(GLEScontext* ctx, GLenum target, GLint level, uint32_t crc) {
++    if (target != GL_TEXTURE_2D || level != 0 || !ctx->shareGroup().get()) return;
++    TextureData* texData = getTextureTargetData(target);
++    if (texData) texData->imgdCrc = crc;
++}
++
++static uint32_t s_imgdPixelsCrc(GLEScontext* ctx, GLsizei w, GLsizei h, GLenum format,
++                                GLenum type, const GLvoid* pixels) {
++    if (!pixels || w <= 0 || h <= 0 || ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER)) return 0;
++    int ps = imgd::pixelSize(format, type);
++    return ps > 0 ? imgd::crc32(pixels, (size_t)ps * (size_t)w * (size_t)h) : 0;
++}
++
++
+ namespace translator {
+ namespace gles2 {
+ 
+@@ -925,6 +943,7 @@ GL_APICALL void  GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
+ 
+     auto funcPtr = translator::gles2::glTexImage2D;
+ 
++    t_imgdInCompressed = true;
+     if (shouldPassthroughCompressedFormat(ctx, internalformat)) {
+         doCompressedTexImage2DNative(ctx, target, level, internalformat,
+                                           width, height, border, imageSize, data);
+@@ -933,6 +952,13 @@ GL_APICALL void  GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
+                                     width, height, border,
+                                     imageSize, data, funcPtr);
+     }
++    t_imgdInCompressed = false;
++    // imgdUpdateCompressedTextureCRC: the compressed bytes as uploaded
++    if (imgd::armed()) {
++        s_imgdSetCrc(ctx, target, level,
++                     data && imageSize > 0 && !ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER)
++                             ? imgd::crc32(data, (size_t)imageSize) : 0);
++    }
+ 
+     TextureData* texData = getTextureTargetData(target);
+     if (texData) {
+@@ -970,6 +996,12 @@ GL_APICALL void  GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint leve
+             SET_ERROR_IF(format != texData->compressedFormat, GL_INVALID_OPERATION);
+         }
+         SET_ERROR_IF(ctx->getMajorVersion() < 3 && !data, GL_INVALID_OPERATION);
++        if (imgd::armed()) {
++            s_imgdSetCrc(ctx, target, level,
++                         data && imageSize > 0 && !ctx->isBindedBuffer(GL_PIXEL_UNPACK_BUFFER)
++                                 ? imgd::crc32(data, (size_t)imageSize) : 0);
++        }
++        t_imgdInCompressed = true;
+         if (shouldPassthroughCompressedFormat(ctx, format)) {
+             doCompressedTexSubImage2DNative(ctx, target, level, xoffset, yoffset,
+                                                  width, height, format, imageSize, data);
+@@ -984,6 +1016,7 @@ GL_APICALL void  GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint leve
+                             width, height, format, type, data);
+                     });
+         }
++        t_imgdInCompressed = false;
+     }
+ }
+ 
+@@ -1587,10 +1620,180 @@ static void s_glDrawPost(GLESv2Context* ctx, GLenum mode) {
+     }
+ }
+ 
++// ---- OpenStacks image detection (common/imgd.h, docs/re/kmm_controls.md 3.20) -------------
++// HD-Player's Imgd.cpp, run inside the translator: texture uploads record a CRC32 per
++// texture, draws test the configured images. Nothing here touches the guest's GL state or
++// error flag: uniforms and buffers are read through ProgramData / the host dispatcher.
++
++static GLESbuffer* s_imgdBuffer(GLEScontext* ctx, GLuint name) {
++    if (!name) return nullptr;
++    auto obj = ctx->shareGroup()->getObjectData(NamedObjectType::VERTEXBUFFER, name);
++    return obj ? static_cast<GLESbuffer*>(obj) : nullptr;
++}
++
++static imgd::Attr s_imgdAttr(GLESv2Context* ctx, int index) {
++    imgd::Attr a;
++    const GLESpointer* p = index >= 0 ? ctx->getPointer((GLenum)index) : nullptr;
++    if (!p || !p->isEnable()) return a;
++    if (p->getAttribType() == GLESpointer::BUFFER) {
++        GLESbuffer* b = s_imgdBuffer(ctx, p->getBufferName());
++        if (!b || !b->getData() || p->getBufferOffset() > b->getSize()) return a;
++        a.data = static_cast<const uint8_t*>(b->getData()) + p->getBufferOffset();
++        a.avail = b->getSize() - p->getBufferOffset();
++    } else if (p->getAttribType() == GLESpointer::ARRAY) {
++        a.data = static_cast<const uint8_t*>(p->getArrayData());
++        a.avail = p->getDataSize() > 0 ? (size_t)p->getDataSize() : 0;
++    } else {
++        return a;
++    }
++    a.size = p->getSize();
++    a.type = p->getType();
++    a.normalized = p->isNormalize();
++    a.stride = p->getStride();
++    return a;
++}
++
++// 16 floats (4 vec4 columns) of uniform `name[0..3]`, or of a uniform block member
++static bool s_imgdMatrix(GLESv2Context* ctx, GLuint globalProg, ProgramData* pd,
++                         const char* name, float out[16]) {
++    for (int i = 0; i < 4; i++) {
++        char n[96];
++        snprintf(n, sizeof(n), "%s[%d]", name, i);
++        int loc = pd->getGuestUniformLocation(n);
++        if (loc < 0) return false;
++        ctx->dispatcher().glGetUniformfv(globalProg, pd->getHostUniformLocation(loc),
++                                         out + 4 * i);
++    }
++    return true;
++}
++
++static void s_imgdBlockFloats(GLESv2Context* ctx, GLuint globalProg, const char* block,
++                              int floatOff, float out[16]) {
++    memset(out, 0, 16 * sizeof(float));
++    if (ctx->getMajorVersion() < 3 || !ctx->dispatcher().glGetUniformBlockIndex ||
++        !ctx->dispatcher().glGetActiveUniformBlockiv || !ctx->dispatcher().glGetInteger64i_v)
++        return;
++    GLuint idx = ctx->dispatcher().glGetUniformBlockIndex(globalProg, block);
++    if (idx == GL_INVALID_INDEX) return;
++    GLint binding = -1;
++    ctx->dispatcher().glGetActiveUniformBlockiv(globalProg, idx, GL_UNIFORM_BLOCK_BINDING,
++                                                &binding);
++    if (binding < 0) return;
++    GLESbuffer* b = s_imgdBuffer(ctx, ctx->getIndexedBuffer(GL_UNIFORM_BUFFER, binding));
++    if (!b || !b->getData()) return;
++    GLint64 start = 0;
++    ctx->dispatcher().glGetInteger64i_v(GL_UNIFORM_BUFFER_START, binding, &start);
++    size_t off = (size_t)start + (size_t)floatOff * 4;
++    if (start < 0 || off + 64 > b->getSize()) return;
++    memcpy(out, static_cast<const uint8_t*>(b->getData()) + off, 64);
++}
++
++// imgdNormalizedScreenPositionGroupA (0x1402b8d60): unity_ObjectToWorld / unity_MatrixVP from
++// plain uniforms, else from the UnityPerDraw (float 0) / UnityPerFrame (float 76) blocks
++static void s_imgdUnityMatrices(GLESv2Context* ctx, GLuint globalProg, ProgramData* pd,
++                                float o2w[16], float vp[16]) {
++    if (s_imgdMatrix(ctx, globalProg, pd, "hlslcc_mtx4x4unity_ObjectToWorld", o2w) &&
++        s_imgdMatrix(ctx, globalProg, pd, "hlslcc_mtx4x4unity_MatrixVP", vp))
++        return;
++    s_imgdBlockFloats(ctx, globalProg, "UnityPerDraw", 0, o2w);
++    s_imgdBlockFloats(ctx, globalProg, "UnityPerFrame", 76, vp);
++}
++
++// imageDetect (0x1402b09d0) for one draw
++static void s_imgdDraw(GLESv2Context* ctx, GLenum mode, GLint first, GLsizei count,
++                       GLenum type, const GLvoid* indices, bool elements) {
++    if (!imgd::armed() || count < 3 || !ctx->shareGroup().get()) return;
++    std::shared_ptr<const imgd::Config> cfg = imgd::current();
++    GLuint prog = ctx->getCurrentProgram();
++    if (!cfg || !prog) return;
++    auto pobj = ctx->shareGroup()->getObjectData(NamedObjectType::SHADER_OR_PROGRAM, prog);
++    if (!pobj || pobj->getDataType() != PROGRAM_DATA) return;
++    ProgramData* pd = static_cast<ProgramData*>(pobj);
++    if (!pd->getLinkStatus()) return;
++    const GLuint globalProg =
++            ctx->shareGroup()->getGlobalName(NamedObjectType::SHADER_OR_PROGRAM, prog);
++    if (!globalProg) return;
++
++    // the texture unit of the game's sampler (FUN_1402b1400); unit 0 without one
++    int unit = 0;
++    if (!cfg->sampler.empty()) {
++        int loc = pd->getGuestUniformLocation(cfg->sampler.c_str());
++        if (loc < 0 && !cfg->sampler2.empty())
++            loc = pd->getGuestUniformLocation(cfg->sampler2.c_str());
++        if (loc >= 0) {
++            GLint u = 0;
++            ctx->dispatcher().glGetUniformiv(globalProg, pd->getHostUniformLocation(loc), &u);
++            unit = u;
++        }
++    }
++    if (unit < 0 || unit >= ctx->getMaxCombinedTexUnits()) return;
++    unsigned int tex = ctx->getBindedTexture(GL_TEXTURE0 + unit, GL_TEXTURE_2D);
++    auto tobj = ctx->shareGroup()->getObjectData(
++            NamedObjectType::TEXTURE, ctx->getTextureLocalName(GL_TEXTURE_2D, tex));
++    if (!tobj || tobj->getDataType() != TEXTURE_DATA) return;
++    const uint32_t crc = static_cast<TextureData*>(tobj)->imgdCrc;
++    if (!crc) return;
++    auto range = cfg->byCrc.equal_range(crc);
++    if (range.first == range.second) return;
++
++    imgd::Order ord;
++    ord.mode = mode;
++    ord.count = count;
++    ord.first = first;
++    if (elements) {
++        ord.type = type;
++        size_t esz = type == GL_UNSIGNED_BYTE ? 1 : type == GL_UNSIGNED_SHORT ? 2 : 4;
++        if (ctx->isBindedBuffer(GL_ELEMENT_ARRAY_BUFFER)) {
++            GLESbuffer* b = s_imgdBuffer(ctx, ctx->getBuffer(GL_ELEMENT_ARRAY_BUFFER));
++            uintptr_t off = (uintptr_t)indices;
++            if (!b || !b->getData() || off > b->getSize()) return;
++            ord.data = static_cast<const uint8_t*>(b->getData()) + off;
++            ord.avail = b->getSize() - off;
++        } else {
++            if (!indices) return;
++            ord.data = static_cast<const uint8_t*>(indices);
++            ord.avail = (size_t)count * esz;
++        }
++    }
++
++    bool haveMats = false;
++    float o2w[16], vp[16];
++    for (auto it = range.first; it != range.second; ++it) {
++        const int idx = it->second;
++        if (imgd::isFound(idx)) continue;
++        const imgd::Image& im = cfg->images[idx];
++        imgd::Attr texAttr = s_imgdAttr(ctx, im.texAttr);
++        if (!texAttr.data) continue;
++        const bool useRect = im.hasRect && cfg->emu == imgd::EMU_UNITY;
++        imgd::Attr posAttr;
++        if (useRect) posAttr = s_imgdAttr(ctx, im.posAttr);
++        int cursor = 0, tri[3];
++        while (imgd::findTriangle(texAttr, ord, im.u, im.v, &cursor, tri)) {
++            if (!useRect) {
++                imgd::markFound(idx);
++                break;
++            }
++            float p[4], c[4], x, y;
++            if (!imgd::centroid(posAttr, ord, tri, p)) break;
++            if (!haveMats) {
++                s_imgdUnityMatrices(ctx, globalProg, pd, o2w, vp);
++                haveMats = true;
++            }
++            imgd::unityClip(o2w, vp, p, c);
++            imgd::clipToPercent(c, &x, &y);
++            if (imgd::inRect(im.rect, x, y)) {
++                imgd::markFound(idx);
++                break;
++            }
++        }
++    }
++}
++
+ GL_APICALL void  GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count){
+     GET_CTX_V2();
+     SET_ERROR_IF(first < 0 || count < 0,GL_INVALID_VALUE)
+     SET_ERROR_IF(!GLESv2Validate::drawMode(mode),GL_INVALID_ENUM);
++    s_imgdDraw(ctx, mode, first, count, 0, nullptr, false);
+ 
+     if (ctx->vertexAttributesBufferBacked()) {
+         s_glDrawPre(ctx, mode);
+@@ -1626,6 +1829,7 @@ GL_APICALL void  GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum t
+     GET_CTX_V2();
+     SET_ERROR_IF(count < 0,GL_INVALID_VALUE)
+     SET_ERROR_IF(!(GLESv2Validate::drawMode(mode) && GLESv2Validate::drawType(type)),GL_INVALID_ENUM);
++    s_imgdDraw(ctx, mode, 0, count, type, indices, true);
+ 
+     if (ctx->isBindedBuffer(GL_ELEMENT_ARRAY_BUFFER) &&
+         ctx->vertexAttributesBufferBacked()) {
+@@ -4051,6 +4255,10 @@ static void sPrepareTexImage2D(GLenum target, GLsizei level, GLint internalforma
+ 
+ GL_APICALL void  GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid* pixels){
+     GET_CTX();
++    // imgdUpdateTextureCRC: bpp * w * h bytes of the level-0 upload (0 without pixels)
++    if (imgd::armed() && !t_imgdInCompressed) {
++        s_imgdSetCrc(ctx, target, level, s_imgdPixelsCrc(ctx, width, height, format, type, pixels));
++    }
+     // clear previous error
+     GLint err = ctx->dispatcher().glGetError();
+     if (err != GL_NO_ERROR) {
+@@ -4315,6 +4523,11 @@ GL_APICALL void GL_APIENTRY glPopDebugGroupKHR(void) {
+ 
+ GL_APICALL void  GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid* pixels){
+     GET_CTX();
++    // a level-0 sub-upload replaces the texture's CRC with its own (0x1402b4340)
++    if (imgd::armed() && !t_imgdInCompressed && pixels) {
++        uint32_t crc = s_imgdPixelsCrc(ctx, width, height, format, type, pixels);
++        if (crc) s_imgdSetCrc(ctx, target, level, crc);
++    }
+     SET_ERROR_IF(!(GLESv2Validate::textureTarget(ctx, target) ||
+                    GLESv2Validate::textureTargetEx(ctx, target)), GL_INVALID_ENUM);
+     SET_ERROR_IF(!GLESv2Validate::pixelFrmt(ctx,format), GL_INVALID_ENUM);
+diff --git a/host/gl/glestranslator/gles_v2/gles_v30_imp.cpp b/host/gl/glestranslator/gles_v2/gles_v30_imp.cpp
+index 1d798d0..f0ded23 100644
+--- a/host/gl/glestranslator/gles_v2/gles_v30_imp.cpp
++++ b/host/gl/glestranslator/gles_v2/gles_v30_imp.cpp
+@@ -377,6 +377,7 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements(GLenum mode, GLuint start, GLuin
+     GET_CTX_V2();
+     SET_ERROR_IF(count < 0,GL_INVALID_VALUE)
+     SET_ERROR_IF(!(GLESv2Validate::drawMode(mode) && GLESv2Validate::drawType(type)),GL_INVALID_ENUM);
++    s_imgdDraw(ctx, mode, 0, count, type, indices, true);
+ 
+     if (ctx->isBindedBuffer(GL_ELEMENT_ARRAY_BUFFER) &&
+         ctx->vertexAttributesBufferBacked()) {
+diff --git a/host/render_control.cpp b/host/render_control.cpp
+index aca4512..73c3eea 100644
+--- a/host/render_control.cpp
++++ b/host/render_control.cpp
+@@ -48,6 +48,8 @@
+ #define GOLDFISH_SYNC_VULKAN_SEMAPHORE_SYNC 0x00000001
+ #define GOLDFISH_SYNC_VULKAN_QSRI 0x00000002
+ 
++namespace imgd { void frameEnd(); }   // OpenStacks image detection (glestranslator/common)
++
+ namespace gfxstream {
+ namespace host {
+ 
+@@ -869,6 +871,9 @@ static void rcCloseColorBuffer(uint32_t colorbuffer)
+ 
+ static int rcFlushWindowColorBuffer(uint32_t windowSurface)
+ {
++    // a frame of this render thread is complete: report the images it matched
++    ::imgd::frameEnd();
++
+     GRSYNC_DPRINT("waiting for gralloc cb lock");
+     GrallocSyncPostLock lock(*sGrallocSync());
+     GRSYNC_DPRINT("lock gralloc cb lock {");

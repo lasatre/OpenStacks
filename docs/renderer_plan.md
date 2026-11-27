@@ -115,6 +115,10 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
     vblank-blocked swap stalls the guest's eglMakeCurrent and sync-fence waits (minimized:
     ~57 fps). That lock works around Vulkan driver bugs, so revisit it if Vulkan is enabled.
   - Patch 0007 makes readers wait on a colour buffer's write fence (binds, posts).
+  - Patch 0009: image detection for BlueStacks "Smart" controls (docs/re/kmm_controls.md
+    3.20): texture-upload CRCs and per-draw tests in the GLES translator, a report per frame
+    flush (rcFlushWindowColorBuffer); `ost_imgd_*` in ost_renderer. Off (one atomic load per
+    call) until the controls engine sends a scheme with images.
   - Patch 0008: the Android 9 guest presents frames with rcFlushWindowColorBufferAsync
     (no reply) and has no native fences. So SurfaceFlinger's rcBindTexture or rcFBPost
     can reach the host before the app's flush. The host keeps the order: a buffer set as

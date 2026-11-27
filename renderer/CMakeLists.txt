@@ -22,6 +22,9 @@ add_library(ost_renderer SHARED
     "${GFXSTREAM_SRC}/host/render_api.cpp")   # initLibrary(), outside the static lib
 target_compile_definitions(ost_renderer PRIVATE
     OST_RENDERER_BUILD=1 GFXSTREAM_ENABLE_HOST_GLES=1 EMUGL_BUILD)
+# common/imgd.h: image detection core, in gfxstream's GLcommon (gfxstream-patches/0009)
+target_include_directories(ost_renderer PRIVATE
+    "${GFXSTREAM_SRC}/host/gl/glestranslator/common/include")
 if(WIN32)
     target_compile_definitions(ost_renderer PRIVATE
         UNICODE _UNICODE NOMINMAX VK_USE_PLATFORM_WIN32_KHR)
@@ -50,6 +53,12 @@ endif()
 # Smoke test: one channel, rcGetRendererVersion
 add_executable(ost_renderer_smoke smoke.c)
 target_link_libraries(ost_renderer_smoke PRIVATE ost_renderer)
+
+# ost_imgd_test: the image detection core (gfxstream patch 0009), no GL needed
+add_executable(ost_imgd_test imgd_test.cpp
+    "${GFXSTREAM_SRC}/host/gl/glestranslator/common/imgd.cpp")
+target_include_directories(ost_imgd_test PRIVATE
+    "${GFXSTREAM_SRC}/host/gl/glestranslator/common/include")
 
 # st_probe: checks the vendored ShaderTranslator.h against libshadertranslator.dll/.so
 add_executable(st_probe st_probe.cpp)

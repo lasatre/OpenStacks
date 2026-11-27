@@ -132,6 +132,7 @@ class ControlsSession(QObject):
     # -- the game in front
     def _on_package(self, pkg: str) -> None:
         self.package = pkg
+        self.engine.package = pkg
         self.reload()
 
     def reload(self, keep_disabled: bool = False) -> None:
@@ -161,7 +162,7 @@ class ControlsSession(QObject):
             s += " (not yet supported: " + ", ".join(
                 f"{n} {t}" for t, n in sorted(e.unsupported.items())) + ")"
         if e.scheme.smart:
-            s += "; smart conditions ignored (on-screen detection not implemented)"
+            s += "; on-screen detection pending"   # the engine reports the outcome
         return s
 
     # -- the controls editor

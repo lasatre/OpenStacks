@@ -8,7 +8,8 @@ A condition is a boolean expression over identifiers, for example
 
 Evaluation is three-valued (Kleene logic):
 - `lookup(name)` returns True, False or None for unknown.
-- While image detection is not implemented, images are unknown.
+- Images are unknown while the renderer cannot detect them (imgd.py); with detection an
+  image is true while it is on screen.
 - The caller decides what an unknown result means (by default, enabled).
 """
 from __future__ import annotations

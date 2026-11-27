@@ -3689,8 +3689,69 @@ static struct {
     void (*ch_close)(void *);
     void (*drop_window)(void);
     void (*repaint)(void);           /* optional: re-present the last frame */
+    /* optional: image detection for "Smart" game controls (docs/re/kmm_controls.md 3.20) */
+    void (*imgd_set_cb)(void (*)(void *, uint32_t, const int32_t *, int), void *);
+    void (*imgd_begin)(uint32_t, int, const char *, const char *);
+    void (*imgd_add)(uint32_t, int, int, float, float, const float *);
+    void (*imgd_commit)(void);
     bool shown;
 } gx;
+
+static void gx_imgd_bh(void *opaque)     /* main loop: one "T <gen> <index...>" line */
+{
+    ost_input_send_line((const char *)opaque);
+    g_free(opaque);
+}
+
+/* renderer thread: the images matched in a frame changed */
+static void gx_imgd_report(void *user, uint32_t gen, const int32_t *idx, int n)
+{
+    GString *l = g_string_new(NULL);
+    g_string_printf(l, "T %u", gen);
+    for (int i = 0; i < n; i++) {
+        g_string_append_printf(l, " %d", idx[i]);
+    }
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), gx_imgd_bh, g_string_free(l, false));
+}
+
+/* The controls front-end's image list (bst_vmsg "I" lines, after the "I"):
+ *   b <gen> <emu> <sampler|-> <sampler2|->     begin a list
+ *   i <crc hex> <tex attr> <pos attr> <u> <v> [x1 y1 x2 y2]
+ *   c                                          commit; answered "I <gen> <1|0>" (detecting?) */
+void gr_imgd_line(const char *l)
+{
+    static uint32_t gen;
+    bool have = gx.imgd_begin && gx.imgd_add && gx.imgd_commit && g.ready;
+
+    while (*l == ' ') {
+        l++;
+    }
+    if (l[0] == 'b') {
+        char s1[64] = "", s2[64] = "";
+        unsigned g0 = 0;
+        int emu = 0;
+        if (sscanf(l + 1, "%u %d %63s %63s", &g0, &emu, s1, s2) >= 2) {
+            gen = g0;
+            if (have) {
+                gx.imgd_begin(gen, emu, strcmp(s1, "-") ? s1 : "", strcmp(s2, "-") ? s2 : "");
+            }
+        }
+    } else if (l[0] == 'i') {
+        unsigned crc = 0;
+        int ta = 0, pa = 0;
+        float u = 0, v = 0, r[4];
+        int n = sscanf(l + 1, "%x %d %d %f %f %f %f %f %f", &crc, &ta, &pa, &u, &v,
+                       &r[0], &r[1], &r[2], &r[3]);
+        if (have && n >= 5) {
+            gx.imgd_add(crc, ta, pa, u, v, n == 9 ? r : NULL);
+        }
+    } else if (l[0] == 'c') {
+        if (have) {
+            gx.imgd_commit();
+        }
+        ost_input_printf("I %u %d", gen, have ? 1 : 0);
+    }
+}
 
 static void gx_log(void *user, int level, const char *msg)
 {
@@ -3925,6 +3986,12 @@ static bool gx_init_host(void)
         return false;
     }
     GX_SYM(repaint, "ost_renderer_repaint");
+    if (GX_SYM(imgd_set_cb, "ost_imgd_set_callback") && GX_SYM(imgd_begin, "ost_imgd_begin") &&
+        GX_SYM(imgd_add, "ost_imgd_add") && GX_SYM(imgd_commit, "ost_imgd_commit")) {
+        gx.imgd_set_cb(gx_imgd_report, NULL);
+    } else {
+        gx.imgd_begin = NULL;                /* an older ost_renderer: no image detection */
+    }
     /* gfxstream only uses the API level for colour buffer ref counting: BlueStacks'
      * gralloc creates, opens and closes each buffer up front (in SurfaceFlinger)
      * and keeps using it, i.e. the pre-O rule "create holds a reference". With

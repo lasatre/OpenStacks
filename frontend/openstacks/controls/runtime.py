@@ -6,10 +6,8 @@ Each class reads its JSON fields with HD-Player's *parse* defaults (§2) and imp
 - Speeds are percent of the view per second, stepped every 16 ms (engine.STEP).
 - Times are in ms.
 
-Not implemented:
-- Tilt: OpenStacks has no accelerometer path into the guest yet.
-- SmartScroll, GenericSwipe, Callback: their HD-Player runtimes were not analysed.
-These are listed as unsupported, and their keys are not captured.
+All 24 HD-Player types are implemented. Not reproduced: GenericSwipe's extraData.txt log.
+Image conditions (Smart schemes) come from the renderer's detection (imgd.py, §3.20).
 """
 from __future__ import annotations
 
@@ -140,6 +138,9 @@ class Control:
         if not on and self.active:
             self.reset()
         self.active = on
+
+    def on_start_condition(self, ok: bool) -> None:
+        """StartCondition re-evaluated on new image tags (§3.18); only Pan acts on it."""
 
     def reset(self) -> None:
         pass
@@ -450,13 +451,14 @@ class Pan(Control):
         self.stick_xy = (0.0, 0.0)
         self.last_reset = 0.0
         self.first_move = False
+        self.start_ok = False        # last StartCondition value (rt+0x239)
 
     # -- capture
     def wants_lock(self):
-        return self.state not in (0, 5, 0xb)
+        return self.state not in (0, 5, 9, 0xb)
 
     def mouse_buttons(self):
-        return 1 if self.state in (1, 3, 4, 7, 10, 0xd) else 0
+        return 1 if self.state in (1, 3, 4, 7, 8, 10, 0xd) else 0
 
     def captures_mouse(self):
         return self.wants_lock()
@@ -499,20 +501,38 @@ class Pan(Control):
     def _activate(self) -> None:
         self._start(0xc if self.tweaks & 0x10000 else 1)
 
+    def on_start_condition(self, ok: bool) -> None:
+        """panImgDetect (0x1403038d0): the image condition starts / stops panning; with
+        Tweaks 0x200 through the active (50 ms) / inactive (500 ms) waits."""
+        prev, self.start_ok = self.start_ok, ok
+        if not self.active or ok == prev:
+            return
+        if ok:
+            if self.state == 0 and self.tweaks & 0x200:
+                self.state, self.t = 9, now()
+            else:
+                self._stop(0)
+                self._start(1)
+        else:
+            if self.state == 1 and self.tweaks & 0x200:
+                self.state, self.t = 8, now()
+            else:
+                self._stop(0)
+
     # -- keys
     def on_key(self, name, down):
         st = self.relevant("KeyStartStop", name, down)
         su = self.relevant("KeySuspend", name, down)
         lo = self.relevant("KeyLookAround", name, down) and self.look_on
         s = self.state
-        if s in (0, 6):
+        if s in (0, 6, 9):
             if st and down:
                 if self.exclusive_on:
                     self.state = 0xb
                     self.excl_begin()
                 else:
                     self._activate()
-        elif s in (1, 7, 0xc, 10, 0xd, 0xe):
+        elif s in (1, 7, 8, 0xc, 10, 0xd, 0xe):
             if st and (down != self.hold):
                 self._stop(0)
             elif lo and down:
@@ -544,7 +564,7 @@ class Pan(Control):
                 self._start(1)
             else:
                 return
-        if self.state not in (1, 3, 7, 10) or not self.cid and self.state != 10:
+        if self.state not in (1, 3, 7, 8, 10) or not self.cid and self.state != 10:
             return
         if self.state == 10:
             if now() - self.t < 0.02:
@@ -604,7 +624,7 @@ class Pan(Control):
             vw, vh = self.e.view_px
             fw, fh = self.e.fb
             self._move(d["dx"] * fw / vw, d["dy"] * fh / vh, self.sens)
-        elif ev in ("ldown", "lup") and self.state in (1, 3, 4, 7, 10, 0xd):
+        elif ev in ("ldown", "lup") and self.state in (1, 3, 4, 7, 8, 10, 0xd):
             down = ev == "ldown"
             if not self.shoot_on or self.lbutton == (-1, -1):
                 return
@@ -638,6 +658,10 @@ class Pan(Control):
             self._activate()
         elif s == 0xe and t - self.t >= max(0.0, self.wait_reset):
             self._activate()
+        elif s == 9 and t - self.t >= 0.05:          # image detect: active wait
+            self._start(1)
+        elif s == 8 and t - self.t >= 0.5:           # image detect: inactive wait
+            self._stop(0)
         elif s == 0xc:                               # activation wiggle (Tweaks 0x10000)
             el = t - self.t
             if el < self.act_ms / 2:

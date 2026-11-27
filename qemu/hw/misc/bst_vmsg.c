@@ -604,6 +604,15 @@ void ost_input_printf(const char *fmt, ...)
     qemu_chr_fe_write(&g_vmsg->input, (const uint8_t *)line, n);
 }
 
+void ost_input_send_line(const char *line)
+{
+    if (!ost_input_connected()) {
+        return;
+    }
+    qemu_chr_fe_write(&g_vmsg->input, (const uint8_t *)line, strlen(line));
+    qemu_chr_fe_write(&g_vmsg->input, (const uint8_t *)"\n", 1);
+}
+
 static void ost_input_reset(BstVmsgState *s)
 {
     bool any = false;
@@ -676,6 +685,9 @@ static void ost_input_line(BstVmsgState *s, char *l)
         }
         return;
     }
+    case 'I':                                    /* I ...: image detection (gr_render) */
+        gr_imgd_line(l + 1);
+        return;
     case 'k':                                    /* k <evdev> <0/1>: key into the guest */
         if (sscanf(l + 1, "%d %d", &x, &v) == 2 && x > 0 && x < 768) {
             qemu_input_event_send_key_linux(NULL, (unsigned)x, v != 0);

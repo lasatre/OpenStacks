@@ -980,13 +980,87 @@ and numbers (tokenizer separator set `"&!|()+-*/^"`; a single `&`/`|` is an erro
   set). Empty EnableCondition => always enabled.
 * **StartCondition** is evaluated against the **image-recognition tag store** (manager+0x208)
   in `imapSetTags` (called when the screen-detection engine reports new tags); the boolean goes to
-  rt+0x90 and the runtime's second callback (rt+0x50) is invoked. Only Pan uses it
-  (`panImgDetect` 0x1403038d0, requires `Tweaks&0x200`): tag condition true => start panning after
-  50 ms ("active wait"), false => stop after 500 ms ("inactive wait").
+  rt+0x90 and the runtime's std::function at rt+0x50 (called only when set) is invoked. Only
+  Pan sets it (`panImgDetect` 0x1403038d0, also gated by manager+0x132): on a rising edge, with
+  state 0 and `Tweaks&0x200` -> state 9 (start(1) after 50 ms), otherwise stop + start(1); on a
+  falling edge, with state 1 and `Tweaks&0x200` -> state 8 (stop after 500 ms), otherwise stop.
+  Other types' StartConditions (Roblox's LockCursor `!Arrow`) have no effect.
+* `imapSetTags(tags)` (0x1402eab00): the same tag set as last time -> nothing. Else every old tag
+  that is also a variable is reset, the tag store is cleared and refilled with the new tags
+  that are image ids of the scheme (with their matched position), each also set as a true
+  variable (so EnableConditions can name images), StartConditions are evaluated, then all
+  EnableConditions (0x1402eb3c0).
 * `XExpr`/`YExpr` (and Pan `LButtonXExpr` ... , MOBA `OriginXExpr` ... `CancelYExpr`) are
   numeric expressions that override the corresponding coordinates on re-evaluation
   (`FUN_140306fe0(value, expr, "X"/"Y")` in 0x1402eb3c0). `*ShowOnOverlayExpr` re-compute the
   Pan flags `IsLookAroundEnabled` / `IsShootOnClickEnabled` / crosshair visibility.
+
+### 3.20 Image detection (Imgd.cpp, ImgdVertexDataHelpers.cpp, ImgdShaderEmul.cpp) [C unless marked]
+
+How "Smart" schemes see the game. A scheme's `Images[]`: `{ImageId, ImageType ("Version 1"),
+DetectColor, MatchColor, TextureCRC ("0x990CCA42"), TextureIndex, VertexIndex, TextureCoord [u, v],
+VertexRect [] or [x1, y1, x2, y2]}`. HD-Player runs inside the GLES translator's calls (per GL
+context of a package that has images; `bst.imgd_*` properties tune it).
+
+**Texture CRCs.** CRC = zlib CRC32 (reflected 0xEDB88320, table 0x140acf1e0, init/final ~0;
+`FUN_1402b52f0`). Kept per texture name, only for `GL_TEXTURE_2D` level 0, for the texture
+bound to the active unit:
+* `glTexImage2D` (0x1402b3e40): crc32(pixels, pixelSize(format, type) * w * h) (no row padding;
+  `imgdComputePixelSize` 0x1402ba6c0); NULL pixels -> 0;
+* `glTexSubImage2D` (0x1402b4340): the texture's CRC becomes the sub-upload's crc32(w * h * bpp);
+* `glCompressedTexImage2D` (0x1402b3930) / `glCompressedTexSubImage2D` (0x1402b3ae0):
+  crc32 of the compressed bytes (`imageSize`).
+
+**Per draw** (`imageDetect` 0x1402b09d0, from the draw hook 0x1402b0020):
+1. The sampler unit: per-package uniform name (table below; `glGetUniformLocation` on the current
+   program, then `glGetUniformiv` for its unit; Free Fire falls back to `_NormalTex`); no entry or
+   no such uniform -> unit 0. The texture is the `GL_TEXTURE_2D` bound to that unit.
+2. Every image of the scheme not yet matched this frame whose TextureCRC equals the texture's
+   CRC (a DetectColor image matches any texture of pixel size 1, then compares MatchColor;
+   not implemented in OpenStacks). TextureCoord must have 2 values ("Bad cfg. TextureCoordLen").
+3. Triangle search (`FUN_1402b6d20`) over the draw's vertices (index buffer ubyte/ushort/uint, or
+   sequential): GL_TRIANGLE_STRIP steps 1, any other mode steps 3. The texcoords come from vertex
+   attribute `TextureIndex` (float, or unsigned short; normalized shorts scaled by 1/65536).
+   Skip a triangle that is degenerate in u or v (|d| < 1e-5) or has a texcoord outside [0, 1];
+   it matches when (u, v) is in its texcoord bounding box and on the same side of all three edges
+   (inclusive). The search resumes after a match (cursor + 3).
+4. Without `VertexRect` (or for a package without a shader emulation): matched. With it: the
+   centre of the matched triangle's `VertexIndex` attribute (mean of the 3 vertices, w = 1;
+   `FUN_1402b7d80`) goes through the package's vertex-shader emulation to clip space; percent =
+   ((x * 0.5 + 0.5) * 100, (0.5 - y * 0.5) * 100) (no divide by w); matched if strictly inside
+   the rect (`FUN_1402b8240`), else the search continues with the next triangle.
+5. A match adds the image to this frame's found set (and stores the percent position).
+
+**Per frame** (`sendFoundImages` 0x1402b4fd0, on swap): once a context has found anything it
+reports its found set every frame (even when empty) to imap (`imapSetTags`), then clears it.
+
+Per-package tables (strings 0x14096aa58.., pointer table 0x140acf600):
+
+| package | sampler uniform | shader emulation |
+|---|---|---|
+| com.dts.freefireth / freefiremax | `_AlphaTex` (fallback `_NormalTex`) | GroupA |
+| com.activision.callofduty.shooter, com.tencent.tmgp.kr.codm, com.garena.game.codm, com.vng.codmvn | `_MainTex` | GroupA |
+| jp.pokemon.pokemonunite | `_MainTex` | GroupA |
+| com.pixonic.wwr | `_MainTex` | WarRobots (0x1402b8800) |
+| com.tencent.ig, com.pubg.imobile | `ps0` | 0x1402b93f0 (also Apex) |
+| com.supercell.brawlstars | `s_texture` | BrawlStars (0x1402b91c0) |
+| com.axlebolt.standoff2, com.kitkagames.fallbuddies, com.HoYoverse.hkrpgoversea | - | GroupA |
+| com.roblox.client | - | Roblox (0x1402b9680) |
+| com.ea.gp.apexlegendsmobilefps | - | 0x1402b93f0 |
+| com.garena.game.lmjx, com.tencent.cosg/cosjp/cosna | - | 0x1402b9aa0 (Undawn-like) |
+
+GroupA (`imgdNormalizedScreenPositionGroupA` 0x1402b8d60), Unity HLSLcc: O2W =
+`hlslcc_mtx4x4unity_ObjectToWorld[0..3]`, VP = `hlslcc_mtx4x4unity_MatrixVP[0..3]` (vec4 columns,
+`glGetUniformfv`); if a location is missing, from uniform blocks `UnityPerDraw` (float 0) and
+`UnityPerFrame` (float 76) (`FUN_1402ba130`). world = O2W[0]*x + O2W[1]*y + O2W[2]*z + O2W[3];
+clip = VP[0]*wx + VP[1]*wy + VP[2]*wz + VP[3]*ww. The other emulations were not analysed.
+
+**OpenStacks:** gfxstream patch 0009 (translator hooks + `glestranslator/common/imgd.cpp`), the
+`ost_imgd_*` API of ost_renderer, QEMU `I`/`T` lines (keymapping_plan.md), engine `imgd.py`.
+Matches go into a found set per render thread; a thread that never matched stays quiet, and
+reports go out only when the set changes. Not reproduced: DetectColor, the non-GroupA
+emulations (their VertexRect is ignored), mapped-buffer (glMapBufferRange) vertex data, the
+image picker / texture dump tools.
 
 ### 3.19 Key names [C partial]
 

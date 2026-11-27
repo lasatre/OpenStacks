@@ -96,6 +96,7 @@ From the front-end to QEMU:
 | `k <evdev> <0/1>` | inject a key into the guest (SendOriginalKeys, Script `text` fallback) |
 | `a <x> <y> <z>` | accelerometer (Tilt): gravity as HD-Player sends it, `-g * 1e6`; QEMU completes the guest's parked `gcal` request with gcall 0x3fc |
 | `g <opcode> <args...>` | any gcall host call (docs/re/kmm_controls.md 3.16.1); NativeCursor sends the mouse (0x3f8 enable, 0x3fd data, 0x40a pointer). Queued in QEMU; accelerometer values and consecutive mouse moves coalesce |
+| `I b <gen> <emu> <sampler> <sampler2>`, `I i <crc> <tex> <pos> <u> <v> [rect]`, `I c` | a Smart scheme's Images for the renderer's image detection (`-` = no sampler; emu 1 = Unity); docs/re/kmm_controls.md 3.20 |
 
 From QEMU to the front-end:
 
@@ -108,6 +109,8 @@ From QEMU to the front-end:
 | `R <dx> <dy>` | relative motion while locked |
 | `F <0/1>` | the display window gained or lost focus (the engine releases everything on loss) |
 | `O <orientation>` | orientation changed |
+| `I <gen> <0/1>` | after `I c`: whether the renderer detects images (gfxstream ost_renderer only) |
+| `T <gen> <index...>` | the images matched in a frame changed (indices of the `I i` lines) |
 
 Key codes are Linux evdev numbers everywhere. Windows scancodes are converted in QEMU with
 the existing qnum tables.
@@ -136,6 +139,11 @@ Status:
 - Milestone 2 is done: all 24 HD-Player control types have a runtime. Tilt (accelerometer)
   and NativeCursor (Android mouse) go through the `gcal` host-call channel; both verified on
   Pie64. GenericSwipe's extraData.txt logging is not reproduced.
+- Milestone 4 (image detection) is implemented after HD-Player's Imgd.cpp (spec 3.20): texture
+  CRCs and per-draw texcoord/triangle tests in gfxstream's translator (patch 0009), tags to the
+  engine per frame; images become condition variables, Pan honours StartCondition. Unit-tested
+  (renderer/imgd_test.cpp, the engine against Free Fire's Smart scheme); not yet seen on a game.
+  Without detection (BlueStacks renderer) the unknown-image policy stays.
 - The runtime follows docs/re/kmm_controls.md: a 16 ms tick, speeds in percent per second,
   HD-Player's dispatch and combo shadowing, parse defaults on load and editor defaults on
   create.
@@ -151,9 +159,9 @@ Status:
 3. **The editor:** palette, placement, key capture, settings, schemes, import/export, and the
    Gamepad tab.
 4. **Smart controls:** image detection for `Images` / `StartCondition` (texture CRC matching
-   in the renderer, as BlueStacks does). Until then, conditions that reference image ids
-   evaluate as "unknown". The default policy ignores those conditions, so a Smart scheme
-   behaves like its Standard counterpart. The player shows which mode is in use.
+   in the renderer, as BlueStacks does). Without it (the BlueStacks renderer), conditions that
+   reference image ids evaluate as "unknown" and the default policy ignores them, so a Smart
+   scheme behaves like its Standard counterpart. The status line shows which mode is in use.
 
 Behaviour details (Dpad timing, Pan sensitivity scaling, MOBA radii, ...) follow HD-Player.exe;
 reverse it per type where the field names do not make the behaviour obvious.

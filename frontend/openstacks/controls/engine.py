@@ -21,6 +21,7 @@ engine runs the scheme's controls (runtime.py) and sends touch contacts back.
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -78,6 +79,7 @@ class Engine(QObject):
         self._free = list(range(15, 0, -1))
         self._pos: dict[int, tuple[int, int]] = {}
         self._focused = True
+        self.orient = 0                  # guest display rotation (QEMU "O" line)
         self._lock = False
         self._caps = None
         self._timer = QTimer(self, interval=TICK_MS)
@@ -238,6 +240,15 @@ class Engine(QObject):
         self.ch.flush()
 
     # ------------------------------------------------------------------ to the guest
+    def send_tilt(self, ax: float, ay: float) -> None:
+        """Gravity for tilt angles in degrees (HD-Player ImapRtTilt send, 0x1404a68d0):
+        (sin ax, sin ay, cos ax cos ay), x/y turned for the display orientation
+        (0x140306d20), sent as -g * 1e6 (the guest reports -v / 1e6 * 9.81 m/s^2)."""
+        rx, ry = math.radians(ax), math.radians(ay)
+        x, y, z = math.sin(rx), math.sin(ry), math.cos(rx) * math.cos(ry)
+        x, y = {0: (-x, -y), 1: (-y, x), 2: (x, y), 3: (y, -x)}[self.orient]
+        self.ch.send(f"a {int(x * -1e6)} {int(y * -1e6)} {int(z * -1e6)}")
+
     def send_key_guest(self, name: str, down: bool) -> None:
         for code in keys.evdev_codes(name)[:1]:
             self.ch.send(f"k {code} {1 if down else 0}")
@@ -336,6 +347,7 @@ class Engine(QObject):
                 self._caps = None
                 self.update_capture()
             elif kind == "O":
+                self.orient = int(p[1]) & 3
                 self.changed.emit()
         except (IndexError, ValueError):
             return

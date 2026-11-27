@@ -120,6 +120,15 @@ typedef struct BstVmsgState {
     bool pushmove[VMSG_PUSH_SLOTS];
     unsigned qh, qt, pushes, drops;
     bool push_busy;
+    /* the IRQ slot (shm+0x1c) is shared by pushes and gcal completions: busy from
+     * raising the line until the guest's hard ISR clears it (BAR0+0x28) */
+    bool irq_busy;
+    /* gcal (host->guest calls, HD-Player gcall/Gcall.cpp): the guest parks a method-0
+     * request; a host call completes it with the message in the out window. Only the
+     * accelerometer call (Tilt control) is sent; the latest value wins. */
+    int gcal_wait;                  /* cid of the parked request, -1 = none */
+    bool accel_pending;
+    int32_t accel[3];
     QemuInputHandlerState *ihs;
     Notifier init_done;
     int tx, ty;
@@ -184,6 +193,45 @@ static BstVmsgConn *bst_vmsg_get_conn(BstVmsgState *s, uint32_t cid)
     return &s->conn[cid];
 }
 
+/* write the next host call into a gcal out window; false = nothing to send */
+static bool bst_vmsg_gcal_fill(BstVmsgState *s, uint8_t *out)
+{
+    if (!s->accel_pending) {
+        return false;
+    }
+    s->accel_pending = false;
+    /* gcallSendAccelerometerDataRpc (HD-Player 0x1402a4c70): {opcode 0x3fc, length 20,
+     * x, y, z}, gravity in units of -1e-6 g; libgcall_jni gcallDecode passes the three
+     * words to gcallSendAccelerometerDataClbk */
+    stl_le_p(out + 0x00, 0x3fc);
+    stl_le_p(out + 0x04, 0x14);
+    stl_le_p(out + 0x08, (uint32_t)s->accel[0]);
+    stl_le_p(out + 0x0c, (uint32_t)s->accel[1]);
+    stl_le_p(out + 0x10, (uint32_t)s->accel[2]);
+    return true;
+}
+
+/* complete the parked gcal request if there is a call to send and the IRQ slot is free
+ * (vmsgCompleteRequest: status 0 in the poll word, then the IRQ names the cid; the guest
+ * ISR wakes that connection's waitqueue, there is no 0x38 ack) */
+static void bst_vmsg_gcal_kick(BstVmsgState *s)
+{
+    int cid = s->gcal_wait;
+    if (cid < 0 || s->irq_busy || !s->accel_pending) {
+        return;
+    }
+    BstVmsgConn *c = &s->conn[cid];
+    s->gcal_wait = -1;
+    if (!c->in_use || c->service_id != VMSG_GCAL_SID) {
+        return;
+    }
+    bst_vmsg_gcal_fill(s, s->shm + c->host_off);
+    stl_le_p(s->shm + c->poll_off, 0);
+    stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, (uint32_t)cid);
+    s->irq_busy = true;
+    pci_set_irq(PCI_DEVICE(s), 1);
+}
+
 static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
 {
     uint8_t *in;
@@ -216,7 +264,12 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
             fprintf(stderr, "[bstvmsg] gcal cid=%u: wait-for-host-call parked\n",
                     (unsigned)(c - s->conn));
         }
-        stl_le_p(s->shm + c->poll_off, 1);
+        if (bst_vmsg_gcal_fill(s, out)) {
+            stl_le_p(s->shm + c->poll_off, 0);  /* the ioctl returns without sleeping */
+        } else {
+            s->gcal_wait = (int)(c - s->conn);
+            stl_le_p(s->shm + c->poll_off, 1);
+        }
         return;
     }
 
@@ -325,7 +378,7 @@ static int bst_vmsg_find_sid(BstVmsgState *s, uint32_t sid)
 /* deliver the next queued message if the channel is idle */
 static void bst_vmsg_push_kick(BstVmsgState *s)
 {
-    if (s->push_busy || s->qh == s->qt) {
+    if (s->push_busy || s->irq_busy || s->qh == s->qt) {
         return;
     }
     int cid = bst_vmsg_find_sid(s, VMSG_INP_SID);
@@ -338,6 +391,7 @@ static void bst_vmsg_push_kick(BstVmsgState *s)
     memcpy(dst, s->pushq[k], s->pushlen[k]);
     stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, (uint32_t)cid);
     s->push_busy = true;
+    s->irq_busy = true;
     s->pushes++;
     if (s->pushes <= 20 || (s->pushes & 0xff) == 0) {
         fprintf(stderr, "[bstvmsg] push #%u cid=%d type=%u x=%u y=%u (q=%u)\n",
@@ -576,6 +630,15 @@ static void ost_input_line(BstVmsgState *s, char *l)
         s->syn_dirty = false;
         bst_vmsg_emit(s);
         return;
+    case 'a': {                                  /* a <x> <y> <z>: accelerometer (Tilt) */
+        int32_t g[3];
+        if (sscanf(l + 1, "%d %d %d", &g[0], &g[1], &g[2]) == 3) {
+            memcpy(s->accel, g, sizeof(g));
+            s->accel_pending = true;
+            bst_vmsg_gcal_kick(s);
+        }
+        return;
+    }
     case 'k':                                    /* k <evdev> <0/1>: key into the guest */
         if (sscanf(l + 1, "%d %d", &x, &v) == 2 && x > 0 && x < 768) {
             qemu_input_event_send_key_linux(NULL, (unsigned)x, v != 0);
@@ -710,6 +773,9 @@ static void bst_vmsg_bar0_write(void *opaque, hwaddr addr, uint64_t val,
         BstVmsgConn *c = bst_vmsg_get_conn(s, cid);
         if (c) {
             c->in_use = 0;
+            if (s->gcal_wait == (int)cid) {
+                s->gcal_wait = -1;
+            }
         }
         break;
     }
@@ -717,6 +783,9 @@ static void bst_vmsg_bar0_write(void *opaque, hwaddr addr, uint64_t val,
         /* guest hard ISR consumed shm+0x1c: drop the line, mark idle cid */
         pci_set_irq(PCI_DEVICE(s), 0);
         stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, 0xffffffffu);
+        s->irq_busy = false;
+        bst_vmsg_gcal_kick(s);
+        bst_vmsg_push_kick(s);
         break;
     case 0x38:
         /* guest callback done (val = cid): channel free for the next push */
@@ -793,6 +862,7 @@ static void bst_vmsg_realize(PCIDevice *pdev, Error **errp)
      * shared-line interrupt (spurious bstkbd scancode 0 / list corruption). */
     stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, 0xffffffffu);
     stl_le_p(s->shm + VMSG_SHM_CID, 0xffffffffu);
+    s->gcal_wait = -1;
 
     s->props_text = g_string_new(bst_vmsg_props_text);
     if (s->propsfile && *s->propsfile) {

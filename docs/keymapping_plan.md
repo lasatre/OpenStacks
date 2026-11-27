@@ -94,6 +94,7 @@ From the front-end to QEMU:
 | `btn <mask>` | mouse buttons to capture: 1 = left, 2 = right, 4 = middle, 8 = x1, 16 = x2, 32 = wheel |
 | `lock <0/1>` | pointer lock: hide, confine and report relative motion |
 | `k <evdev> <0/1>` | inject a key into the guest (SendOriginalKeys, Script `text` fallback) |
+| `a <x> <y> <z>` | accelerometer (Tilt): gravity as HD-Player sends it, `-g * 1e6`; QEMU completes the guest's parked `gcal` request with gcall 0x3fc |
 
 From QEMU to the front-end:
 
@@ -131,8 +132,9 @@ the existing qnum tables.
 
 Status:
 - Milestones 1 and 3 are done.
-- Milestone 2 is done except Tilt (no accelerometer path into the guest yet) and SmartScroll,
-  GenericSwipe and Callback (their HD-Player runtimes are not yet analysed).
+- Milestone 2 is done except SmartScroll, GenericSwipe and Callback (their HD-Player runtimes
+  are not yet analysed). Tilt drives the guest accelerometer through the `gcal` host-call
+  channel (verified on Pie64: `BstGCallService` reports the values and the sensor follows).
 - The runtime follows docs/re/kmm_controls.md: a 16 ms tick, speeds in percent per second,
   HD-Player's dispatch and combo shadowing, parse defaults on load and editor defaults on
   create.

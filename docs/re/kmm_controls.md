@@ -837,6 +837,16 @@ KeyRight. Two angles ax (left/right, rt+0xd8) and ay (up/down, rt+0xe0):
 * when an axis' keys are both released (or both held) and `AutoReset`, that angle snaps to 0;
 * each change sends gravity `g = (sin ax, sin ay, cos ax * cos ay)`, rotated for the display
   orientation (`FUN_140306d20`), as integers `-g*1e6` to the sensor path (`FUN_1402a4c70`).
+* orientation turn (`FUN_140306d20`, o = manager+0x134): o=0 (-x, -y), o=1 (-y, x), o=2 (x, y),
+  o=3 (y, -x); z unchanged.
+* transport: `gcallSendAccelerometerDataRpc` (`FUN_1402a4c70`, gcall/GcallEnc.cpp) writes
+  `{u32 0x3fc, u32 20, x, y, z}` into the buffer of the guest's parked `gcal` request
+  (service 'gcal', registered at 0x1402a6740 with in/out 0x1000; its request callback 0x1402a67a0
+  keeps the out pointer and returns 1 = pending), then `vmsgCompleteRequest(cid, 0)` sets the poll
+  word to 0 and raises the IRQ for that cid. The guest's bstvmsg ISR wakes the sleeping ioctl
+  (no 0x38 ack for a connection without callback). libgcall_jni `gcallDecode` switches on the
+  opcode (0x3e8..0x412) and passes +8/+0xc/+0x10 to `gcallSendAccelerometerDataClbk`; the
+  accelerometer then reads `-v / 1e6 * 9.81` m/s^2 [C, verified at runtime].
 `Radius` is not used by the runtime (overlay only) [I].
 
 ### 3.13 Scroll (ImapRtScroll, onMouse 0x1403080b0, tick 0x1403082e0) [C]

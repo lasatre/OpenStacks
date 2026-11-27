@@ -1276,6 +1276,38 @@ class Rotate(Control):
         self.state = 0
 
 
+# ------------------------------------------------------------------ Tilt (§3.12)
+class Tilt(Control):
+    """Arrow keys tilt the device: the accelerometer, not touch (gcall 0x3fc via QEMU)."""
+    key_fields = ("KeyUp", "KeyDown", "KeyLeft", "KeyRight")
+
+    def __init__(self, e, raw):
+        super().__init__(e, raw)
+        self.max = fnum(raw, "MaxAngle", 45)
+        self.speed = fnum(raw, "Speed", 45)          # degrees per second
+        self.auto_reset = bool(raw.get("AutoReset", True))
+        self.ax = self.ay = 0.0                      # left/right, up/down in degrees
+
+    def _axis(self, a: float, neg: str, pos: str) -> float:
+        n, p = self.held(neg), self.held(pos)
+        if n != p:
+            a += (self.speed if p else -self.speed) * STEP
+            return max(-self.max, min(self.max, a))
+        return 0.0 if self.auto_reset else a
+
+    def tick(self, t):
+        ax = self._axis(self.ax, "KeyLeft", "KeyRight")
+        ay = self._axis(self.ay, "KeyDown", "KeyUp")
+        if (ax, ay) != (self.ax, self.ay):
+            self.ax, self.ay = ax, ay
+            self.e.send_tilt(ax, ay)
+
+    def reset(self):
+        if self.ax or self.ay:
+            self.ax = self.ay = 0.0
+            self.e.send_tilt(0.0, 0.0)
+
+
 # ------------------------------------------------------------------ wheel family (§3.13-15)
 class Scroll(Control):
     """Mouse wheel: a vertical swipe at the cursor, Amplitude % per notch."""
@@ -1798,7 +1830,7 @@ class Script(Control):
 TYPES = {
     "Tap": Tap, "TapRepeat": TapRepeat, "Dpad": Dpad, "Pan": Pan, "Swipe": Swipe,
     "Zoom": Zoom, "MOBADpad": MOBADpad, "MOBASkill": MOBASkill, "FreeLook": FreeLook,
-    "Rotate": Rotate, "Scroll": Scroll, "MouseZoom": MouseZoom, "EdgeScroll": EdgeScroll,
+    "Rotate": Rotate, "Tilt": Tilt, "Scroll": Scroll, "MouseZoom": MouseZoom, "EdgeScroll": EdgeScroll,
     "State": State, "Alias": Alias, "SendOriginalKeys": SendOriginalKeys,
     "DontForwardKeys": DontForwardKeys, "LockCursor": LockCursor, "NativeCursor": NativeCursor,
     "Script": Script,

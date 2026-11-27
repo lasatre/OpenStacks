@@ -56,6 +56,10 @@ brackets). Move an item to NOTES when it lands.
   host folder needs the VBoxSharedFolders HGCM service in vmmdev; vboxsf.ko already loads
   and only stubs answer.
 - **Microphone** - bstaudio capture delivers silence [10g].
+- **Shared clipboard** - copy/paste between the host and the guest doesn't work. The VNC
+  console already parses ServerCutText / extended clipboard; the native display has no
+  path. Options: BlueStacks' own clipboard host calls (find them in libhostcall_jni), or an
+  adb-based bridge (`cmd clipboard` / a small guest helper) polled by the player.
 - **Google sign-in seeding** - updating Chrome, Play Store or GMS over adb needs a Google
   account (a BlueStacks rule) [10h].
 - **bst.version 5.22+ rules** - .config.db has per-app tweaks gated on prodversion_gte 5.22,

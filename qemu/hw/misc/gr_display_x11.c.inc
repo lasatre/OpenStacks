@@ -90,7 +90,7 @@ static Window grx_make_window(void)
         .background_pixel = BlackPixel(g_xdpy, scr),       /* the letterbox bars */
         .event_mask = StructureNotifyMask | SubstructureNotifyMask | ExposureMask |
                       ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-                      KeyPressMask | KeyReleaseMask,
+                      KeyPressMask | KeyReleaseMask | FocusChangeMask,
     };
     Window w = x11.XCreateWindow(g_xdpy, RootWindow(g_xdpy, scr), 0, 0, GR_W, GR_H, 0,
                                  CopyFromParent, InputOutput, CopyFromParent,
@@ -201,6 +201,12 @@ static void grx_event(XEvent *e)
         break;
     case MotionNotify:
         if (g_xMouseDown) grx_pointer(e->xmotion.x, e->xmotion.y, -1);   /* touch move */
+        break;
+    case FocusOut:
+        /* focus moving inside our window or the pointer-root dance: not a loss */
+        if (e->xfocus.detail != NotifyInferior && e->xfocus.detail != NotifyPointer) {
+            gr_input_post((GrInputEv){ .kind = 3 });    /* release held keys (issue #8) */
+        }
         break;
     case KeyPress:
     case KeyRelease: {

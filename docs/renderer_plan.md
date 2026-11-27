@@ -111,6 +111,9 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
     and then swaps vsync'd (GLX interval 1). The guest is held only for the draw, never the
     vblank wait. Upstream's unsynced swap lost frames in bursts under XWayland + KWin when the
     guest's 60 Hz phase sat at the compositor's deadline. `OST_VSYNC=0` restores it.
+    Patch 0006 drops `graphicsDriverLock` around the swap under `OST_VSYNC`. Otherwise a
+    vblank-blocked swap stalls the guest's eglMakeCurrent and sync-fence waits (minimized:
+    ~57 fps). That lock works around Vulkan driver bugs, so revisit it if Vulkan is enabled.
 - **M3 (first cut):** `OST_RENDERER=gfxstream` in gr_render.c: `ost_renderer.dll` (or
   `OST_GFXSTREAM_DLL`) instead of libOpenglRender.dll. Per connection a pump thread
   (`gx_pump`): handshake via the pure lane's createFinish, guest bytes (pure window or HPP

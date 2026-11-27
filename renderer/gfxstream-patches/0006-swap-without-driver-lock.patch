@@ -1,0 +1,39 @@
+diff --git a/host/gl/glestranslator/egl/egl_imp.cpp b/host/gl/glestranslator/egl/egl_imp.cpp
+index c5cfe0c..16bbe81 100644
+--- a/host/gl/glestranslator/egl/egl_imp.cpp
++++ b/host/gl/glestranslator/egl/egl_imp.cpp
+@@ -23,6 +23,7 @@
+ #include <EGL/eglext.h>
+ #include <common/gles_macros.h>
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
+@@ -1263,7 +1264,25 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers(EGLDisplay display, EGLSurface surf
+         RETURN_ERROR(EGL_FALSE,EGL_BAD_SURFACE);
+     }
+ 
+-    {
++    // OpenStacks (issue #6): with OST_VSYNC (0005, mailbox present) the native swap is
++    // vsync'd and can block for a whole refresh (always while the window is hidden). Holding
++    // graphicsDriverLock across it stalls every other thread's eglMakeCurrent and
++    // eglClientWaitSyncKHR (the guest's sync fences) behind the swap, so the guest is paced
++    // by the host display again (minimized: ~57 instead of 60 fps). The lock works around
++    // Vulkan driver bugs (vkDestroyDevice vs eglMakeCurrent); OpenStacks runs without
++    // Vulkan and GLX is thread-safe under XInitThreads, so swap without it.
++    static const bool ostVsync = [] {
++        const char* v = getenv("OST_VSYNC");
++        if (v && *v) return atoi(v) != 0;
++#ifdef __linux__
++        return true;
++#else
++        return false;
++#endif
++    }();
++    if (ostVsync) {
++        dpy->nativeType()->swapBuffers(Srfc->native());
++    } else {
+         gfxstream::base::AutoLock mutex(*graphicsDriverLock());
+         dpy->nativeType()->swapBuffers(Srfc->native());
+     }

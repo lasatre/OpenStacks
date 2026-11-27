@@ -128,6 +128,15 @@ the existing qnum tables.
   would be better later.
 
 ## Milestones
+
+Status:
+- Milestones 1 and 3 are done.
+- Milestone 2 is done except Tilt (no accelerometer path into the guest yet) and SmartScroll,
+  GenericSwipe and Callback (their HD-Player runtimes are not yet analysed).
+- The runtime follows docs/re/kmm_controls.md: a 16 ms tick, speeds in percent per second,
+  HD-Player's dispatch and combo shadowing, parse defaults on load and editor defaults on
+  create.
+
 1. **Plumbing:** the QEMU chardev, multi-touch in bst_vmsg, and capture in gr_render on Win32 and
    X11, including pointer lock. The engine runs Tap, TapRepeat, Dpad, Swipe and Script basics
    from an imported `.cfg`. There is a minimal overlay. Gamepad buttons and sticks come through

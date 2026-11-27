@@ -19,7 +19,8 @@ from .. import paths
 from ..qemu_engine import ENGINE, controls_port
 from . import store
 from .bscfg import ControlsFile
-from .engine import Engine, Pan
+from .engine import Engine
+from .runtime import Pan
 from .overlay import Overlay
 
 _RESUMED = re.compile(r"(?:mResumedActivity|topResumedActivity)[:=].*? u\d+ ([\w.]+)/")
@@ -113,8 +114,12 @@ class ControlsSession(QObject):
 
     def _sync_view(self) -> None:
         r = self._screen_rect()
-        if r is not None:
-            self.engine.set_view(r.width(), r.height())
+        if r is None:
+            return
+        w, h = self.inst.res_wh()
+        if getattr(self.display, "rotation", lambda: 0)() & 1:
+            w, h = h, w
+        self.engine.set_geometry(r.width(), r.height(), w, h)
 
     def _overlay_controls(self) -> list[dict]:
         if not self.engine.enabled or not self.engine.scheme:

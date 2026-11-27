@@ -210,7 +210,7 @@ class EditSurface(QWidget):
         if t == "MOBADpad":
             return [("KeyMove", self.pt(c.get("X", 50), c.get("Y", 50)))]
         if t == "MOBASkill":
-            out = [("Key", self.pt(c.get("X", 50), c.get("Y", 50)))]
+            out = [("KeyActivate", self.pt(c.get("X", 50), c.get("Y", 50)))]
             if "CancelX" in c and c.get("IsCancelSkillEnabled", True):
                 out.append(("KeyCancel", self.pt(c["CancelX"], c["CancelY"]) + QPointF(0, 20)))
             return out

@@ -114,6 +114,12 @@ Pie64 boot plus Chrome, Settings, Play Store, Lawnchair, SystemUI and SurfaceFli
     Patch 0006 drops `graphicsDriverLock` around the swap under `OST_VSYNC`. Otherwise a
     vblank-blocked swap stalls the guest's eglMakeCurrent and sync-fence waits (minimized:
     ~57 fps). That lock works around Vulkan driver bugs, so revisit it if Vulkan is enabled.
+  - Patch 0007 makes readers wait on a colour buffer's write fence (binds, posts).
+  - Patch 0008: the Android 9 guest presents frames with rcFlushWindowColorBufferAsync
+    (no reply) and has no native fences. So SurfaceFlinger's rcBindTexture or rcFBPost
+    can reach the host before the app's flush. The host keeps the order: a buffer set as
+    a window surface's target has a pending write until that surface flushes, and readers
+    on other threads wait for it (at most 100 ms). `OST_FLUSH_ORDER=0` turns it off.
 - **M3 (first cut):** `OST_RENDERER=gfxstream` in gr_render.c: `ost_renderer.dll` (or
   `OST_GFXSTREAM_DLL`) instead of libOpenglRender.dll. Per connection a pump thread
   (`gx_pump`): handshake via the pure lane's createFinish, guest bytes (pure window or HPP

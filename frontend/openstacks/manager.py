@@ -36,7 +36,8 @@ def run_app() -> QApplication:
     app.setOrganizationName("OpenStacks")
     from . import brand
     brand.apply(app)
-    Store()                # ensure instances.conf is parsed once
+    store = Store()        # ensure instances.conf is parsed once
+    brand.apply_theme(app, store.global_settings.theme)
     return app
 
 
@@ -207,7 +208,7 @@ class ManagerWindow(QMainWindow):
         for text, slot in (("New", self._new), ("Launch", self._launch),
                            ("Stop", self._stop), ("Clone", self._clone),
                            ("Delete", self._delete), ("Set default", self._set_default),
-                           ("Settings", self._edit_settings)):
+                           ("Edit", self._edit_settings)):
             b = QPushButton(text, central)
             b.clicked.connect(slot)
             btns.addWidget(b)
@@ -240,10 +241,18 @@ class ManagerWindow(QMainWindow):
         ver = QLabel(f"v{__version__}", parent)
         ver.setEnabled(False)                     # muted text
         row.addWidget(ver)
+        prefs = QPushButton("Settings", parent)
+        prefs.setToolTip("OpenStacks settings (theme, emulator, folders)")
+        prefs.clicked.connect(self._app_settings)
+        row.addWidget(prefs)
         about = QPushButton("About", parent)
         about.clicked.connect(self._about)
         row.addWidget(about)
         return row
+
+    def _app_settings(self) -> None:
+        from .settings import SettingsDialog
+        SettingsDialog(self.store, self).exec()
 
     def _about(self) -> None:
         from . import brand

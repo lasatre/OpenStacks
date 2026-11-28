@@ -106,6 +106,7 @@ class GlobalSettings:
     instances_dir: str = ""            # per-instance data disks (default <repo>/instances)
     adb_path: str = ""
     screenshots_dir: str = ""          # default: <repo>/screenshots
+    theme: str = "system"              # system | light | dark (Settings > Appearance)
 
     def resolved_qemu_path(self) -> str:
         if self.qemu_path:

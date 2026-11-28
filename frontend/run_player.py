@@ -35,7 +35,7 @@ def smoke(report: str = "") -> int:
     import importlib
     lines, ok = [], True
     for m in ("config", "paths", "brand", "checks", "images", "magisk", "adb", "files",
-              "qemu_engine", "native", "notify", "manager", "player"):
+              "qemu_engine", "native", "notify", "manager", "player", "settings"):
         try:
             importlib.import_module("openstacks." + m)
             lines.append(f"ok   import openstacks.{m}")

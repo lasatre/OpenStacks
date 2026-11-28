@@ -78,3 +78,63 @@ def _register_app_id() -> None:
 
 def accent(dark: bool | None = None) -> QColor:
     return QColor(INDIGO_LIGHT if (is_dark() if dark is None else dark) else INDIGO)
+
+
+# -- theme (Settings > Appearance, GlobalSettings.theme) ----------------------------------
+THEMES = (("system", "Follow the system"), ("light", "Light"), ("dark", "Dark"))
+_base_style = ""
+_custom = False             # Fusion + our palette in use
+
+
+def _palette(dark: bool) -> QPalette:
+    """A complete light or dark palette for the Fusion style (used where the platform does
+    not honour a colour-scheme request, e.g. Linux without a desktop portal)."""
+    if dark:
+        win, base, alt, text, btn = "#202124", "#17181a", "#2a2b2e", "#e8e8ea", "#2d2e31"
+        dis, hl, link, tip = "#7d7e82", INDIGO_LIGHT, "#8b8ff8", "#2d2e31"
+    else:
+        win, base, alt, text, btn = "#f3f3f3", "#ffffff", "#f5f5f7", "#1c1c1e", "#fbfbfb"
+        dis, hl, link, tip = "#a0a0a4", INDIGO, INDIGO, "#ffffdc"
+    p = QPalette()
+    for role, c in ((QPalette.Window, win), (QPalette.WindowText, text),
+                    (QPalette.Base, base), (QPalette.AlternateBase, alt),
+                    (QPalette.Text, text), (QPalette.Button, btn),
+                    (QPalette.ButtonText, text), (QPalette.BrightText, "#ff5555"),
+                    (QPalette.Highlight, hl), (QPalette.HighlightedText, "#ffffff"),
+                    (QPalette.Link, link), (QPalette.ToolTipBase, tip),
+                    (QPalette.ToolTipText, text), (QPalette.PlaceholderText, dis)):
+        p.setColor(role, QColor(c))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        p.setColor(QPalette.Disabled, role, QColor(dis))
+    return p
+
+
+def apply_theme(app, mode: str) -> None:
+    """mode: "system", "light" or "dark". Asks Qt for the colour scheme first (the native
+    style follows it on Windows, and on Linux with a desktop portal); where the palette does
+    not follow, switches to Fusion with an explicit palette."""
+    global _base_style, _custom
+    if not _base_style:
+        _base_style = app.style().name()
+    if _custom:                                      # back to the platform's own look first
+        app.setStyle(_base_style)
+        app.setPalette(QPalette())
+        _custom = False
+    hints = app.styleHints()
+    if mode in ("light", "dark"):
+        want_dark = mode == "dark"
+        try:
+            hints.setColorScheme(Qt.ColorScheme.Dark if want_dark else Qt.ColorScheme.Light)
+        except AttributeError:                       # Qt < 6.8
+            pass
+        app.processEvents()
+        if is_dark() != want_dark:
+            app.setStyle("Fusion")
+            app.setPalette(_palette(want_dark))
+            _custom = True
+    else:
+        try:
+            hints.unsetColorScheme()
+        except AttributeError:
+            pass
+        app.processEvents()

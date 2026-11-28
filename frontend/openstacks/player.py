@@ -299,7 +299,9 @@ class PlayerPane(QWidget):
         self._controls_started = False
         if self.native:
             from .controls.session import ControlsSession
-            self.controls = ControlsSession(inst, self.adb, self.display, parent=self)
+            self.controls = ControlsSession(
+                inst, self.adb, self.display, parent=self,
+                download=lambda: self.store.global_settings.controls_download)
             self.controls.status.connect(self.flash)
             self.controls.editor_requested.connect(self.open_controls_editor)
 

@@ -2,8 +2,8 @@
 
 Ours: `<config dir>/controls/<package>.cfg`, shared by every instance like BlueStacks'
 InputMapper folder. A game with no file of ours uses BlueStacks' own file when BlueStacks
-is installed on this machine (read-only; a save writes ours). "Import from BlueStacks"
-copies them all over.
+is installed on this machine, else the one downloaded from BlueStacks' servers (cloud.py);
+both are read-only (a save writes ours). "Import from BlueStacks" copies them all over.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from .. import paths
+from . import cloud
 
 
 def bluestacks_dirs() -> list[Path]:
@@ -34,7 +35,8 @@ def ours(package: str) -> Path:
 
 
 def find(package: str) -> Optional[Path]:
-    """The controls file for a package: ours, else BlueStacks'."""
+    """The controls file for a package: ours, else BlueStacks' installed one, else the
+    downloaded one."""
     if not package:
         return None
     p = ours(package)
@@ -44,7 +46,13 @@ def find(package: str) -> Optional[Path]:
         q = d / f"{package}.cfg"
         if q.is_file():
             return q
-    return None
+    return cloud.cached(package)
+
+
+def local(package: str) -> bool:
+    """A file we did not download (ours or an installed BlueStacks one) exists."""
+    p = find(package)
+    return p is not None and p != cloud.cached(package)
 
 
 def import_dir(src: Path, overwrite: bool = False) -> tuple[int, int]:

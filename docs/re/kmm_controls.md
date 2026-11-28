@@ -1121,6 +1121,27 @@ when creating a control.
 
 ---
 
+## 6. Built-in controls download (`cldGetPackageCfgAsync` 0x14018bd80) [C]
+
+HD-Player fetches a game's `.cfg` from BlueStacks' cloud.
+- **Request:** GET `<bst.bluestacks_cloud_url>/get_cfg_info` (`https://cloud.bluestacks.com`)
+  with the common client query (FUN_140183aa0) plus `country` (`bst.country`),
+  `parser_version`, `package_name`, `package_version_code` and, for the `nxt_cn` / `msi5_cn`
+  OEMs, `use_china_cdn=1`.
+- **Reply:** `{"cfg_file_url": {"normal": "https://eb.bluestacks.com/content_keymap/<package>.cfg?parserver=<v>[&cache=True]"}, "is_video_present": false, "success": true}`.
+- **Observed behaviour:**
+  - The reply is the same for any package name, known or not.
+  - The file is a normal ParserVersion `.cfg`, served from `public/appsettings/imap/V<v>/`, or a 404 when there is none.
+  - Neither request needs authentication, and the other query items are optional.
+  - "Not fetching cfg as existing cfg already updated at {}" compares MetaData
+    `CloudUpdateTimeUTC` with the local file.
+  - There is no listing: `content_keymap/` returns 404 and the CDN path returns 403.
+- **OpenStacks (`controls/cloud.py`):**
+  - Only `package_name` and `parser_version=17` are sent, and only for a non-system app opened with no local file.
+  - Each download is cached under `controls/bluestacks/`, and `index.json` records hits and misses.
+  - A hit is rechecked weekly, a miss after 3 days, and an error after an hour.
+  - Settings > Game controls turns this off.
+
 ## 5. Open questions / not determined
 
 1. Pan `Sensitivity`/`SensitivityRatioY` parse default -1 is used as-is by the motion formula; no

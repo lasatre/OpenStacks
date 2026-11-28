@@ -3083,6 +3083,24 @@ static void gr_button(HWND h, LPARAM l, int kind, int qnum, int down)
 static bool g_lockOn;
 static POINT g_lockCenter;
 
+/* While locked, aim motion comes from raw mouse input (WM_INPUT), not from the cursor
+ * position: GetCursorPos deltas are clamped at the window edge, so a fast flick to the
+ * boundary yields one huge delta (up to half the window) that Pan turns into a runaway
+ * swipe (the camera "spins"). Raw input gives true relative motion regardless of where
+ * the cursor is, so the cursor is only parked at centre and hidden for appearance. */
+static void gr_raw_mouse(HWND target, bool on)
+{
+    RAWINPUTDEVICE rid;
+    rid.usUsagePage = 0x01;                      /* generic desktop  */
+    rid.usUsage = 0x02;                          /* mouse            */
+    rid.dwFlags = on ? RIDEV_INPUTSINK : RIDEV_REMOVE;
+    rid.hwndTarget = on ? target : NULL;
+    if (!RegisterRawInputDevices(&rid, 1, sizeof(rid))) {
+        gr_log("native display: raw mouse %s failed err=%lu",
+               on ? "register" : "remove", (unsigned long)GetLastError());
+    }
+}
+
 static void gr_lock_apply(HWND h, bool on)
 {
     HWND t = g_child ? g_child : h;
@@ -3102,7 +3120,9 @@ static void gr_lock_apply(HWND h, bool on)
         g_lockCenter.y = (tl.y + br.y) / 2;
         SetCursorPos(g_lockCenter.x, g_lockCenter.y);
         SetCursor(NULL);
+        gr_raw_mouse(g.hwnd ? g.hwnd : h, true);
     } else {
+        gr_raw_mouse(g.hwnd ? g.hwnd : h, false);
         ClipCursor(NULL);
         SetCursor(LoadCursor(NULL, IDC_ARROW));
     }
@@ -3133,15 +3153,26 @@ static bool gr_input_msg(HWND h, UINT m, WPARAM w, LPARAM l)
         g_mouseDown = false;
         gr_pointer(h, l, 0);
         return true;
+    case WM_INPUT:
+        if (g_lockOn) {
+            RAWINPUT ri;
+            UINT sz = sizeof(ri);
+            if (GetRawInputData((HRAWINPUT)l, RID_INPUT, &ri, &sz,
+                                sizeof(RAWINPUTHEADER)) != (UINT)-1 &&
+                ri.header.dwType == RIM_TYPEMOUSE &&
+                !(ri.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
+                LONG dx = ri.data.mouse.lLastX, dy = ri.data.mouse.lLastY;
+                if (dx || dy)
+                    gr_input_post((GrInputEv){ .kind = 5, .x = (int)dx, .y = (int)dy });
+            }
+        }
+        return false;    /* WM_INPUT still needs DefWindowProc for cleanup */
     case WM_MOUSEMOVE:
         if (g_lockOn) {
-            POINT p;
-            GetCursorPos(&p);
-            int dx = p.x - g_lockCenter.x, dy = p.y - g_lockCenter.y;
-            if (dx || dy) {
-                gr_input_post((GrInputEv){ .kind = 5, .x = dx, .y = dy });
+            POINT p;                             /* just re-park the hidden cursor; */
+            GetCursorPos(&p);                    /* motion comes from WM_INPUT above */
+            if (p.x != g_lockCenter.x || p.y != g_lockCenter.y)
                 SetCursorPos(g_lockCenter.x, g_lockCenter.y);
-            }
             return true;
         }
         if (g_mouseDown) gr_pointer(h, l, -1);    /* drag = touch move */

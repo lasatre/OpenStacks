@@ -28,6 +28,7 @@ and from Qt worker threads.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import socket
@@ -53,7 +54,39 @@ MSYS2_BIN = r"C:\msys64\ucrt64\bin"          # DLLs needed by the patched build
 # BlueStacks gives the guest a paravirtual KVM clock for the same reason.)
 # Phase-78: + AVX/AVX2/FMA/BMI (houdini emits AVX for some games -> SIGILL
 # without it); needs the WHPX CPUID 0xD fix in qemu/apply_to_tree.py.
-QEMU_CPU = "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on,+xsave,+avx,+avx2,+fma,+f16c,+bmi1,+bmi2,+movbe"
+# + AES/PCLMULQDQ/SHA/RDRAND/RDSEED/ADX/LZCNT: houdini translates ARM crypto instructions with
+# them and logs "Expected CPU feature >> AES << is not supported" without; Brawl Stars then
+# dies with 0xdead0000 at start. Every x86-64 CPU WHPX/KVM runs on has them (a host without
+# one only gets a QEMU warning and the flag dropped).
+def guest_mac(name: str) -> str:
+    """A stable per-instance MAC with VirtualBox's prefix, as a BlueStacks guest has (08:00:27).
+    QEMU's default 52:54:00:12:34:56 is the Android emulator's well-known MAC, which games'
+    emulator checks look for."""
+    h = hashlib.sha256(("openstacks-mac:" + name).encode("utf-8")).digest()
+    return "08:00:27:" + ":".join(f"{b:02x}" for b in h[:3])
+
+
+def host_cpu_name() -> str:
+    """The host CPU's marketing name, given to the guest instead of "QEMU Virtual CPU" (as a
+    BlueStacks guest sees it under Hyper-V)."""
+    try:
+        if sys.platform == "win32":
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as k:
+                return str(winreg.QueryValueEx(k, "ProcessorNameString")[0]).strip()
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+QEMU_CPU = ("qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+invtsc,vmware-cpuid-freq=on,+xsave,+avx,"
+            "+avx2,+fma,+f16c,+bmi1,+bmi2,+movbe,+aes,+pclmulqdq,+sha-ni,+rdrand,+rdseed,+adx,"
+            "+abm")
 
 def controls_port(inst: Instance) -> int:
     """Port of the game-controls channel (bstvmsg "input" chardev, controls/channel.py):
@@ -211,7 +244,15 @@ class QemuEngine:
         argv += ["-machine", "pc", "-accel", accel]
         # Phase-73: QEMU's default qemu64 model has no SSSE3/SSE4/POPCNT/AVX;
         # libhoudini (ARM translation) and games abort without them.
-        argv += ["-cpu", getattr(g, "cpu_model", "") or os.environ.get("OST_CPU", QEMU_CPU)]
+        cpu = getattr(g, "cpu_model", "") or os.environ.get("OST_CPU", QEMU_CPU)
+        name = host_cpu_name()
+        if name and "model-id=" not in cpu:
+            cpu += ",model-id=" + name.replace(",", ",,")
+        argv += ["-cpu", cpu]
+        # what a BlueStacks guest sees (its VirtualBox engine) instead of QEMU/SeaBIOS
+        argv += ["-smbios", "type=0,vendor=innotek GmbH,version=VirtualBox",
+                 "-smbios", "type=1,manufacturer=innotek GmbH,product=VirtualBox,version=1.2",
+                 "-smbios", "type=2,manufacturer=Oracle Corporation,product=VirtualBox,version=1.2"]
         argv += ["-m", str(inst.ram_mb), "-smp", str(inst.cpus)]
         argv += ["-kernel", str(kernel), "-initrd", str(initrd)]
         argv += ["-append", self.build_append(inst)]
@@ -225,7 +266,7 @@ class QemuEngine:
             argv += disk_args(str(root), str(data) if has_data else None,
                               disk_format(data) if has_data else "vhdx")
 
-        argv += ["-nic", f"user,model=virtio-net-pci,"
+        argv += ["-nic", f"user,model=virtio-net-pci,mac={guest_mac(inst.name)},"
                          f"hostfwd=tcp:127.0.0.1:{inst.adb_port}-10.0.2.15:5555"]
 
         # bst* paravirt devices, with stock-QEMU fallback. Device options match

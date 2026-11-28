@@ -53,6 +53,8 @@
 #include "system/system.h"
 #include "hw/misc/gr_render.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/core/qdev-properties-system.h"
+#include "chardev/char-fe.h"
 
 #define TYPE_BST_VMSG "bstvmsg"
 OBJECT_DECLARE_SIMPLE_TYPE(BstVmsgState, BST_VMSG)
@@ -99,6 +101,8 @@ typedef struct BstVmsgConn {
 #define VMSG_PUSH_SLOTS         64
 #define VMSG_PUSH_MAX           132             /* touch frame = largest */
 #define VMSG_TOUCH_SLOTS        16
+#define VMSG_GCAL_SLOTS         32
+#define VMSG_GCAL_WORDS         16      /* opcode, length, up to 14 arguments */
 #define VMSG_TOUCH_NONE         0x7fffffffu
 
 typedef struct BstVmsgState {
@@ -118,10 +122,32 @@ typedef struct BstVmsgState {
     bool pushmove[VMSG_PUSH_SLOTS];
     unsigned qh, qt, pushes, drops;
     bool push_busy;
+    /* the IRQ slot (shm+0x1c) is shared by pushes and gcal completions: busy from
+     * raising the line until the guest's hard ISR clears it (BAR0+0x28) */
+    bool irq_busy;
+    /* gcal (host->guest calls, HD-Player gcall/Gcall.cpp): the guest parks a method-0
+     * request; a host call completes it with the message in the out window. Calls come
+     * from the controls channel (Tilt: accelerometer 0x3fc, NativeCursor: mouse 0x3fd). */
+    int gcal_wait;                  /* cid of the parked request, -1 = none */
+    uint32_t gq[VMSG_GCAL_SLOTS][VMSG_GCAL_WORDS];
+    unsigned gq_h, gq_t;
     QemuInputHandlerState *ihs;
     Notifier init_done;
     int tx, ty;
     bool tdown, tdirty;
+
+    /* game controls (docs/keymapping_plan.md): contacts 1..15 injected by the
+     * front-end's key mapping engine over the "input" chardev; contact 0 stays the
+     * host pointer. Frames carry every contact (type 2) or every active slot (type 5). */
+    CharFrontend input;
+    bool input_open;
+    char inbuf[256];
+    unsigned inlen;
+    struct { bool down; uint32_t x, y; } syn[VMSG_TOUCH_SLOTS];
+    bool syn_dirty;
+    bool prev_down[VMSG_TOUCH_SLOTS];
+    uint64_t capkeys[12];           /* evdev codes 0..767 the front-end maps */
+    unsigned capbtn;                /* OST_BTN_* */
 
     /* host props served to the guest's bstconf (GetProps) */
     char *props;            /* extra 'k=v;k=v' (later lines win) */
@@ -169,6 +195,67 @@ static BstVmsgConn *bst_vmsg_get_conn(BstVmsgState *s, uint32_t cid)
     return &s->conn[cid];
 }
 
+/* write the next host call into a gcal out window; false = nothing to send.
+ * A message is {u32 opcode, u32 length in bytes (header included), u32 args...}, as
+ * HD-Player's GcallEnc.cpp writes them and libgcall_jni gcallDecode reads them. */
+static bool bst_vmsg_gcal_fill(BstVmsgState *s, uint8_t *out)
+{
+    if (s->gq_h == s->gq_t) {
+        return false;
+    }
+    uint32_t *m = s->gq[s->gq_h++ % VMSG_GCAL_SLOTS];
+    for (uint32_t i = 0; i < m[1] / 4; i++) {
+        stl_le_p(out + 4 * i, m[i]);
+    }
+    return true;
+}
+
+static bool gcal_is_move(const uint32_t *m)
+{
+    return m[0] == 0x3fd && m[2] == 0;      /* gcallSendMouseDataRpc, action 0 = move */
+}
+
+/* queue a host call; the latest accelerometer value and consecutive mouse moves replace
+ * the queued ones */
+static void bst_vmsg_gcal_queue(BstVmsgState *s, const uint32_t *args, unsigned n)
+{
+    uint32_t m[VMSG_GCAL_WORDS] = { args[0], 4 * (n + 1) };
+    memcpy(m + 2, args + 1, 4 * (n - 1));
+    for (unsigned i = s->gq_h; i != s->gq_t; i++) {
+        uint32_t *q = s->gq[i % VMSG_GCAL_SLOTS];
+        if ((m[0] == 0x3fc && q[0] == 0x3fc) ||
+            (gcal_is_move(m) && gcal_is_move(q) && i + 1 == s->gq_t)) {
+            memcpy(q, m, sizeof(m));
+            return;
+        }
+    }
+    if (s->gq_t - s->gq_h >= VMSG_GCAL_SLOTS) {
+        s->gq_h++;                          /* full: drop the oldest */
+    }
+    memcpy(s->gq[s->gq_t++ % VMSG_GCAL_SLOTS], m, sizeof(m));
+}
+
+/* complete the parked gcal request if there is a call to send and the IRQ slot is free
+ * (vmsgCompleteRequest: status 0 in the poll word, then the IRQ names the cid; the guest
+ * ISR wakes that connection's waitqueue, there is no 0x38 ack) */
+static void bst_vmsg_gcal_kick(BstVmsgState *s)
+{
+    int cid = s->gcal_wait;
+    if (cid < 0 || s->irq_busy || s->gq_h == s->gq_t) {
+        return;
+    }
+    BstVmsgConn *c = &s->conn[cid];
+    s->gcal_wait = -1;
+    if (!c->in_use || c->service_id != VMSG_GCAL_SID) {
+        return;
+    }
+    bst_vmsg_gcal_fill(s, s->shm + c->host_off);
+    stl_le_p(s->shm + c->poll_off, 0);
+    stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, (uint32_t)cid);
+    s->irq_busy = true;
+    pci_set_irq(PCI_DEVICE(s), 1);
+}
+
 static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
 {
     uint8_t *in;
@@ -201,7 +288,12 @@ static void bst_vmsg_process_request(BstVmsgState *s, BstVmsgConn *c)
             fprintf(stderr, "[bstvmsg] gcal cid=%u: wait-for-host-call parked\n",
                     (unsigned)(c - s->conn));
         }
-        stl_le_p(s->shm + c->poll_off, 1);
+        if (bst_vmsg_gcal_fill(s, out)) {
+            stl_le_p(s->shm + c->poll_off, 0);  /* the ioctl returns without sleeping */
+        } else {
+            s->gcal_wait = (int)(c - s->conn);
+            stl_le_p(s->shm + c->poll_off, 1);
+        }
         return;
     }
 
@@ -310,7 +402,7 @@ static int bst_vmsg_find_sid(BstVmsgState *s, uint32_t sid)
 /* deliver the next queued message if the channel is idle */
 static void bst_vmsg_push_kick(BstVmsgState *s)
 {
-    if (s->push_busy || s->qh == s->qt) {
+    if (s->push_busy || s->irq_busy || s->qh == s->qt) {
         return;
     }
     int cid = bst_vmsg_find_sid(s, VMSG_INP_SID);
@@ -323,6 +415,7 @@ static void bst_vmsg_push_kick(BstVmsgState *s)
     memcpy(dst, s->pushq[k], s->pushlen[k]);
     stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, (uint32_t)cid);
     s->push_busy = true;
+    s->irq_busy = true;
     s->pushes++;
     if (s->pushes <= 20 || (s->pushes & 0xff) == 0) {
         fprintf(stderr, "[bstvmsg] push #%u cid=%d type=%u x=%u y=%u (q=%u)\n",
@@ -391,44 +484,270 @@ static void bst_vmsg_input_event(DeviceState *dev, QemuConsole *src,
     }
 }
 
+/* One touch frame with every contact: slot 0 = the host pointer, slots 1..15 = the
+ * key mapping engine's. A frame where no contact went down or up is a "move" and may
+ * replace a move still waiting in the queue (each frame carries all contacts). */
+static void bst_vmsg_emit(BstVmsgState *s)
+{
+    bool down[VMSG_TOUCH_SLOTS];
+    uint32_t x[VMSG_TOUCH_SLOTS], y[VMSG_TOUCH_SLOTS];
+    bool changed = false;
+    int active = 0;
+    uint8_t m[VMSG_PUSH_MAX];
+
+    down[0] = s->tdown;
+    x[0] = (uint32_t)s->tx;
+    y[0] = (uint32_t)s->ty;
+    for (int i = 1; i < VMSG_TOUCH_SLOTS; i++) {
+        down[i] = s->syn[i].down;
+        x[i] = s->syn[i].x;
+        y[i] = s->syn[i].y;
+    }
+    for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
+        changed |= down[i] != s->prev_down[i];
+        active += down[i] || s->prev_down[i];
+    }
+    if (!active) {
+        return;
+    }
+    if (s->touch_mt) {
+        /* Phase-80: kernel 5.15 bstinput (Tiramisu64) inpMtTouchDispatch:
+         * type 5, [u32 count] + count x {u32 slot, u32 state, u32 x, u32 y};
+         * state 2 = finger up (ABS_MT_TRACKING_ID -1), else down/move at x,y
+         * (0..32767), then BTN_TOUCH + SYN. Type 2 is "unknown" there.
+         * At most 7 entries fit one push; more contacts take several pushes,
+         * which must not be coalesced (each holds only part of the frame). */
+        const int per = (VMSG_PUSH_MAX - 8) / 16;
+        bool coalesce = !changed && active <= per;
+        int n = 0;
+        for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
+            if (!down[i] && !s->prev_down[i]) {
+                continue;
+            }
+            uint8_t *e = m + 8 + 16 * n;
+            stl_le_p(e + 0, (uint32_t)i);
+            stl_le_p(e + 4, down[i] ? 1 : 2);
+            stl_le_p(e + 8, x[i]);
+            stl_le_p(e + 12, y[i]);
+            if (++n == per) {
+                stl_le_p(m + 0, 5);
+                stl_le_p(m + 4, (uint32_t)n);
+                bst_vmsg_push(s, m, 8 + 16 * n, coalesce);
+                n = 0;
+            }
+        }
+        if (n) {
+            stl_le_p(m + 0, 5);
+            stl_le_p(m + 4, (uint32_t)n);
+            bst_vmsg_push(s, m, 8 + 16 * n, coalesce);
+        }
+    } else {
+        stl_le_p(m, 2);                              /* type 2 = touch */
+        for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
+            stl_le_p(m + 4 + 8 * i, down[i] ? x[i] : VMSG_TOUCH_NONE);
+            stl_le_p(m + 8 + 8 * i, down[i] ? y[i] : VMSG_TOUCH_NONE);
+        }
+        bst_vmsg_push(s, m, sizeof(m), !changed);
+    }
+    memcpy(s->prev_down, down, sizeof(down));
+}
+
 static void bst_vmsg_input_sync(DeviceState *dev)
 {
     BstVmsgState *s = BST_VMSG(dev);
-    uint8_t m[VMSG_PUSH_MAX];
-    static bool was_down;
 
     if (!s->tdirty) {
         return;
     }
     s->tdirty = false;
-    if (s->touch_mt) {
-        /* Phase-80: kernel 5.15 bstinput (Tiramisu64) inpMtTouchDispatch:
-         * type 5, [u32 count] + count x {u32 slot, u32 state, u32 x, u32 y};
-         * state 2 = finger up (ABS_MT_TRACKING_ID -1), else down/move at x,y
-         * (0..32767), then BTN_TOUCH + SYN. Type 2 is "unknown" there.  */
-        memset(m, 0, 24);
-        stl_le_p(m + 0, 5);
-        stl_le_p(m + 4, 1);
-        stl_le_p(m + 8, 0);                          /* slot 0 */
-        stl_le_p(m + 12, s->tdown ? 1 : 2);
-        stl_le_p(m + 16, (uint32_t)s->tx);
-        stl_le_p(m + 20, (uint32_t)s->ty);
-        bst_vmsg_push(s, m, 24, s->tdown && was_down);
-        was_down = s->tdown;
+    bst_vmsg_emit(s);
+}
+
+/* ---- game controls channel (docs/keymapping_plan.md) ---- */
+
+static BstVmsgState *g_vmsg;         /* the instance owning the "input" chardev */
+
+bool ost_input_connected(void)
+{
+    return g_vmsg && g_vmsg->input_open;
+}
+
+bool ost_input_wants_key(unsigned evdev)
+{
+    return ost_input_connected() && evdev < 768 &&
+           (g_vmsg->capkeys[evdev / 64] >> (evdev % 64) & 1);
+}
+
+unsigned ost_input_buttons(void)
+{
+    return ost_input_connected() ? g_vmsg->capbtn : 0;
+}
+
+void ost_input_printf(const char *fmt, ...)
+{
+    char line[160];
+    va_list ap;
+    int n;
+
+    if (!ost_input_connected()) {
         return;
     }
-    stl_le_p(m, 2);                                  /* type 2 = touch */
-    for (int i = 0; i < VMSG_TOUCH_SLOTS; i++) {
-        stl_le_p(m + 4 + 8 * i, VMSG_TOUCH_NONE);
-        stl_le_p(m + 8 + 8 * i, VMSG_TOUCH_NONE);
+    va_start(ap, fmt);
+    n = vsnprintf(line, sizeof(line) - 1, fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        return;
     }
-    if (s->tdown) {
-        stl_le_p(m + 4, (uint32_t)s->tx);
-        stl_le_p(m + 8, (uint32_t)s->ty);
+    n = MIN(n, (int)sizeof(line) - 2);
+    line[n++] = '\n';
+    /* non-blocking: a stalled front-end loses events rather than stalling QEMU */
+    qemu_chr_fe_write(&g_vmsg->input, (const uint8_t *)line, n);
+}
+
+void ost_input_send_line(const char *line)
+{
+    if (!ost_input_connected()) {
+        return;
     }
-    /* only a move while already down may be coalesced */
-    bst_vmsg_push(s, m, sizeof(m), s->tdown && was_down);
-    was_down = s->tdown;
+    qemu_chr_fe_write(&g_vmsg->input, (const uint8_t *)line, strlen(line));
+    qemu_chr_fe_write(&g_vmsg->input, (const uint8_t *)"\n", 1);
+}
+
+static void ost_input_reset(BstVmsgState *s)
+{
+    bool any = false;
+    for (int i = 1; i < VMSG_TOUCH_SLOTS; i++) {
+        any |= s->syn[i].down;
+        s->syn[i].down = false;
+    }
+    memset(s->capkeys, 0, sizeof(s->capkeys));
+    s->capbtn = 0;
+    gr_set_pointer_lock(false);
+    if (any) {
+        bst_vmsg_emit(s);
+    }
+}
+
+static void ost_input_line(BstVmsgState *s, char *l)
+{
+    int id, x, y, v;
+
+    switch (l[0]) {
+    case 't':                                    /* t <id> <x> <y>: down / move */
+        if (sscanf(l + 1, "%d %d %d", &id, &x, &y) == 3 &&
+            id > 0 && id < VMSG_TOUCH_SLOTS) {
+            int ax, ay;
+            gr_view_to_panel(x, y, &ax, &ay);
+            s->syn[id].down = true;
+            s->syn[id].x = (uint32_t)ax;
+            s->syn[id].y = (uint32_t)ay;
+            s->syn_dirty = true;
+        }
+        return;
+    case 'u':                                    /* u <id>: up */
+        if (sscanf(l + 1, "%d", &id) == 1 && id > 0 && id < VMSG_TOUCH_SLOTS) {
+            s->syn[id].down = false;
+            s->syn_dirty = true;
+        }
+        return;
+    case 's':                                    /* sync: one frame */
+        if (s->syn_dirty) {
+            s->syn_dirty = false;
+            bst_vmsg_emit(s);
+        }
+        return;
+    case 'r':                                    /* release every synthetic contact */
+        for (int i = 1; i < VMSG_TOUCH_SLOTS; i++) {
+            s->syn[i].down = false;
+        }
+        s->syn_dirty = false;
+        bst_vmsg_emit(s);
+        return;
+    case 'a':                                    /* a <x> <y> <z>: accelerometer (Tilt) */
+    case 'g': {                                  /* g <opcode> <args...>: a host call */
+        uint32_t w[VMSG_GCAL_WORDS - 1];
+        unsigned n = 0;
+        char *p = l + 1, *end;
+        if (l[0] == 'a') {
+            w[n++] = 0x3fc;
+        }
+        while (n < VMSG_GCAL_WORDS - 1) {
+            long v = strtol(p, &end, 10);
+            if (end == p) {
+                break;
+            }
+            w[n++] = (uint32_t)v;
+            p = end;
+        }
+        if (n >= 1 && w[0] >= 0x3e8 && w[0] <= 0x412) {     /* gcallDecode's range */
+            bst_vmsg_gcal_queue(s, w, n);
+            bst_vmsg_gcal_kick(s);
+        }
+        return;
+    }
+    case 'I':                                    /* I ...: image detection (gr_render) */
+        gr_imgd_line(l + 1);
+        return;
+    case 'k':                                    /* k <evdev> <0/1>: key into the guest */
+        if (sscanf(l + 1, "%d %d", &x, &v) == 2 && x > 0 && x < 768) {
+            qemu_input_event_send_key_linux(NULL, (unsigned)x, v != 0);
+        }
+        return;
+    }
+    if (!strncmp(l, "cap", 3)) {                 /* cap <evdev...>: keys to capture */
+        char *p = l + 3, *end;
+        memset(s->capkeys, 0, sizeof(s->capkeys));
+        for (;;) {
+            long c = strtol(p, &end, 10);
+            if (end == p) {
+                break;
+            }
+            if (c > 0 && c < 768) {
+                s->capkeys[c / 64] |= 1ull << (c % 64);
+            }
+            p = end;
+        }
+    } else if (!strncmp(l, "btn", 3) && sscanf(l + 3, "%d", &v) == 1) {
+        s->capbtn = (unsigned)v;
+    } else if (!strncmp(l, "lock", 4) && sscanf(l + 4, "%d", &v) == 1) {
+        gr_set_pointer_lock(v != 0);
+    }
+}
+
+static int ost_input_can_read(void *opaque)
+{
+    return 4096;
+}
+
+static void ost_input_read(void *opaque, const uint8_t *buf, int size)
+{
+    BstVmsgState *s = opaque;
+
+    for (int i = 0; i < size; i++) {
+        char c = (char)buf[i];
+        if (c == '\n') {
+            s->inbuf[s->inlen] = 0;
+            ost_input_line(s, s->inbuf);
+            s->inlen = 0;
+        } else if (c != '\r' && s->inlen < sizeof(s->inbuf) - 1) {
+            s->inbuf[s->inlen++] = c;
+        }
+    }
+}
+
+static void ost_input_event(void *opaque, QEMUChrEvent ev)
+{
+    BstVmsgState *s = opaque;
+
+    if (ev == CHR_EVENT_OPENED) {
+        s->input_open = true;
+        s->inlen = 0;
+        fprintf(stderr, "[bstvmsg] game controls connected\n");
+    } else if (ev == CHR_EVENT_CLOSED) {
+        s->input_open = false;
+        ost_input_reset(s);
+        fprintf(stderr, "[bstvmsg] game controls disconnected\n");
+    }
 }
 
 static const QemuInputHandler bst_vmsg_touch_handler = {
@@ -503,6 +822,9 @@ static void bst_vmsg_bar0_write(void *opaque, hwaddr addr, uint64_t val,
         BstVmsgConn *c = bst_vmsg_get_conn(s, cid);
         if (c) {
             c->in_use = 0;
+            if (s->gcal_wait == (int)cid) {
+                s->gcal_wait = -1;
+            }
         }
         break;
     }
@@ -510,6 +832,9 @@ static void bst_vmsg_bar0_write(void *opaque, hwaddr addr, uint64_t val,
         /* guest hard ISR consumed shm+0x1c: drop the line, mark idle cid */
         pci_set_irq(PCI_DEVICE(s), 0);
         stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, 0xffffffffu);
+        s->irq_busy = false;
+        bst_vmsg_gcal_kick(s);
+        bst_vmsg_push_kick(s);
         break;
     case 0x38:
         /* guest callback done (val = cid): channel free for the next push */
@@ -586,6 +911,7 @@ static void bst_vmsg_realize(PCIDevice *pdev, Error **errp)
      * shared-line interrupt (spurious bstkbd scancode 0 / list corruption). */
     stl_le_p(s->shm + VMSG_SHM_IRQ_PENDING, 0xffffffffu);
     stl_le_p(s->shm + VMSG_SHM_CID, 0xffffffffu);
+    s->gcal_wait = -1;
 
     s->props_text = g_string_new(bst_vmsg_props_text);
     if (s->propsfile && *s->propsfile) {
@@ -617,12 +943,19 @@ static void bst_vmsg_realize(PCIDevice *pdev, Error **errp)
     qemu_input_handler_activate(s->ihs);
     s->init_done.notify = bst_vmsg_init_done;
     qemu_add_machine_init_done_notifier(&s->init_done);
+
+    if (qemu_chr_fe_backend_connected(&s->input)) {
+        g_vmsg = s;
+        qemu_chr_fe_set_handlers(&s->input, ost_input_can_read, ost_input_read,
+                                 ost_input_event, NULL, s, NULL, true);
+    }
 }
 
 static const Property bst_vmsg_props[] = {
     DEFINE_PROP_STRING("props", BstVmsgState, props),
     DEFINE_PROP_STRING("propsfile", BstVmsgState, propsfile),
     DEFINE_PROP_BOOL("touch-mt", BstVmsgState, touch_mt, false),
+    DEFINE_PROP_CHR("input", BstVmsgState, input),
 };
 
 static void bst_vmsg_class_init(ObjectClass *klass, const void *data)

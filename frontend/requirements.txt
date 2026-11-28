@@ -1,5 +1,6 @@
 PySide6>=6.9,<7
 truststore>=0.9       # HTTPS via the Windows certificate verifier (fresh installs lack roots)
+pysdl2-dll>=2.30; sys_platform == "win32"   # SDL2.dll: gamepads for game controls (Linux: system libSDL2)
 # PySide6 6.9+ ships Python 3.14 wheels. Everything else is stdlib:
 #   * VNC protocol is pure stdlib (socket/struct)  -> openstacks/vnc.py
 #   * adb wrapper is stdlib subprocess             -> openstacks/adb.py

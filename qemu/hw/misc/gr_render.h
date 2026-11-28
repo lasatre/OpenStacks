@@ -68,4 +68,35 @@ void gr_render_set_orientation(int o);
  */
 const uint8_t *gr_render_frame(unsigned *seq, int *w, int *h);
 
+/*
+ * Game controls input channel (docs/keymapping_plan.md). The front-end's key mapping
+ * engine talks to bstvmsg over a chardev (bstvmsg property "input"): it injects extra
+ * touch contacts and asks for the keys/buttons it maps. The host window code forwards
+ * those to it instead of the guest. Every function here runs on the main loop (BQL).
+ */
+#define OST_BTN_LEFT    1u
+#define OST_BTN_RIGHT   2u
+#define OST_BTN_MIDDLE  4u
+#define OST_BTN_X1      8u
+#define OST_BTN_X2      16u
+#define OST_BTN_WHEEL   32u
+#define OST_BTN_HOVER   64u          /* report pointer motion with no button held */
+
+/* bst_vmsg.c */
+bool ost_input_connected(void);
+bool ost_input_wants_key(unsigned evdev);
+unsigned ost_input_buttons(void);    /* OST_BTN_* the front-end captures */
+void ost_input_printf(const char *fmt, ...) G_GNUC_PRINTF(1, 2);
+void ost_input_send_line(const char *line);   /* any length; adds the newline */
+
+/* gr_render.c */
+/* view coordinates (0..INPUT_EVENT_ABS_MAX across the display as shown) -> the
+ * guest's unrotated panel coordinates (the inverse of the current rotation) */
+void gr_view_to_panel(int vx, int vy, int *ax, int *ay);
+/* pointer lock for aim/pan controls: hide + confine the cursor, report relative
+ * motion ("R dx dy") instead of positions */
+void gr_set_pointer_lock(bool on);
+/* an image detection line from the controls front-end ("I ...", without the "I") */
+void gr_imgd_line(const char *l);
+
 #endif /* HW_MISC_GR_RENDER_H */

@@ -76,6 +76,20 @@ OST_API void ost_channel_close(OstChannel *ch);
 
 OST_API void ost_renderer_shutdown(void);
 
+/* Image detection for BlueStacks "Smart" game controls (docs/re/kmm_controls.md 3.20):
+ * the translator hashes texture uploads and tests each draw against a list of images.
+ * Configure with begin, add per image, commit (an empty list turns it off). `emu` 0 = no
+ * screen-position test, 1 = Unity (GroupA); `sampler` names the sampler uniform whose unit
+ * is checked ("" = unit 0), `sampler2` a fallback. `rect` (x1 y1 x2 y2, percent) or NULL.
+ * The callback runs on a render thread when the set of images matched in a frame changes
+ * (indices into the committed list, ascending); signal only, never call back in. */
+typedef void (*ost_imgd_fn)(void *user, uint32_t gen, const int32_t *idx, int n);
+OST_API void ost_imgd_set_callback(ost_imgd_fn fn, void *user);
+OST_API void ost_imgd_begin(uint32_t gen, int emu, const char *sampler, const char *sampler2);
+OST_API void ost_imgd_add(uint32_t crc, int tex_attr, int pos_attr, float u, float v,
+                          const float *rect);
+OST_API void ost_imgd_commit(void);
+
 #ifdef __cplusplus
 }
 #endif

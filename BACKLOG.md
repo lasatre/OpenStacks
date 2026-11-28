@@ -10,6 +10,14 @@ brackets). Move an item to NOTES when it lands.
 - **Updates** - no update check; a newer release has to be extracted over the old one
   (`data\` is kept).
 
+## Game controls
+- **BlueStacks' built-in control configs, downloaded automatically** - BlueStacks fetches
+  per-game `.cfg` files (the `CloudUpdateTimeUTC` / `UpdateVersion` / `UpdateArticleKey`
+  fields in MetaData suggest a cloud update service). Find the endpoint and protocol
+  (HD-Player / the Qt front-end), then import them automatically. Ideally mirror the whole
+  catalogue into a local cache and refresh it as a whole, so requests never reveal which
+  packages the user has installed.
+
 ## Display / UX
 - **Home screen stays portrait after a portrait app** - Android keeps rotation 1 when the
   launcher returns, while BlueStacks snaps back to landscape (probably by forcing the

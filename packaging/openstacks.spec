@@ -8,9 +8,29 @@ ROOT = os.path.abspath(os.getcwd())
 FRONTEND = os.path.join(ROOT, "frontend")
 BRAND = os.path.join(ROOT, "brand")
 
+# SDL2 for gamepads (frontend/openstacks/controls/gamepad.py loads it with ctypes, from the
+# bundle first): the pysdl2-dll wheel's SDL2.dll on Windows, the build machine's libSDL2
+# elsewhere (it links only libc/libm and dlopens its video/input backends).
+def _sdl2():
+    if sys.platform == "win32":
+        try:
+            import sdl2dll
+            p = os.path.join(sdl2dll.get_dllpath(), "SDL2.dll")
+            return [(p, ".")] if os.path.exists(p) else []
+        except ImportError:
+            return []
+    for d in ("/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/lib"):
+        p = os.path.join(d, "libSDL2-2.0.so.0")
+        if os.path.exists(p):
+            return [(os.path.realpath(p), ".")]
+    print("warning: libSDL2-2.0.so.0 not found: no bundled gamepad support")
+    return []
+
+
 a = Analysis(
     [os.path.join(FRONTEND, "run_player.py")],
     pathex=[FRONTEND],
+    binaries=_sdl2(),
     datas=[(os.path.join(BRAND, d), os.path.join("brand", d)) for d in ("png", "ico", "svg")],
     # image patches (patches/*.py) are loaded from disk at install time and import these
     hiddenimports=["gzip", "hashlib", "urllib.request", "zipfile", "importlib.util", "truststore"],

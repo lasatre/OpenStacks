@@ -74,6 +74,8 @@ def main():
                     help="QEMU -cpu (SSE4/AVX2 for houdini + games; AVX needs the WHPX CPUID 0xD patch)")
     ap.add_argument("--exe", default="dev", choices=sorted(EXES))
     ap.add_argument("--env", action="append", default=[], metavar="K=V")
+    ap.add_argument("--controls", type=int, metavar="PORT",
+                    help="game-controls channel (bstvmsg input chardev) on 127.0.0.1:PORT")
     ap.add_argument("--props", default="host", choices=["host", "min"],
                     help="host: HD-Player-style bst.* props from bluestacks.conf "
                          "(tools/bstprops.py); min: bstvmsg built-in list only")
@@ -135,6 +137,11 @@ def main():
         ov.update(kv.split("=", 1) for kv in a.prop)
         pf = bstprops.write_props_file(os.path.join(run, "bst.props"), "Pie64", ov)
         vmsg += ",propsfile=" + str(pf).replace(",", ",,")
+    ctl = []
+    if a.controls:
+        ctl = ["-chardev", "socket,id=ostin,host=127.0.0.1,port=%d,server=on,wait=off,"
+                           "nodelay=on" % a.controls]
+        vmsg += ",input=ostin"
     img = lambda f: os.path.join(images, f).replace(",", ",,")
     argv = [
         exe, "-name", "openstacks-" + a.name,
@@ -146,6 +153,7 @@ def main():
     ] + disk_args(os.path.join(images, a.root),
                   None if a.data == "none" else data_path, fmt(a.data), True, not a.persist, fmt(a.root)) + [
         "-nic", "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:25556-10.0.2.15:5555",
+    ] + ctl + [
         "-device", vmsg,
         "-device", "bstpgaipc,id=bstpgaipc0,gr=on,addr=0x05" + pgaipc_opts(os.path.join(images, "kernel.bin")),
     ] + ({"dsound": ["-audiodev", "dsound,id=snd0"],

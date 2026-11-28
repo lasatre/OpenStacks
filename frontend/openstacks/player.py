@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QCursor, QIcon, QKeySequence
 from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QSlider,
                                QPushButton, QTabWidget, QToolButton,
@@ -293,6 +293,16 @@ class PlayerPane(QWidget):
 
         self._status = ""
         self._adb_state = f"adb {inst.adb_port}: probing"
+        # game controls (key mapping + gamepad; controls/): native display only, the
+        # engine talks to QEMU's window input directly
+        self.controls = None
+        self._controls_started = False
+        if self.native:
+            from .controls.session import ControlsSession
+            self.controls = ControlsSession(inst, self.adb, self.display, parent=self)
+            self.controls.status.connect(self.flash)
+            self.controls.editor_requested.connect(self.open_controls_editor)
+
         self._vnc_state = f"vnc 127.0.0.1:{inst.vnc_port}: idle"
         self._adb_threads: list[_CallThread] = []
         self._vol_pid = 0                 # QEMU process the saved volume was applied to
@@ -314,6 +324,9 @@ class PlayerPane(QWidget):
         """(Re)start VNC streaming + adb poll for this instance."""
         if self.native:
             self._vnc_state = "display: native (GPU)"
+            if self.controls is not None and not self._controls_started:
+                self._controls_started = True
+                self.controls.start()
         elif self.vnc_thread is None:
             self.input_worker.start()
             self.vnc_thread = VncClientThread("127.0.0.1", self.inst.vnc_port,
@@ -331,6 +344,9 @@ class PlayerPane(QWidget):
             self.notes.stop()
             self.notes = None
         self.vnc_thread, self.input_worker, self.boot_watch = None, None, None
+        if self.controls is not None:
+            self.controls.stop()
+            self.controls = None
         if self.native:
             self.display.stop()      # stop polling + hand the renderer window back first
         if self.screen_window is not None:
@@ -541,7 +557,24 @@ class PlayerPane(QWidget):
         self._adb_threads.append(th)
 
     def keymap(self) -> None:
-        self.flash("keymap editor: not implemented yet (WIP)")
+        if self.controls is None:
+            self.flash("game controls need the native display (display=native)")
+            return
+        self.controls.menu(self).exec(QCursor.pos())
+
+    def open_controls_editor(self) -> None:
+        if self.controls is None:
+            return
+        panel = self.controls.open_editor()
+        if panel is None:
+            return
+        win = self.window()
+        if hasattr(win, "attach_side_panel"):
+            win.attach_side_panel(panel)
+        else:                                # screen popped out: a floating panel
+            panel.setParent(None)
+            panel.setWindowFlag(Qt.Tool, True)
+            panel.show()
 
     def multitouch(self) -> None:
         self.flash("multi-touch gestures: not implemented yet (WIP)")
@@ -798,7 +831,7 @@ class PlayerWindow(QMainWindow):
         ("root", "root", "Root this instance with Magisk / remove Magisk", ""),
         ("pop_screen", "pop_screen", "Pop the screen out into its own window / bring it back",
          "Ctrl+Shift+P"),
-        ("keymap", "keymap", "Game controls / key mapping (coming soon)", ""),
+        ("keymap", "keymap", "Game controls: key mapping and gamepad", ""),
         ("multitouch", "multitouch", "Multi-touch gestures (coming soon)", ""),
     )
     _NAV = (
@@ -859,6 +892,13 @@ class PlayerWindow(QMainWindow):
         row.addWidget(rail)
         self.setCentralWidget(holder)
         self.sidebar = rail
+        self._side_row = row
+
+    def attach_side_panel(self, panel: QWidget) -> None:
+        """Dock a panel (the controls editor) at the window's right edge, BlueStacks-style."""
+        self._side_row.addWidget(panel)
+        panel.show()
+        panel.closed.connect(lambda: self._side_row.removeWidget(panel))
 
     # -- pane helpers -----------------------------------------------------------------
     def current_pane(self) -> Optional[PlayerPane]:

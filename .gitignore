@@ -19,6 +19,7 @@ runs/
 # front-end local state
 frontend/instances.conf
 frontend/logs/
+frontend/controls/
 frontend/screenshots/
 frontend/.venv/
 

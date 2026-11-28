@@ -28,6 +28,7 @@
 #include "render-utils/RenderLib.h"
 #include "render-utils/Renderer.h"
 #include "render-utils/render_api.h"
+#include "common/imgd.h"   // glestranslator/common: image detection core
 
 using gfxstream::RenderChannel;
 
@@ -434,5 +435,29 @@ OST_API void ost_renderer_shutdown(void) {
     }
     if (r) r->stop(true);
 }
+
+// ---- image detection (BlueStacks "Smart" controls) -------------------------------------
+OST_API void ost_imgd_set_callback(ost_imgd_fn fn, void* user) { imgd::setReport(fn, user); }
+
+OST_API void ost_imgd_begin(uint32_t gen, int emu, const char* sampler, const char* sampler2) {
+    imgd::begin(gen, emu, sampler, sampler2);
+}
+
+OST_API void ost_imgd_add(uint32_t crc, int tex_attr, int pos_attr, float u, float v,
+                          const float* rect) {
+    imgd::Image im;
+    im.crc = crc;
+    im.texAttr = tex_attr;
+    im.posAttr = pos_attr;
+    im.u = u;
+    im.v = v;
+    if (rect) {
+        im.hasRect = true;
+        memcpy(im.rect, rect, sizeof(im.rect));
+    }
+    imgd::add(im);
+}
+
+OST_API void ost_imgd_commit(void) { imgd::commit(); }
 
 }  // extern "C"

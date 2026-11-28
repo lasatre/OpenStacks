@@ -61,6 +61,7 @@ DEPS_DIR = DATA_DIR / "deps"                 # download caches (images, Magisk, 
 LOGS_DIR = CONF_DIR / "logs"
 SCREENSHOTS_DIR = CONF_DIR / "screenshots"
 CONF_FILE = CONF_DIR / "instances.conf"
+CONTROLS_DIR = CONF_DIR / "controls"      # game controls: <package>.cfg (BlueStacks format)
 
 # BlueStacks 5's GPU renderer (Windows only). Not redistributable: the packaged build needs
 # BlueStacks 5 installed (or OST_RENDERER_DLL pointing at a copy of its install folder's DLL).

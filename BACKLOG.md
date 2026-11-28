@@ -17,6 +17,22 @@ brackets). Move an item to NOTES when it lands.
   would need a package list from elsewhere (e.g. a published catalogue) to stop revealing
   which games are opened.
 
+## Game controls (cont.)
+- **Aim-mode camera spins on big mouse moves (Pan re-centre teleport)** - the real cause,
+  found by logging Pan finger coords (OST_PAN_LOG): host motion is clean (raw input, below),
+  and Pan's finger slides smoothly, but when it leaves the view it re-centres by lifting and
+  re-pressing at the anchor (runtime.py `_move`, `_out`). That is an instant position
+  teleport (e.g. y 0 -> 37), and games that drive the camera from the touch's absolute
+  position (Fall Buddies) read each teleport as a reverse swipe -> spin. Happens often on
+  vertical motion (the finger crosses the whole screen height in ~4 events, 17 re-centres in
+  one burst). Re-pressing on a different contact id did NOT help (the game keys on position,
+  not id). Likely fix: sequence the re-centre so the guest sees a real touch-up gap before
+  the re-press (a frame/ms delay, cf. the Tweaks 0x800 state-10 path which already waits
+  20ms), or RE BlueStacks' exact Pan re-centre timing. Needs live testing per game.
+  DONE this round (keep): RAWINPUT (WM_INPUT) relative deltas while locked in gr_render.c,
+  replacing `GetCursorPos - center` (which clamped at the window edge); the visible cursor is
+  only parked+hidden. This is a genuine fix but orthogonal to the spin above.
+
 ## Display / UX
 - **Home screen stays portrait after a portrait app** - Android keeps rotation 1 when the
   launcher returns, while BlueStacks snaps back to landscape (probably by forcing the
@@ -73,6 +89,17 @@ brackets). Move an item to NOTES when it lands.
   and we report 5.21.550 [10i].
 - **Magisk extras** - Zygisk is off and modules are untested. Magisk's db read fails early in
   boot, which the per-boot adb-shell grant works around [10t].
+- **HPP app patching (Brawl Stars and ~a handful of others)** - some games self-kill at
+  startup with a deliberate SIGILL / fault addr 0xdead0000 unless BlueStacks patches them.
+  BlueStacks loads `/data/downloads/.hpp/libhpp64.so` and writes a per-app patched library
+  into the game's own `code_cache/libarmhk.so` before the game runs (syscall trace of
+  com.supercell.brawlstars on BS vs OpenStacks; the whole `.hpp` path is absent on ours).
+  Driven by the server grm_config rules (requirements.json) and the `.bst*Apps` lists under
+  `/data/downloads/.tmp/`. HD-Player side: `HppHost.cpp`, "Enable HPP for %s", hppFlush.
+  Large standalone RE task; most games don't need it, so it's low priority. Until then,
+  affected games are unsupported on OpenStacks (they also need this shim, i.e. don't run
+  "clean"). Smart-controls detection testing uses Standoff 2 / Fall Buddies instead, which
+  run unpatched.
 
 ## Images
 - **Android 7, 11 and 13 beyond boot** - all five images boot to Lawnchair with touch, adb

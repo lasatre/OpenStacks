@@ -11,12 +11,11 @@ brackets). Move an item to NOTES when it lands.
   (`data\` is kept).
 
 ## Game controls
-- **BlueStacks' built-in control configs, downloaded automatically** - BlueStacks fetches
-  per-game `.cfg` files (the `CloudUpdateTimeUTC` / `UpdateVersion` / `UpdateArticleKey`
-  fields in MetaData suggest a cloud update service). Find the endpoint and protocol
-  (HD-Player / the Qt front-end), then import them automatically. Ideally mirror the whole
-  catalogue into a local cache and refresh it as a whole, so requests never reveal which
-  packages the user has installed.
+- **Whole-catalogue mirror of BlueStacks' controls** - per-game download is done
+  (`controls/cloud.py`, kmm_controls.md §6), but it asks about each game as it is opened.
+  The server has no listing (`content_keymap/` and the CDN path 404/403), so a full mirror
+  would need a package list from elsewhere (e.g. a published catalogue) to stop revealing
+  which games are opened.
 
 ## Display / UX
 - **Home screen stays portrait after a portrait app** - Android keeps rotation 1 when the

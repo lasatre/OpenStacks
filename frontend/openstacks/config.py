@@ -107,6 +107,7 @@ class GlobalSettings:
     adb_path: str = ""
     screenshots_dir: str = ""          # default: <repo>/screenshots
     theme: str = "system"              # system | light | dark (Settings > Appearance)
+    controls_download: bool = True     # fetch BlueStacks' controls for a game with none
 
     def resolved_qemu_path(self) -> str:
         if self.qemu_path:

@@ -5,7 +5,7 @@ instances started afterwards.
 """
 from __future__ import annotations
 
-from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QVBoxLayout, QWidget)
 
@@ -58,6 +58,19 @@ class SettingsDialog(QDialog):
         form.addRow("Theme", self.cb_theme)
         outer.addWidget(box)
 
+        # -- game controls
+        box = QGroupBox("Game controls", self)
+        form = QFormLayout(box)
+        self.ck_download = QCheckBox("Download BlueStacks' controls for games that have none",
+                                     box)
+        self.ck_download.setChecked(g.controls_download)
+        self.ck_download.setToolTip(
+            "When you open a game with no controls file, ask BlueStacks' server for its file "
+            "(only that game's package name is sent). Downloads are kept, and each game is "
+            "checked again at most once a week.")
+        form.addRow(self.ck_download)
+        outer.addWidget(box)
+
         # -- emulator
         box = QGroupBox("Emulator", self)
         form = QFormLayout(box)
@@ -103,6 +116,7 @@ class SettingsDialog(QDialog):
     def accept(self) -> None:
         g = self.store.global_settings
         g.theme = self.cb_theme.currentData()
+        g.controls_download = self.ck_download.isChecked()
         g.acceleration = self.cb_accel.currentData()
         g.priority = self.cb_prio.currentData()
         g.qemu_path = self.ed_qemu.text().strip()

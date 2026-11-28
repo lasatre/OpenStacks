@@ -2,11 +2,12 @@
 
 The game in front decides which controls file applies, like BlueStacks: the session polls
 the guest's resumed activity over adb and loads that package's `.cfg` (store.py) when it
-changes.
+changes. With no local file, BlueStacks' own file for the game is downloaded (cloud.py).
 """
 from __future__ import annotations
 
 import re
+import threading
 import time
 from typing import Optional
 
@@ -17,7 +18,7 @@ from PySide6.QtWidgets import QMenu
 
 from .. import paths
 from ..qemu_engine import ENGINE, controls_port
-from . import store
+from . import cloud, store
 from .bscfg import ControlsFile
 from .engine import Engine
 from .runtime import Pan
@@ -65,10 +66,13 @@ class PackageWatch(QThread):
 class ControlsSession(QObject):
     status = Signal(str)
     editor_requested = Signal()
+    _fetch_done = Signal(str, str)       # package, cloud.fetch result (from a worker thread)
 
-    def __init__(self, inst, adb, display, parent=None):
+    def __init__(self, inst, adb, display, parent=None, download=lambda: True):
         super().__init__(parent)
         self.inst = inst
+        self.download = download         # Settings > "Download game controls"
+        self._fetches: set[str] = set()
         self.adb = adb
         self.display = display
         self.package = ""
@@ -79,6 +83,7 @@ class ControlsSession(QObject):
         self.engine.changed.connect(lambda: self.overlay.update())
         self.watch = PackageWatch(adb, lambda: ENGINE.is_running(inst), self)
         self.watch.package.connect(self._on_package)
+        self._fetch_done.connect(self._fetched)
         self.overlay = Overlay(self._screen_rect, self._overlay_controls, self._aiming,
                                lambda: self.display.window())
         self.editor = None
@@ -97,6 +102,7 @@ class ControlsSession(QObject):
             self.editor.dirty = False
             self.editor.close_editor()
         self._view.stop()
+        self._fetch_done.disconnect()
         self.watch.stop()
         self.overlay.stop()
         self.overlay.deleteLater()
@@ -135,6 +141,42 @@ class ControlsSession(QObject):
         self.package = pkg
         self.engine.package = pkg
         self.reload()
+        self._maybe_fetch(pkg)
+
+    def _maybe_fetch(self, pkg: str, force: bool = False) -> None:
+        """Ask BlueStacks for this game's controls when we have no local file (ours or an
+        installed BlueStacks one): the first time, and then now and then for updates."""
+        if not pkg or pkg in self._fetches or store.local(pkg):
+            return
+        if not force and (not self.download() or not cloud.due(pkg)):
+            return
+        self._fetches.add(pkg)
+        if not self.engine.scheme:
+            self.status.emit(f"game controls: looking for BlueStacks' controls for {pkg}...")
+
+        def work() -> None:              # a daemon thread: never holds up closing
+            result = cloud.fetch(pkg)
+            try:
+                self._fetch_done.emit(pkg, result)   # queued to the GUI thread
+            except RuntimeError:
+                pass                     # the session is gone
+        threading.Thread(target=work, name=f"controls-fetch {pkg}", daemon=True).start()
+
+    def _fetched(self, pkg: str, result: str) -> None:
+        self._fetches.discard(pkg)
+        if pkg != self.package:
+            return
+        if result in ("new", "updated"):
+            self.reload()
+            self.status.emit(self.describe() + (" (downloaded from BlueStacks)"
+                                                if result == "new" else
+                                                " (updated from BlueStacks)"))
+        elif result == "same":
+            self.status.emit(self.describe() + " (BlueStacks' file is up to date)")
+        elif not self.engine.scheme:
+            self.status.emit(self.describe() + {
+                "none": " (BlueStacks has none either)",
+                "error": " (could not reach BlueStacks; will retry later)"}.get(result, ""))
 
     def reload(self, keep_disabled: bool = False) -> None:
         if self.editor is not None and not keep_disabled:
@@ -227,6 +269,9 @@ class ControlsSession(QObject):
         m.addSeparator()
         if store.bluestacks_dirs():
             m.addAction("Import controls from BlueStacks", self._import_bluestacks)
+        if cloud.valid_package(self.package) and not store.local(self.package):
+            m.addAction("Check BlueStacks for this game's controls",
+                        lambda: self._maybe_fetch(self.package, force=True))
         m.addAction("Open controls folder", self._open_folder)
         m.addAction("Reload controls", self.reload)
         return m

@@ -16,7 +16,7 @@ helper scripts) can import openstacks.* pieces without a display.
 import os as _os
 import sys as _sys
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 __all__ = ["__version__"]
 
 # Linux: the native screen is QEMU's X11 window embedded by XID, so Qt must be on X11
